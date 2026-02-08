@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class Test {
 
     @GetMapping("/")
+    // 保证泛型不要拖后腿
     public BaseResponse<?> test() {
         //return ResultUtils.success("glyahh !");
         return ResultUtils.error(ErrorCode.NO_AUTH_ERROR);
