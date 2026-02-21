@@ -1,11 +1,39 @@
 spring:
   application:
     name: glyahh-ai-generate-code-backend
+  # mysql
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${spring.datasource.url}
+    username: ${spring.datasource.username}
+    password: ${spring.datasource.password}
+  profiles:
+    active: local
 
 server:
   port: 8124
   servlet:
-    context-path: /api # ??????????/api??????????????/api
+    context-path: /api
+
+langchain4j:
+  open-ai:
+    chat-model:
+      # 使用的模型名称，例如 qwen3.5-plus
+      model-name: qwen3.5-plus
+      # Qwen3.5-Plus 的兼容模式地址，以阿里云百炼为例
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      # 你的 Qwen API Key
+      api-key: ${langchain4j.open-ai.chat-model.api-key}
+      # 开启详细的请求和回答日志记录
+      log-requests: true
+      log-responses: true
+      max-tokens: 8192
+      # 最大重试次数
+      max-retries: 2
+
+
+
+
 
 # springdoc-openapi????
 springdoc:

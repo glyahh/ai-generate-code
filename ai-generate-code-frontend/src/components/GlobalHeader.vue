@@ -1,29 +1,105 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { UserLoginStore } from '@/stores/UserLogin'
+import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { message } from 'ant-design-vue'
+import { userLogoutUsingPost } from '@/api/userController'
+import { RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
 
-/** 菜单项配置：通过此数组配置导航菜单 */
-const menuItems = [
+const userLoginStore = UserLoginStore()
+userLoginStore.fetchLoginUser()
+
+/** 基础菜单项 */
+const baseMenuItems = [
   { key: 'home', path: '/', label: '首页' },
   { key: 'about', path: '/about', label: '关于' },
 ]
 
+/** 管理员专属菜单项（登录为 admin 时显示） */
+const adminMenuItems = [
+  { key: 'manage', path: '/admin/manage', label: '用户管理' },
+]
+
+/** 根据用户角色动态计算完整菜单 */
+const menuItems = computed(() => {
+  const userRole = userLoginStore.userLogin?.userRole
+  const isAdmin = userRole === 'admin'
+  return isAdmin ? [...baseMenuItems, ...adminMenuItems] : baseMenuItems
+})
+
+// ref,computed都是响应式数据,需要加上value
 const menuItemsForMenu = computed(() =>
-  menuItems.map((m) => ({ key: m.key, label: m.label }))
+  menuItems.value.map((m) => ({ key: m.key, label: m.label }))
 )
 
 const router = useRouter()
 const route = useRoute()
 
+/**
+ * 根据当前路径计算选中的菜单项
+ */
 const selectedKeys = computed(() => {
   const path = route.path
-  const item = menuItems.find((m) => m.path === path)
+  const item = menuItems.value.find((m) => m.path === path)
   return item ? [item.key] : []
 })
 
+/**
+ * 菜单项点击事件
+ */
 function onMenuSelect({ key }: { key: string }) {
-  const item = menuItems.find((m) => m.key === key)
+  const item = menuItems.value.find((m) => m.key === key)
   if (item) router.push(item.path)
+}
+
+const isLoginPage = computed(() => route.path.startsWith('/user/login'))
+
+function handleAuthClick() {
+  if (isLoginPage.value) {
+    const redirect = (route.query.redirect as string) || document.referrer || '/'
+    router.push(redirect)
+  } else {
+    router.push({
+      path: '/user/login',
+      query: { redirect: route.fullPath },
+    })
+  }
+}
+
+// 用户菜单悬停状态
+const showUserMenu = ref(false)
+const isLoggingOut = ref(false)
+
+// 个人设置
+function handleSettings() {
+  router.push('/user/settings')
+  showUserMenu.value = false
+}
+
+// 退出登录
+async function handleLogout() {
+  if (isLoggingOut.value) return
+
+  isLoggingOut.value = true
+  try {
+    const res = await userLogoutUsingPost({})
+
+    if (res.data.code === 20000 || res.data.code === 0) {
+      // 清除用户信息
+      userLoginStore.setLoginUser({ userName: '未登录' })
+      message.success('退出登录')
+      // 跳转到登录页
+      router.push('/user/login')
+    } else {
+      message.error('退出登录失败')
+    }
+  } catch (error) {
+    console.error('logout error', error)
+    message.error('退出登录失败')
+  } finally {
+    isLoggingOut.value = false
+    showUserMenu.value = false
+  }
 }
 </script>
 
@@ -37,7 +113,33 @@ function onMenuSelect({ key }: { key: string }) {
         @select="onMenuSelect" />
     </div>
     <div class="header-right">
-      <a-button type="primary">登录</a-button>
+      <div v-if="userLoginStore.userLogin.id" class="user-area-wrapper">
+        <div class="user-area" @mouseenter="showUserMenu = true" @mouseleave="showUserMenu = false">
+          <a-space class="user-info">
+            <a-avatar :src="userLoginStore.userLogin.userAvatar" />
+            <span class="user-name">{{ userLoginStore.userLogin.userName ?? '默认id 114514' }}</span>
+          </a-space>
+
+          <!-- 用户菜单下拉框 -->
+          <Transition name="menu-slide">
+            <div v-if="showUserMenu" class="user-menu" @mouseenter="showUserMenu = true">
+              <div class="menu-item settings-item" @click="handleSettings">
+                <SettingOutlined class="menu-icon" />
+                <span class="menu-text">个人设置</span>
+              </div>
+              <div class="menu-item logout-item" @click="handleLogout" :class="{ 'loading': isLoggingOut }">
+                <RightOutlined class="menu-icon" />
+                <span class="menu-text">退出登录</span>
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </div>
+      <div v-else>
+        <a-button type="primary" @click="handleAuthClick">
+          {{ isLoginPage ? '返回' : '登录/注册' }}
+        </a-button>
+      </div>
     </div>
   </div>
 </template>
@@ -85,6 +187,114 @@ function onMenuSelect({ key }: { key: string }) {
   flex-shrink: 0;
 }
 
+/* 用户区域样式 */
+.user-area-wrapper {
+  position: relative;
+}
+
+.user-area {
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 20px;
+  transition: background-color 0.2s ease;
+}
+
+.user-area:hover .user-info {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.user-name {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.85);
+  font-weight: 500;
+}
+
+/* 用户菜单下拉框 */
+.user-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  min-width: 120px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  z-index: 1000;
+  padding: 0;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+}
+
+.menu-item:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.menu-item.settings-item .menu-icon {
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.menu-item.logout-item {
+  color: #ff4d4f;
+}
+
+.menu-item.logout-item:hover {
+  background-color: rgba(255, 77, 79, 0.1);
+}
+
+.menu-item.loading {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.menu-icon {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.menu-text {
+  flex: 1;
+}
+
+/* 菜单动画 - 从下方滑入 */
+.menu-slide-enter-active {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.menu-slide-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.menu-slide-enter-from {
+  opacity: 0;
+  transform: translateY(10px) scale(0.95);
+}
+
+.menu-slide-leave-to {
+  opacity: 0;
+  transform: translateY(5px) scale(0.98);
+}
+
 @media (max-width: 768px) {
   .global-header {
     padding: 0 16px;
@@ -101,6 +311,16 @@ function onMenuSelect({ key }: { key: string }) {
 
   .header-menu {
     flex: none;
+  }
+
+  .user-menu {
+    min-width: 110px;
+    right: -8px;
+  }
+
+  .menu-item {
+    padding: 3px 10px;
+    font-size: 13px;
   }
 }
 </style>

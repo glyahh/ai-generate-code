@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>glyahh - CF Expert</title>
+    <style>
+        :root {
+            --bg: #1e1e2e;
+            --card: #2b2b3b;
+            --text: #cdd6f4;
+            --accent: #89b4fa;
+        }
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--bg);
+            font-family: system-ui, -apple-system, sans-serif;
+            color: var(--text);
+        }
+        .card {
+            background: var(--card);
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            max-width: 90%;
+            width: 300px;
+        }
+        img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin-bottom: 1rem;
+            border: 2px solid var(--accent);
+        }
+        h1 { margin: 0; font-size: 1.5rem; }
+        p { color: #a6adc8; margin: 0.5rem 0 1.5rem; }
+        button {
+            background: var(--accent);
+            border: none;
+            color: var(--bg);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.8; }
+        #secret { 
+            margin-top: 1rem; 
+            display: none; 
+            color: #f38ba8; 
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <img src="https://picsum.photos/seed/glyahh/100" alt="Avatar">
+        <h1>glyahh</h1>
+        <p>Codeforces Expert (bushi)</p>
+        <button onclick="toggleSecret()">查看真实实力</button>
+        <div id="secret">Rating: 1400 (TLE 选手)</div>
+    </div>
+
+    <script>
+        function toggleSecret() {
+            const el = document.getElementById('secret');
+            el.style.display = el.style.display === 'block' ? 'none' : 'block';
+        }
+    </script>
+</body>
+</html>
