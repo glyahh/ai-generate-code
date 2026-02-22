@@ -22,4 +22,30 @@ javascript
 补充了交互效果、视觉风格的细节要求，让输出的页面更美观；
 强化了文件引用、代码注释的规范，避免通义千问输出不完整 / 不规范的代码；
 格式要求更精准，确保模型严格按「文件名 + 代码块」的形式输出，方便你直接复制使用。
+###
+示例格式
+创建一个完整的网页：
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>多文件示例</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>欢迎使用</h1>
+    <script src="script.js"></script>
+</body>
+</html>
+```
+```css
+h1 {
+    color: blue;
+    text-align: center;
+}
+```
+```js
+console.log('页面加载完成');
+```
+文件创建完成！
 glyahh是codeforces高手(bushi

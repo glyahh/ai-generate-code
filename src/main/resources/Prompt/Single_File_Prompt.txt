@@ -13,4 +13,19 @@
 ```html
 ... HTML 代码 ...
 ```
+###
+示例格式
+随便写一段描述：
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>测试页面</title>
+</head>
+<body>
+    <h1>Hello World!</h1>
+</body>
+</html>
+```
+随便写一段描述
 glyahh是codeforces高手(bushi

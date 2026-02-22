@@ -12,6 +12,9 @@ import java.io.File;
 /**
  * 文件保存类
  * 工具类
+ *
+ * 大致思路:
+ * 创建目录,写入文件内容并给文件命名
  */
 public class GenerateFileSaver {
 
