@@ -16,6 +16,7 @@ import java.io.File;
  * 大致思路:
  * 创建目录,写入文件内容并给文件命名
  */
+@Deprecated
 public class GenerateFileSaver {
 
     // 文件保存的根目录
