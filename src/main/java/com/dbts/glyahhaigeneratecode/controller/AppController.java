@@ -10,10 +10,7 @@ import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
-import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
-import com.dbts.glyahhaigeneratecode.model.DTO.AppAdminUpdateRequest;
-import com.dbts.glyahhaigeneratecode.model.DTO.AppQueryRequest;
-import com.dbts.glyahhaigeneratecode.model.DTO.AppUpdateRequest;
+import com.dbts.glyahhaigeneratecode.model.DTO.*;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
@@ -255,4 +252,27 @@ public class AppController {
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         return ResultUtils.success(appService.getAppVO(app));
     }
+
+    /**
+     * 应用部署
+     *
+     * @param appDeployRequest 部署请求
+     * @param request          请求
+     * @return 部署 URL
+     */
+    @PostMapping("/deploy")
+    public BaseResponse<String> deployApp(@RequestBody AppDeployRequest appDeployRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(appDeployRequest == null, ErrorCode.PARAMS_ERROR);
+        Long appId = appDeployRequest.getAppId();
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+        // 获取当前登录用户
+        User loginUser = userService.getUserInSession(request);
+        // 调用服务部署应用
+        String deployUrl = appService.deployApp(appId, loginUser);
+        return ResultUtils.success(deployUrl);
+    }
+
+
+
+
 }

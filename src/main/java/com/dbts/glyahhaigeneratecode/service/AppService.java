@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.service;
 
 import com.dbts.glyahhaigeneratecode.model.DTO.AppQueryRequest;
+import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.mybatisflex.core.service.IService;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
@@ -55,4 +56,13 @@ public interface AppService extends IService<App> {
      * @return 封装好条件的 QueryWrapper
      */
     QueryWrapper buildMyAppQueryWrapper(AppQueryRequest appQueryRequest, Long userId);
+
+
+    /**
+     * 部署应用
+     *
+     * @param appId 应用 id
+     * @return 访问部署应用的url
+     */
+    String deployApp(Long appId, User loginUser);
 }

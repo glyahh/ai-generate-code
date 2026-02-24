@@ -1,7 +1,10 @@
 package com.dbts.glyahhaigeneratecode.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.core.util.RandomUtil;
+import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
@@ -11,12 +14,17 @@ import com.dbts.glyahhaigeneratecode.model.DTO.AppQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
 import com.dbts.glyahhaigeneratecode.model.VO.UserVO;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -180,4 +188,102 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return queryWrapper;
     }
 
+    @Override
+    public String deployApp(Long appId, User loginUser) {
+        // 1. 权限校验
+        if (appId == null || appId <= 0) {
+            throw new MyException(ErrorCode.PARAMS_ERROR, "应用 id 异常");
+        }
+
+        // 2. 获取应用信息
+        App app = this.getById(appId);
+        if (app == null) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+
+        // 3. 校验权限/是否本人部署
+        if (!app.getUserId().equals(loginUser.getId())) {
+            throw new MyException(ErrorCode.NO_AUTH_ERROR, "只能部署自己的应用");
+        }
+
+        // 4. 校验deployKey是否存在,不存在则生成deployKey(8为 字母+数字)
+        String deployKey = app.getDeployKey();
+        if (StrUtil.isBlank(deployKey)) {
+            deployKey = generateUniqueDeployKey();
+            app.setDeployKey(deployKey);
+        }
+
+        // 5. 根据应用文件类型超找到本应该的路径 (参考路径生成代码)
+        String codeGenType = app.getCodeGenType();
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        // 更稳妥的获取枚举类
+        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
+            try {
+                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (codeGenTypeEnum == null) {
+            throw new MyException(ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
+        }
+        // 自动处理分隔符
+        Path sourceDir = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + appId);
+
+        // 6. 校验路径下的文件是否存在
+        if (!Files.isDirectory(sourceDir)) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物目录不存在，请先生成代码再部署");
+        }
+        Path indexPath = sourceDir.resolve("index.html");
+        if (!Files.isRegularFile(indexPath)) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物缺少 index.html, 请删除再试~");
+        }
+        if (CodeGenTypeEnum.MULTI_FILE.equals(codeGenTypeEnum)) {
+            if (!Files.isRegularFile(sourceDir.resolve("style.css"))) {
+                throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物缺少 style.css, 请删除再试~");
+            }
+            if (!Files.isRegularFile(sourceDir.resolve("script.js"))) {
+                throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物缺少 script.js, 请删除再试~");
+            }
+        }
+
+        // 7. 复制文件到deploy文件夹下
+        Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
+        try {
+            FileUtil.copyContent(sourceDir.toFile(), deployDir.toFile(), true);
+        } catch (Exception e) {
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "部署文件复制失败: " + e.getMessage());
+        }
+
+        // 8. 更新数据库
+        app.setDeployedTime(LocalDateTime.now());
+        app.setUpdateTime(LocalDateTime.now());
+        app.setDeployKey(deployKey);
+        boolean updateResult = this.updateById(app);
+        if (!updateResult) {
+            throw new MyException(ErrorCode.OPERATION_ERROR, "部署信息更新失败");
+        }
+
+        // 9. 返回结果
+        String host = AppConstant.CODE_DEPLOY_HOST;
+        if (StrUtil.isBlank(host)) {
+            host = "http://localhost";
+        }
+        // 如果末尾有/,移除,否则不变
+        host = StrUtil.removeSuffix(host, "/");
+        return host + "/" + deployKey + "/";
+    }
+
+    private String generateUniqueDeployKey() {
+        // 尝试多次避免极小概率碰撞
+        for (int i = 0; i < 10; i++) {
+            String candidate = RandomUtil.randomString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 8);
+            QueryWrapper queryWrapper = new QueryWrapper();
+            queryWrapper.eq(App::getDeployKey, candidate);
+            long count = this.count(queryWrapper);
+            if (count == 0) {
+                return candidate;
+            }
+        }
+        throw new MyException(ErrorCode.SYSTEM_ERROR, "生成 deployKey 失败，请重试");
+    }
 }
