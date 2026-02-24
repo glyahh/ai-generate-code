@@ -4,7 +4,7 @@ spring:
   # mysql
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${spring.datasource.url}
+    url: jdbc:mysql://localhost:3306/gly_ai_generate_code
     username: ${spring.datasource.username}
     password: ${spring.datasource.password}
   profiles:
