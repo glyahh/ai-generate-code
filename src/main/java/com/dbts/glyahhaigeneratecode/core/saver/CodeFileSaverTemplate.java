@@ -23,9 +23,9 @@ public abstract class CodeFileSaverTemplate<T> {
      * @param codeResult 待保存的代码模型（HtmlCodeResult / MultiFileCodeResult）
      * @return 保存后的目录对象
      */
-    public final File save(T codeResult) {
+    public final File save(T codeResult, Long appId) {
         validateInput(codeResult);
-        String uniqueDirName = buildUniqueDirName();
+        String uniqueDirName = buildUniqueDirName(appId);
         saveFiles(uniqueDirName, codeResult);
         return new File(uniqueDirName);
     }
@@ -46,8 +46,8 @@ public abstract class CodeFileSaverTemplate<T> {
      *
      * @return 唯一目录路径字符串
      */
-    private String buildUniqueDirName() {
-        String uniqueDirName = buildUniqueDirPath();
+    private String buildUniqueDirName(Long appId) {
+        String uniqueDirName = buildUniqueDirPath(appId);
         ensureDirExists(uniqueDirName);
         return uniqueDirName;
     }
@@ -57,9 +57,9 @@ public abstract class CodeFileSaverTemplate<T> {
      *
      * @return 目录路径字符串
      */
-    private String buildUniqueDirPath() {
+    private String buildUniqueDirPath(Long appId) {
         String bizType = getBizType();
-        return Base_ROOT_PATH + File.separator + bizType + "_" + IdUtil.getSnowflakeNextIdStr();
+        return Base_ROOT_PATH + File.separator + bizType + "_" + appId;
     }
 
     /**

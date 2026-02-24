@@ -19,16 +19,16 @@ class AiCodeGeneratorFacadeTest {
     private AiCodeGeneratorFacade aiCodeGeneratorFacade;
     @Test
     void generateAndSaveCode() {
-        File file = aiCodeGeneratorFacade.generateAndSaveCode("生成一个介绍glyahh的网站,越短越好", CodeGenTypeEnum.HTML);
+        File file = aiCodeGeneratorFacade.generateAndSaveCode("生成一个介绍glyahh的网站,越短越好", CodeGenTypeEnum.HTML, 1L);
         assertNotNull(file);
 
-        File file1 = aiCodeGeneratorFacade.generateAndSaveCode("生成一个介绍glyahh的网站,越短越好", CodeGenTypeEnum.MULTI_FILE);
+        File file1 = aiCodeGeneratorFacade.generateAndSaveCode("生成一个介绍glyahh的网站,越短越好", CodeGenTypeEnum.MULTI_FILE, 1L);
         assertNotNull(file1);
     }
 
     @Test
     void generateAndSaveCodeStream() {
-        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream("生成一个介绍glyahh的网站,精简美观", CodeGenTypeEnum.MULTI_FILE);
+        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream("生成一个介绍glyahh的网站,精简美观", CodeGenTypeEnum.MULTI_FILE, 1L);
         List<String> list = result.collectList().block();
         assertNotNull(list);
 

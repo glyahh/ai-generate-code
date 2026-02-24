@@ -26,14 +26,14 @@ public class CodeFileSaverExecutor {
      * @param codeResult      代码结果，HTML 时为 HtmlCodeResult，MULTI_FILE 时为 MultiFileCodeResult
      * @return 保存后的目录对象
      */
-    public File execute(CodeGenTypeEnum codeGenTypeEnum, Object codeResult) {
+    public File execute(CodeGenTypeEnum codeGenTypeEnum, Object codeResult, Long appId) {
         if (codeGenTypeEnum == null) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
         try {
             return switch (codeGenTypeEnum) {
-                case HTML -> htmlCodeFileSaverTemplate.save((HtmlCodeResult) codeResult);
-                case MULTI_FILE -> multiFileCodeFileSaverTemplate.save((MultiFileCodeResult) codeResult);
+                case HTML -> htmlCodeFileSaverTemplate.save((HtmlCodeResult) codeResult, appId);
+                case MULTI_FILE -> multiFileCodeFileSaverTemplate.save((MultiFileCodeResult) codeResult, appId);
                 default -> {
                     String errorMessage = "不支持的生成类型：" + codeGenTypeEnum.getValue();
                     throw new MyException(ErrorCode.SYSTEM_ERROR, errorMessage);
