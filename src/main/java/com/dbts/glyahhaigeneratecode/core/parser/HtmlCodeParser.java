@@ -29,8 +29,8 @@ public class HtmlCodeParser implements CodeParser<HtmlCodeResult> {
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
         } else {
-            // 如果没有找到代码块，将整个内容作为HTML
-            result.setHtmlCode(codeContent.trim() + "\n" + "未找到HTML代码快");
+            // 如果没有找到代码块，将整个内容作为 HTML，避免额外调试文案污染页面
+            result.setHtmlCode(codeContent.trim());
         }
         return result;
     }

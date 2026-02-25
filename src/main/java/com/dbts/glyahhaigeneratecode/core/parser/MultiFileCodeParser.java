@@ -30,17 +30,15 @@ public class MultiFileCodeParser implements CodeParser<MultiFileCodeResult> {
         String htmlCode = extractCodeByPattern(codeContent, HTML_CODE_PATTERN);
         String cssCode = extractCodeByPattern(codeContent, CSS_CODE_PATTERN);
         String jsCode = extractCodeByPattern(codeContent, JS_CODE_PATTERN);
-        // 设置HTML代码
+        // 设置 HTML / CSS / JS 代码，本身保持干净，不追加调试文案，避免在页面中露出
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
-            result.setHtmlCode(htmlCode.trim() + "\n" + "未找到HTML代码块");
+            result.setHtmlCode(htmlCode.trim());
         }
-        // 设置CSS代码
         if (cssCode != null && !cssCode.trim().isEmpty()) {
-            result.setCssCode(cssCode.trim() + "\n" + "未找到CSS代码块");
+            result.setCssCode(cssCode.trim());
         }
-        // 设置JS代码
         if (jsCode != null && !jsCode.trim().isEmpty()) {
-            result.setJsCode(jsCode.trim() + "\n" + "未找到JS代码块");
+            result.setJsCode(jsCode.trim());
         }
         return result;
     }

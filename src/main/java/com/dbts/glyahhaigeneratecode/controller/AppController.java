@@ -9,6 +9,7 @@ import com.dbts.glyahhaigeneratecode.common.ResultUtils;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
+import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.DTO.*;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
@@ -22,11 +23,7 @@ import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -112,13 +109,20 @@ public class AppController {
      * 【用户】根据 id 查看自己的应用详情
      */
     @GetMapping("/get/vo")
-    public BaseResponse<AppVO> getMyAppVOById(long id, HttpServletRequest request) {
-        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
+    public BaseResponse<AppVO> getMyAppVOById(@RequestParam String id, HttpServletRequest request) {
+        // 接收字符串类型的 id，避免前端 number 精度丢失问题
+        Long appId;
+        try {
+            appId = Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            throw new MyException(ErrorCode.PARAMS_ERROR, "应用 id 格式错误");
+        }
+        ThrowUtils.throwIf(appId <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
 
         User loginUser = userService.getUserInSession(request);
-        App app = appService.getById(id);
+        App app = appService.getById(appId);
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE), ErrorCode.NO_AUTH_ERROR, "只能查看自己的应用");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE) && app.getPriority()==0, ErrorCode.NO_AUTH_ERROR, "只能查看自己的应用");
 
         return ResultUtils.success(appService.getAppVO(app));
     }

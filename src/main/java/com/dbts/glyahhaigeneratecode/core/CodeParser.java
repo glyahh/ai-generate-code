@@ -35,8 +35,8 @@ public class CodeParser {
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
         } else {
-            // 如果没有找到代码块，将整个内容作为HTML
-            result.setHtmlCode(codeContent.trim() + "\n" + "未找到HTML代码快");
+            // 如果没有找到代码块，将整个内容作为 HTML，避免调试文案污染页面
+            result.setHtmlCode(codeContent.trim());
         }
         return result;
     }
@@ -50,17 +50,15 @@ public class CodeParser {
         String htmlCode = extractCodeByPattern(codeContent, HTML_CODE_PATTERN);
         String cssCode = extractCodeByPattern(codeContent, CSS_CODE_PATTERN);
         String jsCode = extractCodeByPattern(codeContent, JS_CODE_PATTERN);
-        // 设置HTML代码
+        // 设置 HTML / CSS / JS 代码，保持内容干净
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
-            result.setHtmlCode(htmlCode.trim() + "\n" + "未找到HTML代码块");
+            result.setHtmlCode(htmlCode.trim());
         }
-        // 设置CSS代码
         if (cssCode != null && !cssCode.trim().isEmpty()) {
-            result.setCssCode(cssCode.trim() + "\n" + "未找到CSS代码块");
+            result.setCssCode(cssCode.trim());
         }
-        // 设置JS代码
         if (jsCode != null && !jsCode.trim().isEmpty()) {
-            result.setJsCode(jsCode.trim() + "\n" + "未找到JS代码块");
+            result.setJsCode(jsCode.trim());
         }
         return result;
     }

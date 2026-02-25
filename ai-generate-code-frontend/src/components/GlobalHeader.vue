@@ -12,12 +12,13 @@ userLoginStore.fetchLoginUser()
 /** 基础菜单项 */
 const baseMenuItems = [
   { key: 'home', path: '/', label: '首页' },
-  { key: 'about', path: '/about', label: '关于' },
+  { key: 'code-generate', path: '/code/generate', label: '代码生成' },
 ]
 
 /** 管理员专属菜单项（登录为 admin 时显示） */
 const adminMenuItems = [
-  { key: 'manage', path: '/admin/manage', label: '用户管理' },
+  { key: 'manage-users', path: '/admin/users', label: '用户管理' },
+  { key: 'manage-apps', path: '/admin/apps', label: '应用管理' },
 ]
 
 /** 根据用户角色动态计算完整菜单 */

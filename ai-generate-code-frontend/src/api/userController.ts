@@ -258,24 +258,6 @@ export function userUpdateUsingPut({
   });
 }
 
-/** 修改密码（需后端实现 POST /user/update/password） */
-export function userUpdatePasswordUsingPost({
-  body,
-  options,
-}: {
-  body: API.UserUpdatePasswordRequest;
-  options?: { [key: string]: unknown };
-}) {
-  return request<API.BaseResponseBoolean>('/user/update/password', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    data: body,
-    ...(options || {}),
-  });
-}
-
 /** 此处后端没有提供注释 POST /user/update */
 export function userUpdateUsingPost({
   body,
@@ -285,6 +267,27 @@ export function userUpdateUsingPost({
   options?: { [key: string]: unknown };
 }) {
   return request<API.BaseResponseBoolean>('/user/update', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/**
+ * 修改当前登录用户密码
+ * 约定后台接口路径为 POST /user/update/password
+ */
+export function userUpdatePasswordUsingPost({
+  body,
+  options,
+}: {
+  body: API.UserUpdatePasswordRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseBoolean>('/user/update/password', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

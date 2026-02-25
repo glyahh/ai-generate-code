@@ -63,7 +63,33 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         AppVO appVO = new AppVO();
         BeanUtil.copyProperties(app, appVO);
+        appVO.setHasGeneratedCode(hasGeneratedCode(app));
         return appVO;
+    }
+
+    /**
+     * 判断应用是否已有生成代码（code_output 下存在对应目录及 index.html）
+     */
+    private boolean hasGeneratedCode(App app) {
+        if (app == null || app.getId() == null) {
+            return false;
+        }
+        String codeGenType = app.getCodeGenType();
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
+            try {
+                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (codeGenTypeEnum == null) {
+            return false;
+        }
+        Path sourceDir = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + app.getId());
+        if (!Files.isDirectory(sourceDir)) {
+            return false;
+        }
+        return Files.isRegularFile(sourceDir.resolve("index.html"));
     }
 
     /**
@@ -103,6 +129,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                     AppVO appVO = new AppVO();
                     BeanUtil.copyProperties(app, appVO);
                     appVO.setUserVO(finalUserIdToUserVO.get(app.getUserId()));
+                    appVO.setHasGeneratedCode(hasGeneratedCode(app));
                     return appVO;
                 })
                 .collect(Collectors.toList());
@@ -148,7 +175,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             queryWrapper.eq(App::getDeployKey, deployKey);
         }
         if (priority != null) {
-            queryWrapper.gt(App::getPriority, priority);
+            // 优先级大于等于给定值（例如精选应用：priority >= GOOD_APP_PRIORITY）
+            queryWrapper.ge(App::getPriority, priority);
         }
         if (userId != null) {
             queryWrapper.eq(App::getUserId, userId);
