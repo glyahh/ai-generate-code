@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message, Button as AButton, Input as AInput, Spin as ASpin, Empty as AEmpty } from 'ant-design-vue'
+import { message, Button as AButton, Input as AInput, Spin as ASpin, Empty as AEmpty, Modal as AModal } from 'ant-design-vue'
 import type { AppVO } from '@/api'
-import { appGetVoUsingGet } from '@/api/appController'
+import { appGetVoUsingGet, appApplyUsingPost } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
 import { parseMarkdownWithCode } from '@/utils/markdownParser'
 import CodeBlock from '@/components/CodeBlock.vue'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8124/api'
+const PREVIEW_BASE_URL =
+  import.meta.env.VITE_PREVIEW_BASE_URL ?? `${API_BASE_URL.replace(/\/$/, '')}/static`
 
 const route = useRoute()
 const router = useRouter()
@@ -53,10 +57,57 @@ const iframeKey = ref(0)
 const chatMessagesRef = ref<HTMLElement | null>(null)
 const shouldAutoScroll = ref(true)
 
+const applyFeaturedModalVisible = ref(false)
+const applyAppProprietyReason = ref('')
+
+const canApplyFeatured = computed(
+  () => isOwner.value && !isReadOnly.value && (!appInfo.value?.priority || appInfo.value.priority < 99),
+)
+
+function openApplyFeatured() {
+  if (!canApplyFeatured.value) return
+  applyFeaturedModalVisible.value = true
+}
+
+function closeApplyFeatured() {
+  applyFeaturedModalVisible.value = false
+}
+
+async function handleApplyFeaturedConfirm() {
+  if (!appId.value) {
+    message.error('应用 ID 异常，无法提交申请')
+    return
+  }
+  const reason = applyAppProprietyReason.value.trim() || '我想成为精选应用'
+  const hide = message.loading('正在提交精选申请...', 0)
+  try {
+    const res = await appApplyUsingPost({
+      body: {
+        // 注意：这里必须保持 appId 为字符串，不能转为 Number，否则会丢失精度
+        appId: appId.value as any,
+        operate: 1,
+        appPropriety: 99,
+        applyReason: reason,
+      },
+    })
+    hide()
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data === true) {
+      message.success('申请已提交，请等待审核')
+      applyFeaturedModalVisible.value = false
+    } else {
+      message.error(res.data.message || '申请提交失败')
+    }
+  } catch (e: any) {
+    hide()
+    message.error(e?.response?.data?.message || '申请提交失败，请稍后再试')
+  }
+}
+
 const previewUrl = computed(() => {
   if (!appInfo.value || !appId.value) return ''
   const codeGenType = appInfo.value.codeGenType || 'multi_file'
-  return `http://localhost:8124/api/static/${codeGenType}_${appId.value}/`
+  const base = PREVIEW_BASE_URL.replace(/\/$/, '')
+  return `${base}/${codeGenType}_${appId.value}/`
 })
 
 function appendUserMessage(text: string) {
@@ -147,7 +198,8 @@ async function sendMessage(text?: string) {
       appId: String(appId.value),
       message: content,
     })
-    const url = `http://localhost:8124/api/chat/gen/code?${query.toString()}`
+    const apiBase = API_BASE_URL.replace(/\/$/, '')
+    const url = `${apiBase}/chat/gen/code?${query.toString()}`
 
     eventSource = new EventSource(url, { withCredentials: true })
 
@@ -306,6 +358,23 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="app-chat-page">
+    <a-modal
+      v-model:open="applyFeaturedModalVisible"
+      title="申请成为精选应用"
+      :confirm-loading="false"
+      ok-text="申请"
+      cancel-text="取消"
+      @ok="handleApplyFeaturedConfirm"
+      @cancel="closeApplyFeatured"
+    >
+      <p style="margin-bottom: 8px">你可以简单说明想成为精选应用的理由（选填）：</p>
+      <a-textarea
+        v-model:value="applyAppProprietyReason"
+        :rows="3"
+        placeholder="例如：该应用体验较好、功能完善，希望被更多用户看到"
+      />
+    </a-modal>
+
     <div class="top-bar">
       <div class="app-title-wrap">
         <div class="app-avatar">
@@ -323,6 +392,9 @@ onBeforeUnmount(() => {
       <div class="top-actions">
         <a-button v-if="!isReadOnly" class="ghost-btn" @click="goEdit">
           编辑应用信息
+        </a-button>
+        <a-button v-if="canApplyFeatured" class="ghost-btn" type="primary" @click="openApplyFeatured">
+          我要成为精选
         </a-button>
       </div>
     </div>

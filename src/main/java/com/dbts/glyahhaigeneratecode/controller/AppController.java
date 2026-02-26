@@ -14,9 +14,11 @@ import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.DTO.*;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.ApplyVO;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
+import com.dbts.glyahhaigeneratecode.service.UserAppApplyService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -41,6 +43,7 @@ public class AppController {
 
     private final AppService appService;
     private final UserService userService;
+    private final UserAppApplyService userAppApplyService;
 
     /**
      * 【用户】创建应用（须填写 initPrompt）
@@ -110,6 +113,7 @@ public class AppController {
      */
     @GetMapping("/get/vo")
     public BaseResponse<AppVO> getMyAppVOById(@RequestParam String id, HttpServletRequest request) {
+        // 其实这里后端可以不用转化的,但是写都写了(
         // 接收字符串类型的 id，避免前端 number 精度丢失问题
         Long appId;
         try {
@@ -276,7 +280,84 @@ public class AppController {
         return ResultUtils.success(deployUrl);
     }
 
+    /**
+     * 取消应用部署（删除部署目录）
+     *
+     * @param appDeployRequest 取消部署请求，仅使用 appId
+     * @param request          请求
+     * @return 删除成功返回 true，未部署或无目录返回 false
+     */
+    @PostMapping("/undeploy")
+    public BaseResponse<Boolean> undeployApp(@RequestBody AppDeployRequest appDeployRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(appDeployRequest == null, ErrorCode.PARAMS_ERROR);
+        Long appId = appDeployRequest.getAppId();
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+        // 获取当前登录用户
+        User loginUser = userService.getUserInSession(request);
+        // 调用服务取消部署应用
+        boolean result = appService.undeployApp(appId, loginUser);
+        return ResultUtils.success(result);
+    }
 
 
+    /**
+     * 【用户】提交应用 / 权限申请
+     *
+     * @param applyRequest 申请参数（appId、appPropriety、operate、applyReason）
+     * @param request      请求
+     * @return 申请是否创建成功；若用户已是管理员，则返回 false，并通过 message 提示
+     */
+    @PostMapping("/apply")
+    public BaseResponse<Boolean> applyForAppOrAdmin(@RequestBody UserAppApplyRequest applyRequest,
+                                                    HttpServletRequest request) {
+        ThrowUtils.throwIf(applyRequest == null, ErrorCode.PARAMS_ERROR, "申请参数不能为空");
 
+        User loginUser = userService.getUserInSession(request);
+
+        // 如果用户已经是管理员，直接返回 false 和提示信息
+        if (UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole())) {
+            return new BaseResponse<>(20000, false, "您已经是管理员了");
+        }
+
+        boolean result = userAppApplyService.createUserAppApply(
+                applyRequest.getAppId(),
+                applyRequest.getAppPropriety(),
+                applyRequest.getOperate(),
+                applyRequest.getApplyReason(),
+                loginUser
+        );
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 【管理员】回显待处理的用户申请列表（status=0）
+     *
+     * @param request 请求
+     * @return ApplyVO 列表：用户id、用户头像、operate、appId、Reason
+     */
+    @PostMapping("/apply/list/pending")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<List<ApplyVO>> listPendingApply(HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        List<ApplyVO> result = userAppApplyService.listPendingApplyVO(loginUser);
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 【管理员】同意某条用户申请
+     *
+     * @param handleRequest 申请处理请求（applyId，来源于待处理列表 ApplyVO.applyId）
+     * @param request       请求
+     * @return 是否处理成功
+     */
+    @PostMapping("/apply/agree")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> agreeApply(@RequestBody UserAppApplyHandleRequest handleRequest,
+                                            HttpServletRequest request) {
+        ThrowUtils.throwIf(handleRequest == null || handleRequest.getApplyId() == null || handleRequest.getApplyId() <= 0,
+                ErrorCode.PARAMS_ERROR, "applyId 异常");
+        User loginUser = userService.getUserInSession(request);
+        boolean result = userAppApplyService.agreeApply(handleRequest.getApplyId(), loginUser);
+        return ResultUtils.success(result);
+    }
 }

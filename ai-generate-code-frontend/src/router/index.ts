@@ -4,6 +4,7 @@ import UserLogin from '../page/User/UserLogin.vue'
 import UserSettings from '../page/User/UserSettings.vue'
 import AdminHome from '@/page/Admin/AdminHome.vue'
 import AdminAppManage from '@/page/Admin/AdminAppManage.vue'
+import AdminApplyManage from '@/page/Admin/AdminApplyManage.vue'
 import AppChatView from '@/page/App/AppChatView.vue'
 import AppEditView from '@/page/App/AppEditView.vue'
 import CodeGenerateEntry from '@/page/App/CodeGenerateEntry.vue'
@@ -30,6 +31,11 @@ const router = createRouter({
       path: '/admin/users',
       name: 'admin-users',
       component: AdminHome,
+    },
+    {
+      path: '/admin/apply',
+      name: 'admin-apply',
+      component: AdminApplyManage,
     },
     {
       path: '/admin/apps',

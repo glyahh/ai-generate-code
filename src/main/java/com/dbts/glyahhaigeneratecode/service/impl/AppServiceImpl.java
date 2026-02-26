@@ -301,6 +301,63 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return host + "/" + deployKey + "/";
     }
 
+    /**
+     * 取消部署应用：删除部署目录并清空应用的部署信息
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户
+     * @return 删除成功返回 true，未部署或无有效目录返回 false
+     */
+    @Override
+    public boolean undeployApp(Long appId, User loginUser) {
+        // 1. 权限校验
+        if (appId == null || appId <= 0) {
+            throw new MyException(ErrorCode.PARAMS_ERROR, "应用 id 异常");
+        }
+
+        // 2. 获取应用信息
+        App app = this.getById(appId);
+        if (app == null) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+
+        // 3. 校验权限 / 是否本人操作
+        if (!app.getUserId().equals(loginUser.getId())) {
+            throw new MyException(ErrorCode.NO_AUTH_ERROR, "只能操作自己的应用");
+        }
+
+        // 4. 验证是否已部署（deployKey 存在且部署目录存在）
+        String deployKey = app.getDeployKey();
+        if (StrUtil.isBlank(deployKey)) {
+            // 没有部署标识，视为未部署
+            return false;
+        }
+
+        Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
+        if (!Files.isDirectory(deployDir)) {
+            // 目录不存在，视为未部署
+            return false;
+        }
+
+        // 5. 删除部署目录
+        try {
+            FileUtil.del(deployDir.toFile());
+        } catch (Exception e) {
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "取消部署失败: " + e.getMessage());
+        }
+
+        // 6. 清理应用上的部署信息
+        app.setDeployKey(null);
+        app.setDeployedTime(null);
+        app.setUpdateTime(LocalDateTime.now());
+        boolean updateResult = this.updateById(app);
+        if (!updateResult) {
+            throw new MyException(ErrorCode.OPERATION_ERROR, "取消部署信息更新失败");
+        }
+
+        return true;
+    }
+
     private String generateUniqueDeployKey() {
         // 尝试多次避免极小概率碰撞
         for (int i = 0; i < 10; i++) {

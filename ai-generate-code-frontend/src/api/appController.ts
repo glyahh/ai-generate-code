@@ -94,6 +94,54 @@ export function appAdminUpdateUsingPost({
   });
 }
 
+/** 此处后端没有提供注释 POST /app/apply */
+export function appApplyUsingPost({
+  body,
+  options,
+}: {
+  body: API.UserAppApplyRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseBoolean>('/app/apply', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 此处后端没有提供注释 POST /apply/agree */
+export function appApplyAgreeUsingPost({
+  body,
+  options,
+}: {
+  body: API.UserAppApplyHandleRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseBoolean>('/app/apply/agree', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 此处后端没有提供注释 POST /app/apply/list/pending */
+export function appApplyListPendingUsingPost({
+  options,
+}: {
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseListApplyVO>('/app/apply/list/pending', {
+    method: 'POST',
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 POST /app/delete */
 export function appOpenApiDeleteUsingPost({
   body,
@@ -175,6 +223,24 @@ export function appMyListPageVoUsingPost({
   options?: { [key: string]: unknown };
 }) {
   return request<API.BaseResponsePageAppVO>('/app/my/list/page/vo', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 此处后端没有提供注释 POST /app/undeploy */
+export function appUndeployUsingPost({
+  body,
+  options,
+}: {
+  body: API.AppDeployRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseBoolean>('/app/undeploy', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

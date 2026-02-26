@@ -275,24 +275,3 @@ export function userUpdateUsingPost({
     ...(options || {}),
   });
 }
-
-/**
- * 修改当前登录用户密码
- * 约定后台接口路径为 POST /user/update/password
- */
-export function userUpdatePasswordUsingPost({
-  body,
-  options,
-}: {
-  body: API.UserUpdatePasswordRequest;
-  options?: { [key: string]: unknown };
-}) {
-  return request<API.BaseResponseBoolean>('/user/update/password', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    data: body,
-    ...(options || {}),
-  });
-}

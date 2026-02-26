@@ -100,10 +100,11 @@ async function handleSubmit() {
         message.error(res.data.message || '保存失败')
       }
     } else {
-      const body: AppUpdateRequest = {
+      const body = {
         id: appIdForRequest.value,
         appName: form.value.appName,
-      }
+        cover: form.value.cover || undefined,
+      } as any as AppUpdateRequest
       const res = await appUpdateUsingPost({ body })
       if (res.data.code === 0 || res.data.code === 20000) {
         message.success('保存成功')
@@ -134,7 +135,7 @@ onMounted(() => {
           {{
             isAdmin
               ? '管理员可修改应用名称、封面和优先级'
-              : '当前仅支持修改应用名称'
+              : '可修改应用名称与封面（封面用于“我的应用”中的卡片展示）'
           }}
         </p>
       </div>
@@ -144,8 +145,11 @@ onMounted(() => {
           <AInput v-model:value="form.appName" placeholder="请输入应用名称" />
         </a-form-item>
 
-        <a-form-item v-if="isAdmin" label="应用封面 URL" name="cover">
-          <AInput v-model:value="form.cover" placeholder="可选，展示在列表中的封面图" />
+        <a-form-item label="应用封面 URL" name="cover">
+          <AInput
+            v-model:value="form.cover"
+            placeholder="可选，展示在列表和预览中的封面图，支持图片地址或渐变背景等"
+          />
         </a-form-item>
 
         <a-form-item v-if="isAdmin" label="优先级" name="priority">

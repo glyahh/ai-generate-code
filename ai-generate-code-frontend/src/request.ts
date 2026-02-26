@@ -33,9 +33,11 @@ function transformLongToString(value: unknown): unknown {
   return value
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8124/api'
+
 // 创建 Axios 实例
 const myAxios = axios.create({
-  baseURL: 'http://localhost:8124/api',
+  baseURL: API_BASE_URL,
   timeout: 600000, // 10分钟
   withCredentials: true,
 })

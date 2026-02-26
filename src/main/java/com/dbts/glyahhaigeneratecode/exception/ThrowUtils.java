@@ -1,27 +1,37 @@
 package com.dbts.glyahhaigeneratecode.exception;
 
-
 public class ThrowUtils {
+
     /**
      * 条件成立则抛异常
-     * @param condition
-     * @param errorCode
+     *
+     * @param condition        条件
+     * @param runtimeException 异常
      */
-    public static void throwIf (boolean condition, RuntimeException errorCode) {
+    public static void throwIf(boolean condition, RuntimeException runtimeException) {
         if (condition) {
-            throw new RuntimeException("异常code: " + errorCode + "\t异常信息: " + errorCode.getMessage());
+            throw runtimeException;
         }
     }
 
-    public static void throwIf (boolean condition, ErrorCode errorCode) {
+    /**
+     * 条件成立则抛异常
+     *
+     * @param condition 条件
+     * @param errorCode 错误码
+     */
+    public static void throwIf(boolean condition, ErrorCode errorCode) {
         throwIf(condition, new MyException(errorCode));
     }
 
-    public static void throwIf (boolean condition, ErrorCode errorCode, String message) {
+    /**
+     * 条件成立则抛异常
+     *
+     * @param condition 条件
+     * @param errorCode 错误码
+     * @param message   错误信息
+     */
+    public static void throwIf(boolean condition, ErrorCode errorCode, String message) {
         throwIf(condition, new MyException(errorCode, message));
-    }
-
-    public static void throwIfNull (Object object, ErrorCode errorCode) {
-        throwIf(object == null, errorCode);
     }
 }

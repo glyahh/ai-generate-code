@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { UserLoginStore } from '@/stores/UserLogin'
-import {
-  userUpdateUsingPut,
-  userUpdatePasswordUsingPost,
-} from '@/api/userController'
+import { userUpdateUsingPut } from '@/api/userController'
 import type { UserUpdateRequest } from '@/api/types'
+import { appApplyUsingPost } from '@/api/appController'
 import { message } from 'ant-design-vue'
 import { LockOutlined, UserOutlined, TeamOutlined, SafetyCertificateOutlined } from '@ant-design/icons-vue'
 
@@ -50,19 +48,7 @@ async function handlePasswordSubmit() {
   }
   passwordLoading.value = true
   try {
-    const res = await userUpdatePasswordUsingPost({
-      body: {
-        oldPassword: passwordForm.value.oldPassword,
-        newPassword: passwordForm.value.newPassword,
-        checkPassword: passwordForm.value.confirmPassword,
-      },
-    })
-    if (res.data?.code === 0 || res.data?.code === 20000) {
-      message.success('密码修改成功')
-      passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
-    } else {
-      message.error(res.data?.message || '密码修改失败')
-    }
+    message.error('当前版本暂未接入修改密码接口，请联系管理员或稍后再试')
   } catch (e: any) {
     const msg = e?.response?.data?.message || e?.message || '接口尚未实现，请稍后再试'
     message.error(msg)
@@ -129,6 +115,8 @@ const applyList = ref([
 ])
 const applyLoading = ref(false)
 
+const applyAdminReason = ref('')
+
 function handleApprove(id: number) {
   applyLoading.value = true
   setTimeout(() => {
@@ -148,7 +136,31 @@ function handleReject(id: number) {
 }
 
 function handleApplyAdmin() {
-  message.info('申请已提交，请等待管理员审核')
+  if (!userLoginStore.userLogin?.id) {
+    message.warning('请先登录后再提交申请')
+    return
+  }
+  applyLoading.value = true
+  void appApplyUsingPost({
+    body: {
+      appId: 0,
+      operate: 2,
+      applyReason: applyAdminReason.value.trim() || '申请成为管理员',
+    },
+  })
+    .then((res) => {
+      if ((res.data.code === 0 || res.data.code === 20000) && res.data.data === true) {
+        message.success('申请已提交，请等待管理员审核')
+      } else {
+        message.error(res.data.message || '申请提交失败')
+      }
+    })
+    .catch((e: any) => {
+      message.error(e?.response?.data?.message || '申请提交失败，请稍后再试')
+    })
+    .finally(() => {
+      applyLoading.value = false
+    })
 }
 </script>
 
@@ -230,7 +242,13 @@ function handleApplyAdmin() {
             <!-- 普通用户：申请入口 -->
             <div v-if="!isAdmin" class="form-card apply-card">
               <p class="apply-tip">若需管理员权限，可在此提交申请</p>
-              <a-button type="primary" size="large" class="apply-btn" @click="handleApplyAdmin">
+              <a-textarea
+                v-model:value="applyAdminReason"
+                :rows="3"
+                placeholder="请简单说明你申请成为管理员的理由（选填）"
+                class="apply-reason-input"
+              />
+              <a-button type="primary" size="large" class="apply-btn" :loading="applyLoading" @click="handleApplyAdmin">
                 申请成为管理员
               </a-button>
             </div>
@@ -414,13 +432,17 @@ function handleApplyAdmin() {
 
 .apply-card {
   padding: 32px;
-  text-align: center;
+  text-align: left;
 }
 
 .apply-tip {
   font-size: 14px;
   color: #666;
   margin-bottom: 20px;
+}
+
+.apply-reason-input {
+  margin-bottom: 16px;
 }
 
 .apply-btn {

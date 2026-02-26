@@ -17,6 +17,7 @@ import {
   appMyListPageVoUsingPost,
   appGoodListPageVoUsingPost,
   appDeployUsingPost,
+  appUndeployUsingPost,
 } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
 
@@ -76,6 +77,21 @@ const goodApps = ref<AppListState>({
 })
 
 const isLogin = computed(() => !!userLoginStore.userLogin?.id)
+
+function formatDateTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
 
 function buildAppNameFromPrompt(text: string): string {
   const trimmed = text.trim()
@@ -143,11 +159,14 @@ async function loadMyApps() {
   }
   myApps.value.loading = true
   try {
+    const keyword = myApps.value.keyword.trim()
+    const isId = keyword && /^\d+$/.test(keyword)
     const res = await appMyListPageVoUsingPost({
       body: {
         pageNum: myApps.value.pageNum,
         pageSize: myApps.value.pageSize,
-        appName: myApps.value.keyword || undefined,
+        id: isId ? (keyword as any) : undefined,
+        appName: !isId && keyword ? keyword : undefined,
       },
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
@@ -162,11 +181,14 @@ async function loadMyApps() {
 async function loadGoodApps() {
   goodApps.value.loading = true
   try {
+    const keyword = goodApps.value.keyword.trim()
+    const isId = keyword && /^\d+$/.test(keyword)
     const res = await appGoodListPageVoUsingPost({
       body: {
         pageNum: goodApps.value.pageNum,
         pageSize: goodApps.value.pageSize,
-        appName: goodApps.value.keyword || undefined,
+        id: isId ? (keyword as any) : undefined,
+        appName: !isId && keyword ? keyword : undefined,
       },
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
@@ -221,6 +243,37 @@ async function handleDeploy(app: AppVO) {
     console.error(e)
     message.error('部署失败，请稍后重试')
   }
+}
+
+async function handleUndeploy(app: AppVO) {
+  if (!app.id) return
+  const appName = app.appName || '该应用'
+  AModal.confirm({
+    title: '确认下线',
+    content: `是否下线部署的应用「${appName}」？`,
+    okText: '下线',
+    okType: 'primary',
+    cancelText: '取消',
+    async onOk() {
+      const hide = message.loading('正在下线应用...', 0)
+      try {
+        const res = await appUndeployUsingPost({
+          body: { appId: app.id as any },
+        })
+        hide()
+        if ((res.data.code === 0 || res.data.code === 20000) && res.data.data === true) {
+          message.success('下线成功')
+        } else {
+          // 未成功下线时统一提示“好像还没有部署哦”
+          message.error('好像还没有部署哦')
+        }
+      } catch (e) {
+        hide()
+        console.error(e)
+        message.error('下线失败，请稍后重试')
+      }
+    },
+  })
 }
 
 async function handleDeployCopy() {
@@ -351,13 +404,28 @@ onMounted(() => {
       </div>
 
       <div class="list-toolbar">
-        <AInput v-model:value="goodApps.keyword" placeholder="按名称搜索精选应用" allow-clear style="width: 260px"
-          @press-enter="loadGoodApps" @blur="loadGoodApps" />
+        <div class="list-toolbar-search">
+          <AInput
+            v-model:value="goodApps.keyword"
+            placeholder="按名称或 App ID 搜索精选应用"
+            allow-clear
+            @press-enter="loadGoodApps"
+          />
+          <AButton type="primary" ghost @click="loadGoodApps">
+            搜索
+          </AButton>
+        </div>
       </div>
 
       <div class="card-grid" v-loading="goodApps.loading">
         <template v-if="goodApps.records.length">
-          <ACard v-for="app in goodApps.records" :key="app.id" class="app-card" hoverable @click="goChat(app)">
+          <ACard
+            v-for="app in goodApps.records"
+            :key="app.id"
+            class="app-card good-app-card"
+            hoverable
+            @click="goChat(app)"
+          >
             <div class="app-cover good-cover">
               <span>{{ app.appName?.[0] ?? 'A' }}</span>
             </div>
@@ -397,12 +465,37 @@ onMounted(() => {
       </div>
       <div v-else>
         <div class="list-toolbar">
-          <AInput v-model:value="myApps.keyword" placeholder="按名称搜索我的应用" allow-clear style="width: 260px"
-            @press-enter="loadMyApps" @blur="loadMyApps" />
+          <div class="list-toolbar-search">
+            <AInput
+              v-model:value="myApps.keyword"
+              placeholder="按名称或 App ID 搜索我的应用"
+              allow-clear
+              @press-enter="loadMyApps"
+            />
+            <AButton type="primary" ghost @click="loadMyApps">
+              搜索
+            </AButton>
+          </div>
         </div>
         <div class="card-grid" v-loading="myApps.loading">
           <template v-if="myApps.records.length">
-            <ACard v-for="app in myApps.records" :key="app.id" class="app-card" hoverable @click="goChat(app)">
+            <ACard
+              v-for="app in myApps.records"
+              :key="app.id"
+              class="app-card my-app-card"
+              hoverable
+              @click="goChat(app)"
+            >
+              <div class="app-hover-meta">
+                <div v-if="app.createTime" class="app-hover-meta-row">
+                  <span class="meta-label">创建时间</span>
+                  <span class="meta-value">{{ formatDateTime(app.createTime) }}</span>
+                </div>
+                <div v-if="app.updateTime" class="app-hover-meta-row">
+                  <span class="meta-label">修改时间</span>
+                  <span class="meta-value">{{ formatDateTime(app.updateTime) }}</span>
+                </div>
+              </div>
               <div class="app-cover">
                 <span>{{ app.appName?.[0] ?? 'A' }}</span>
               </div>
@@ -426,6 +519,9 @@ onMounted(() => {
                 </AButton>
                 <AButton size="small" type="link" @click="handleDeploy(app)">
                   部署
+                </AButton>
+                <AButton size="small" type="link" @click="handleUndeploy(app)">
+                  下线
                 </AButton>
               </div>
             </ACard>
@@ -451,6 +547,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 32px;
+  min-height: 100vh;
+  width: 100%;
+  padding: 24px 0 40px;
 }
 
 .hero-section {
@@ -458,29 +557,30 @@ onMounted(() => {
   border-radius: 24px;
   overflow: hidden;
   padding: 40px 32px 32px;
-  min-height: 65vh;
+  min-height: 60vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at top left, #e0f2fe 0, #eff6ff 40%, #f9fafb 100%);
 }
 
 .hero-bg {
   position: absolute;
   inset: 0;
-  opacity: 0.3;
+  pointer-events: none;
+  opacity: 0.28;
   background:
-    radial-gradient(circle at 0 0, #a5b4fc 0, transparent 55%),
-    radial-gradient(circle at 100% 0, #6ee7b7 0, transparent 55%);
+    radial-gradient(circle at 0 0, rgba(129, 140, 248, 0.4) 0, transparent 55%),
+    radial-gradient(circle at 100% 0, rgba(56, 189, 248, 0.4) 0, transparent 55%);
 }
 
 .hero-content {
   position: relative;
   z-index: 1;
-  max-width: 880px;
+  max-width: 960px;
   width: 100%;
   margin: 0 auto;
   text-align: center;
+  padding-inline: 24px;
 }
 
 .hero-title {
@@ -495,10 +595,13 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: #0f172a;
 }
 
 .hero-main-text-inner {
   display: inline-block;
+  padding-inline: 4px;
+  text-shadow: 0 8px 16px rgba(148, 163, 184, 0.35);
   animation: heroFloat 3s ease-in-out infinite;
 }
 
@@ -587,8 +690,8 @@ onMounted(() => {
   border-radius: 20px;
   padding: 20px 20px 16px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  color: #0f172a;
 }
-
 .section-header {
   display: flex;
   align-items: baseline;
@@ -618,6 +721,12 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+.list-toolbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -629,19 +738,46 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 260px;
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid transparent !important;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  padding-top: 32px;
+  transition:
+    border-color 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    transform 0.16s ease-out;
+}
+
+.app-card:hover {
+  border-color: rgba(59, 130, 246, 0.55) !important;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+  transform: translateY(-2px);
 }
 
 .app-cover {
-  height: 120px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #bfdbfe, #a5b4fc);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  background: linear-gradient(135deg, #1d4ed8, #22c55e);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #1f2937;
-  font-size: 32px;
+  color: #e5e7eb;
+  font-size: 22px;
   font-weight: 600;
-  margin-bottom: 10px;
+}
+
+/* 我的应用 hover 时封面仅极轻微变淡，几乎看不出 */
+.my-app-card:hover .app-cover {
+  background: linear-gradient(135deg, #2a5dd4, #2dc968);
 }
 
 .good-cover {
@@ -650,6 +786,10 @@ onMounted(() => {
 
 .app-info {
   flex: 1;
+}
+
+.good-app-card .app-info {
+  margin-top: 10px;
 }
 
 .app-name-line {
@@ -681,7 +821,51 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  margin-top: 8px;
+  margin-top: 16px;
+  padding-bottom: 4px;
+}
+
+.my-app-card .app-hover-meta {
+  position: absolute;
+  inset: 0;
+  padding: 10px 12px;
+  background: linear-gradient(
+    to bottom,
+    rgba(15, 23, 42, 0.18),
+    rgba(15, 23, 42, 0.25),
+    transparent 65%
+  );
+  opacity: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: flex-start;
+  align-items: center;
+  text-align: center;
+  transition: opacity 0.18s ease-out;
+}
+
+.my-app-card:hover .app-hover-meta {
+  opacity: 1;
+}
+
+.app-hover-meta-row {
+  display: flex;
+  gap: 6px;
+  font-size: 13px;
+  color: #4b5563;
+  justify-content: center;
+  width: 100%;
+  text-align: center;
+}
+
+.meta-label {
+  opacity: 0.7;
+}
+
+.meta-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .empty-wrap {
@@ -711,9 +895,21 @@ onMounted(() => {
   gap: 8px;
 }
 
+@keyframes homeGradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 @media (max-width: 768px) {
   .hero-section {
-    padding: 28px 16px 20px;
+    padding: 28px 12px 20px;
   }
 
   .hero-main-text {

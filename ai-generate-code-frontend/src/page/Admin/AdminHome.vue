@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, h } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { Table, Button, Modal, Form, Input, Select, message, Space, Image, Tag } from 'ant-design-vue'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import {
@@ -12,6 +12,7 @@ import type { UserVO, UserUpdateRequest } from '@/api/types'
 import { UserLoginStore } from '@/stores/UserLogin'
 
 const router = useRouter()
+const route = useRoute()
 const userLoginStore = UserLoginStore()
 
 // 权限检查
@@ -188,6 +189,16 @@ function handleTableChange(pag: any) {
   pagination.value.current = pag.current
   pagination.value.pageSize = pag.pageSize
   loadUserList()
+}
+
+// 根据路由 query 一键定位用户（来自“用户请求”页）
+function applyQuickLocateFromRoute() {
+  const userIdFromQuery = route.query.userId as string | undefined
+  if (userIdFromQuery) {
+    searchState.value.activeField = 'id'
+    searchState.value.idValue = userIdFromQuery
+    handleSearch('id', userIdFromQuery)
+  }
 }
 
 // 打开修改对话框
@@ -580,6 +591,7 @@ onMounted(async () => {
     return
   }
   await loadUserList()
+  applyQuickLocateFromRoute()
 })
 </script>
 

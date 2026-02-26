@@ -51,3 +51,33 @@ create table app
 
 
 
+-- 用户申请信息表：记录用户申请精选应用或申请成为管理员的记录
+create table if not exists user_app_apply
+(
+    id            bigint auto_increment comment 'id' primary key,
+    userId        bigint                             not null comment '申请用户 id',
+    appId         bigint                             null comment '申请关联的应用 id，申请管理员时可为空',
+    appPropriety  int                                null comment '应用展示优先级，模拟申请将应用设置为精选时的目标优先级（越大越靠前）',
+    operate       tinyint                            not null comment '操作类型：1-申请将自己的应用设置为精选应用；2-申请成为管理员',
+    applyReason   varchar(512)                       null comment '申请理由',
+    status        tinyint  default 0                 not null comment '处理状态：0-待处理；1-通过；2-拒绝',
+    reviewUserId  bigint                             null comment '审核管理员用户 id',
+    reviewRemark  varchar(512)                       null comment '审核备注',
+    reviewTime    datetime                           null comment '审核时间',
+    createTime    datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime    datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete      tinyint  default 0                 not null comment '是否删除',
+    -- 约束与索引
+    CONSTRAINT fk_user_app_apply_userId FOREIGN KEY (userId) REFERENCES user (id),
+    CONSTRAINT fk_user_app_apply_appId FOREIGN KEY (appId) REFERENCES app (id),
+    CONSTRAINT ck_user_app_apply_operate CHECK (operate in (1, 2)),
+    CONSTRAINT ck_user_app_apply_appPropriety CHECK (appPropriety is null or appPropriety >= 0),
+    INDEX idx_user_app_apply_userId (userId),
+    INDEX idx_user_app_apply_appId (appId),
+    INDEX idx_user_app_apply_status (status),
+    INDEX idx_user_app_apply_operate (operate),
+    INDEX idx_user_app_apply_user_app_operate (userId, appId, operate)
+) comment '用户应用 / 权限申请记录表' collate = utf8mb4_unicode_ci;
+
+
+

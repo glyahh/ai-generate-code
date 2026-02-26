@@ -16,7 +16,7 @@ export type AppAddUsingPostResponses = {
 };
 
 export type AppAdminGetVoUsingGetParams = {
-  id: string | number;
+  id: number;
 };
 
 export type AppAdminGetVoUsingGetResponses = {
@@ -41,7 +41,7 @@ export type AppAdminOpenApiDeleteUsingPostResponses = {
 };
 
 export type AppAdminUpdateRequest = {
-  id?: string | number;
+  id?: number;
   appName?: string;
   cover?: string;
   priority?: number;
@@ -54,8 +54,29 @@ export type AppAdminUpdateUsingPostResponses = {
   200: BaseResponseBoolean;
 };
 
+export type AppApplyAgreeUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
+};
+
+export type AppApplyListPendingUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListApplyVO;
+};
+
+export type AppApplyUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
+};
+
 export type AppDeployRequest = {
-  appId?: string | number;
+  appId?: number;
 };
 
 export type AppDeployUsingPostResponses = {
@@ -66,7 +87,7 @@ export type AppDeployUsingPostResponses = {
 };
 
 export type AppGetVoUsingGetParams = {
-  id: string | number;
+  id: string;
 };
 
 export type AppGetVoUsingGetResponses = {
@@ -81,6 +102,15 @@ export type AppGoodListPageVoUsingPostResponses = {
    * OK
    */
   200: BaseResponsePageAppVO;
+};
+
+export type ApplyVO = {
+  applyId?: number;
+  userId?: number;
+  userAvatar?: string;
+  operate?: number;
+  appId?: number;
+  reason?: string;
 };
 
 export type AppMyListPageVoUsingPostResponses = {
@@ -102,20 +132,28 @@ export type AppQueryRequest = {
   pageSize?: number;
   sortField?: string;
   sortOrder?: string;
-  id?: string | number;
+  id?: number;
   appName?: string;
   cover?: string;
   initPrompt?: string;
   codeGenType?: string;
   deployKey?: string;
   priority?: number;
-  userId?: string | number;
+  userId?: number;
   isDelete?: number;
 };
 
+export type AppUndeployUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
+};
+
 export type AppUpdateRequest = {
-  id?: string | number;
+  id?: number;
   appName?: string;
+  cover?: string;
 };
 
 export type AppUpdateUsingPostResponses = {
@@ -126,7 +164,7 @@ export type AppUpdateUsingPostResponses = {
 };
 
 export type AppVO = {
-  id?: string | number;
+  id?: number;
   appName?: string;
   cover?: string;
   initPrompt?: string;
@@ -134,12 +172,11 @@ export type AppVO = {
   deployKey?: string;
   deployedTime?: string;
   priority?: number;
-  userId?: string | number;
+  userId?: number;
   editTime?: string;
   createTime?: string;
   updateTime?: string;
   userVO?: UserVO;
-  /** 是否已有生成代码（存在预览） */
   hasGeneratedCode?: boolean;
 };
 
@@ -155,6 +192,12 @@ export type BaseResponseBoolean = {
   message?: string;
 };
 
+export type BaseResponseListApplyVO = {
+  code?: number;
+  data?: ApplyVO[];
+  message?: string;
+};
+
 export type BaseResponseLoginUserVO = {
   code?: number;
   data?: LoginUserVO;
@@ -163,7 +206,7 @@ export type BaseResponseLoginUserVO = {
 
 export type BaseResponseLong = {
   code?: number;
-  data?: string | number;
+  data?: number;
   message?: string;
 };
 
@@ -204,7 +247,7 @@ export type BaseResponseUserVO = {
 };
 
 export type ChatGenCodeUsingGetParams = {
-  appId: string | number;
+  appId: number;
   message: string;
 };
 
@@ -216,11 +259,11 @@ export type ChatGenCodeUsingGetResponses = {
 };
 
 export type DeleteRequest = {
-  id?: string | number;
+  id?: number;
 };
 
 export type LoginUserVO = {
-  id?: string | number;
+  id?: number;
   userAccount?: string;
   userName?: string;
   userAvatar?: string;
@@ -278,7 +321,7 @@ export type TestUsingGetResponses = {
 };
 
 export type User = {
-  id?: string | number;
+  id?: number;
   userAccount?: string;
   userPassword?: string;
   userName?: string;
@@ -306,8 +349,20 @@ export type UserAddUsingPostResponses = {
   200: BaseResponseLong;
 };
 
+export type UserAppApplyHandleRequest = {
+  Id?: number;
+  option?: number;
+};
+
+export type UserAppApplyRequest = {
+  appId?: number;
+  appPropriety?: number;
+  operate?: number;
+  applyReason?: string;
+};
+
 export type UserGetInfoIdUsingGetParams = {
-  id: string | number;
+  id: number;
 };
 
 export type UserGetInfoIdUsingGetResponses = {
@@ -325,7 +380,7 @@ export type UserGetLoginUsingGetResponses = {
 };
 
 export type UserGetUsingGetParams = {
-  id: string | number;
+  id: number;
 };
 
 export type UserGetUsingGetResponses = {
@@ -336,7 +391,7 @@ export type UserGetUsingGetResponses = {
 };
 
 export type UserGetVoUsingGetParams = {
-  id: string | number;
+  id: number;
 };
 
 export type UserGetVoUsingGetResponses = {
@@ -402,7 +457,7 @@ export type UserQueryRequest = {
   pageSize?: number;
   sortField?: string;
   sortOrder?: string;
-  id?: string | number;
+  id?: number;
   userName?: string;
   userAccount?: string;
   userProfile?: string;
@@ -423,7 +478,7 @@ export type UserRegisterUsingPostResponses = {
 };
 
 export type UserRemoveIdUsingDeleteParams = {
-  id: string | number;
+  id: number;
 };
 
 export type UserRemoveIdUsingDeleteResponses = {
@@ -441,7 +496,7 @@ export type UserSaveUsingPostResponses = {
 };
 
 export type UserUpdateRequest = {
-  id?: string | number;
+  id?: number;
   userName?: string;
   userAvatar?: string;
   userProfile?: string;
@@ -462,21 +517,8 @@ export type UserUpdateUsingPutResponses = {
   200: boolean;
 };
 
-export type UserUpdatePasswordRequest = {
-  oldPassword?: string;
-  newPassword?: string;
-  checkPassword?: string;
-};
-
-export type UserUpdatePasswordUsingPostResponses = {
-  /**
-   * OK
-   */
-  200: BaseResponseBoolean;
-};
-
 export type UserVO = {
-  id?: string | number;
+  id?: number;
   userAccount?: string;
   userName?: string;
   userAvatar?: string;

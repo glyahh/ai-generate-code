@@ -65,4 +65,13 @@ public interface AppService extends IService<App> {
      * @return 访问部署应用的url
      */
     String deployApp(Long appId, User loginUser);
+
+    /**
+     * 取消部署应用（删除部署目录）
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户
+     * @return 删除成功返回 true，未部署或无目录返回 false
+     */
+    boolean undeployApp(Long appId, User loginUser);
 }
