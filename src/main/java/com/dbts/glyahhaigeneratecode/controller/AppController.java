@@ -14,6 +14,7 @@ import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.DTO.*;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.ApplyHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ApplyVO;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
@@ -344,6 +345,21 @@ public class AppController {
     }
 
     /**
+     * 【用户】回显自己的申请历史记录
+     *
+     * @param request 请求
+     * @return ApplyHistoryVO 列表：operate、appId、appName、applyReason、status、reviewRemark、createTime、reviewTime
+     */
+    @PostMapping("/apply/list/my/history")
+    public BaseResponse<List<ApplyHistoryVO>> listMyApplyHistory(HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+        ThrowUtils.throwIf(UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()), ErrorCode.NO_AUTH_ERROR, "仅普通用户可查看申请历史");
+        List<ApplyHistoryVO> result = userAppApplyService.listMyApplyHistoryVO(loginUser);
+        return ResultUtils.success(result);
+    }
+
+    /**
      * 【管理员】同意某条用户申请
      *
      * @param handleRequest 申请处理请求（applyId，来源于待处理列表 ApplyVO.applyId）
@@ -358,6 +374,22 @@ public class AppController {
                 ErrorCode.PARAMS_ERROR, "applyId 异常");
         User loginUser = userService.getUserInSession(request);
         boolean result = userAppApplyService.agreeApply(handleRequest.getApplyId(), loginUser);
+        return ResultUtils.success(result);
+    }
+
+    @PostMapping("/apply/reject")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> rejectApply(@RequestBody UserAppApplyHandleRequest handleRequest,
+                                             HttpServletRequest request) {
+        ThrowUtils.throwIf(handleRequest == null
+                        || handleRequest.getApplyId() == null
+                        || handleRequest.getApplyId() <= 0,
+                ErrorCode.PARAMS_ERROR, "applyId 异常");
+        ThrowUtils.throwIf(StrUtil.isBlank(handleRequest.getReviewRemark()),
+                ErrorCode.PARAMS_ERROR, "审核备注不能为空");
+        User loginUser = userService.getUserInSession(request);
+        boolean result = userAppApplyService.rejectApply(handleRequest.getApplyId(),
+                handleRequest.getReviewRemark(), handleRequest.getApplyReason(), loginUser);
         return ResultUtils.success(result);
     }
 }

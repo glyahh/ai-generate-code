@@ -112,7 +112,7 @@ export function appApplyUsingPost({
   });
 }
 
-/** 此处后端没有提供注释 POST /apply/agree */
+/** 此处后端没有提供注释 POST /app/apply/agree */
 export function appApplyAgreeUsingPost({
   body,
   options,
@@ -130,6 +130,21 @@ export function appApplyAgreeUsingPost({
   });
 }
 
+/** 此处后端没有提供注释 POST /app/apply/list/my/history */
+export function appApplyListMyHistoryUsingPost({
+  options,
+}: {
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseListApplyHistoryVO>(
+    '/app/apply/list/my/history',
+    {
+      method: 'POST',
+      ...(options || {}),
+    }
+  );
+}
+
 /** 此处后端没有提供注释 POST /app/apply/list/pending */
 export function appApplyListPendingUsingPost({
   options,
@@ -138,6 +153,24 @@ export function appApplyListPendingUsingPost({
 }) {
   return request<API.BaseResponseListApplyVO>('/app/apply/list/pending', {
     method: 'POST',
+    ...(options || {}),
+  });
+}
+
+/** 此处后端没有提供注释 POST /app/apply/reject */
+export function appApplyRejectUsingPost({
+  body,
+  options,
+}: {
+  body: API.UserAppApplyHandleRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseBoolean>('/app/apply/reject', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
     ...(options || {}),
   });
 }

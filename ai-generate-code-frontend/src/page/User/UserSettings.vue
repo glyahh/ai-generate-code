@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { UserLoginStore } from '@/stores/UserLogin'
 import { userUpdateUsingPut } from '@/api/userController'
 import type { UserUpdateRequest } from '@/api/types'
-import { appApplyUsingPost } from '@/api/appController'
+import type { ApplyHistoryVO } from '@/api/types'
+import { appApplyListMyHistoryUsingPost, appApplyUsingPost } from '@/api/appController'
 import { message } from 'ant-design-vue'
-import { LockOutlined, UserOutlined, TeamOutlined, SafetyCertificateOutlined } from '@ant-design/icons-vue'
+import {
+  LockOutlined,
+  UserOutlined,
+  TeamOutlined,
+  SafetyCertificateOutlined,
+  HistoryOutlined,
+} from '@ant-design/icons-vue'
 
-type MenuKey = 'password' | 'profile' | 'apply'
+type MenuKey = 'password' | 'profile' | 'apply' | 'history'
 
 const userLoginStore = UserLoginStore()
 const activeMenu = ref<MenuKey>('profile')
@@ -15,11 +22,18 @@ const activeMenu = ref<MenuKey>('profile')
 const isAdmin = computed(() => userLoginStore.userLogin?.userRole === 'admin')
 
 // 菜单项
-const menuItems: { key: MenuKey; label: string; icon: any }[] = [
-  { key: 'profile', label: '基本资料', icon: UserOutlined },
-  { key: 'password', label: '安全设置', icon: LockOutlined },
-  { key: 'apply', label: '申请管理', icon: TeamOutlined },
-]
+const menuItems = computed(() => {
+  const items: { key: MenuKey; label: string; icon: any }[] = [
+    { key: 'profile', label: '基本资料', icon: UserOutlined },
+    { key: 'password', label: '安全设置', icon: LockOutlined },
+    { key: 'apply', label: '申请管理', icon: TeamOutlined },
+  ]
+  // 仅普通用户可见：历史请求
+  if (!isAdmin.value) {
+    items.push({ key: 'history', label: '历史请求', icon: HistoryOutlined })
+  }
+  return items
+})
 
 // 动态菜单标签
 const applyMenuLabel = computed(() => (isAdmin.value ? '用户请求' : '申请管理'))
@@ -162,6 +176,57 @@ function handleApplyAdmin() {
       applyLoading.value = false
     })
 }
+
+// 历史请求（普通用户）
+const historyLoading = ref(false)
+const historyList = ref<ApplyHistoryVO[]>([])
+
+function statusMeta(status?: number) {
+  if (status === 1) return { text: '已通过', color: 'green' }
+  if (status === 2) return { text: '已拒绝', color: 'red' }
+  return { text: '待处理', color: 'orange' }
+}
+
+function operateText(operate?: number) {
+  if (operate === 1) return '精选应用申请'
+  if (operate === 2) return '管理员申请'
+  return '未知类型'
+}
+
+const historyLastUpdatedAt = ref<string>('')
+
+function formatNow() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+async function loadMyHistory(force = false) {
+  if (isAdmin.value) return
+  historyLoading.value = true
+  try {
+    const res = await appApplyListMyHistoryUsingPost({})
+    if (res?.data?.code === 20000) {
+      historyList.value = res.data.data ?? []
+      historyLastUpdatedAt.value = formatNow()
+    } else {
+      message.error(res?.data?.message || '获取历史记录失败')
+    }
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || '获取历史记录失败')
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+watch(
+  () => activeMenu.value,
+  (val) => {
+    if (val === 'history') {
+      void loadMyHistory(true)
+    }
+  },
+)
 </script>
 
 <template>
@@ -174,7 +239,7 @@ function handleApplyAdmin() {
       <nav class="sidebar-nav">
         <button v-for="item in menuItems" :key="item.key" :class="['nav-item', { active: activeMenu === item.key }]"
           @click="activeMenu = item.key">
-          <component :is="item.key === 'apply' ? TeamOutlined : item.icon" class="nav-icon" />
+          <component :is="item.icon" class="nav-icon" />
           <span>{{ item.key === 'apply' ? applyMenuLabel : item.label }}</span>
         </button>
       </nav>
@@ -233,7 +298,7 @@ function handleApplyAdmin() {
             </div>
           </section>
 
-          <section v-else class="work-panel">
+          <section v-else-if="activeMenu === 'apply'" class="work-panel">
             <h3 class="panel-title">{{ isAdmin ? '用户请求' : '申请管理' }}</h3>
             <p class="panel-desc">
               {{ isAdmin ? '处理用户申请成为管理员的请求' : '申请成为管理员，等待审核' }}
@@ -273,6 +338,65 @@ function handleApplyAdmin() {
                     <a-button size="small" :loading="applyLoading" @click="handleReject(req.id)">
                       拒绝
                     </a-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-else class="work-panel">
+            <h3 class="panel-title">历史请求</h3>
+            <p class="panel-desc">查看自己提交过的申请记录、通过情况与管理员审核备注</p>
+
+            <div class="form-card">
+              <div class="history-toolbar">
+                <div class="history-last-updated" v-if="historyLastUpdatedAt">上次刷新：{{ historyLastUpdatedAt }}</div>
+                <a-button :loading="historyLoading" @click="loadMyHistory(true)">刷新</a-button>
+              </div>
+
+              <div v-if="historyList.length === 0 && !historyLoading" class="empty-list">
+                <HistoryOutlined class="empty-icon" />
+                <p>暂无历史申请记录</p>
+              </div>
+
+              <div v-else class="history-list">
+                <div
+                  v-for="item in historyList"
+                  :key="String(item.applyId ?? `${item.operate ?? 'x'}-${item.createTime ?? ''}-${item.reviewTime ?? ''}`)"
+                  class="history-item"
+                >
+                  <div class="history-head">
+                    <div class="history-title">
+                      <span class="history-operate">{{ operateText(item.operate) }}</span>
+                      <a-tag :color="statusMeta(item.status).color">{{ statusMeta(item.status).text }}</a-tag>
+                    </div>
+                    <div class="history-time">
+                      <span v-if="item.createTime">提交：{{ item.createTime }}</span>
+                      <span v-if="item.reviewTime">审核：{{ item.reviewTime }}</span>
+                    </div>
+                  </div>
+
+                  <div class="history-body">
+                    <div class="history-row">
+                      <span class="history-label">应用</span>
+                      <span class="history-value">
+                        <template v-if="item.appName">{{ item.appName }}</template>
+                        <template v-else-if="item.appId">应用 #{{ item.appId }}</template>
+                        <template v-else>—</template>
+                      </span>
+                    </div>
+                    <div class="history-row">
+                      <span class="history-label">申请理由</span>
+                      <span class="history-value">{{ item.applyReason || '—' }}</span>
+                    </div>
+                    <div class="history-row">
+                      <span class="history-label">审核备注</span>
+                      <span class="history-value">
+                        <template v-if="item.status === 2">{{ item.reviewRemark || '—' }}</template>
+                        <template v-else-if="item.status === 1">通过</template>
+                        <template v-else>待处理</template>
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -512,6 +636,85 @@ function handleApplyAdmin() {
 .request-actions {
   display: flex;
   gap: 8px;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.history-last-updated {
+  font-size: 12px;
+  color: #999;
+  margin-right: auto;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-item {
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: #fafafa;
+}
+
+.history-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.history-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-operate {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.history-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 12px;
+  color: #999;
+}
+
+.history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.history-label {
+  font-size: 13px;
+  color: #888;
+}
+
+.history-value {
+  font-size: 13px;
+  color: #333;
+  word-break: break-word;
 }
 
 /* 过渡动画 */

@@ -2,6 +2,7 @@ package com.dbts.glyahhaigeneratecode.service;
 
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.Entity.UserAppApply;
+import com.dbts.glyahhaigeneratecode.model.VO.ApplyHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ApplyVO;
 import com.mybatisflex.core.service.IService;
 
@@ -39,6 +40,14 @@ public interface UserAppApplyService extends IService<UserAppApply> {
     List<ApplyVO> listPendingApplyVO(User loginUser);
 
     /**
+     * 【用户】查看自己的申请历史记录（含处理状态与审核备注）
+     *
+     * @param loginUser 当前登录用户（必须是普通用户）
+     * @return 申请历史列表
+     */
+    List<ApplyHistoryVO> listMyApplyHistoryVO(User loginUser);
+
+    /**
      * 【管理员】同意某条申请，并同步更新对应业务数据
      *
      * @param applyId   申请记录 id
@@ -46,5 +55,16 @@ public interface UserAppApplyService extends IService<UserAppApply> {
      * @return 是否处理成功
      */
     boolean agreeApply(Long applyId, User loginUser);
+
+    /**
+     * 【管理员】拒绝某条申请，仅更新申请记录状态及审核备注
+     *
+     * @param applyId      申请记录 id
+     * @param reviewRemark 审核备注（拒绝理由）
+     * @param applyReason  管理员修改后的申请理由（可选，若为空则不修改原申请理由）
+     * @param loginUser    当前登录管理员
+     * @return 是否处理成功
+     */
+    boolean rejectApply(Long applyId, String reviewRemark, String applyReason, User loginUser);
 }
 

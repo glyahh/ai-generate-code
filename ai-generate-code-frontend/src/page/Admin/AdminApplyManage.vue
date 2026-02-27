@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { message, Modal as AModal } from 'ant-design-vue'
 import type { ApplyVO } from '@/api'
-import { appApplyListPendingUsingPost, appApplyUsingPost, appApplyAgreeUsingPost } from '@/api/appController'
+import { appApplyListPendingUsingPost, appApplyAgreeUsingPost, appApplyRejectUsingPost } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
 
 const router = useRouter()
@@ -14,6 +14,11 @@ const isAdmin = computed(() => userLoginStore.userLogin?.userRole === 'admin')
 const loading = ref(false)
 const applies = ref<ApplyVO[]>([])
 const activeIndex = ref(0)
+
+// 拒绝弹窗
+const rejectModalVisible = ref(false)
+const rejectReviewRemark = ref('')
+const rejectApplyReason = ref('')
 
 const activeApply = computed<ApplyVO | null>(() => {
   if (!applies.value.length) return null
@@ -66,43 +71,25 @@ async function handleDecision(type: 'approve' | 'reject') {
   const apply = activeApply.value
   if (!apply) return
 
-  const title = type === 'approve' ? '确认同意该请求？' : '确认拒绝该请求？'
-  const content =
-    type === 'approve'
-      ? '该操作可能会影响权限或应用展示位，请谨慎确认。'
-      : '拒绝后用户需要重新提交申请才能再次审核，是否继续？'
+  if (type === 'reject') {
+    rejectReviewRemark.value = ''
+    rejectApplyReason.value = apply.reason ?? ''
+    rejectModalVisible.value = true
+    return
+  }
 
   AModal.confirm({
-    title,
-    content,
-    okText: type === 'approve' ? '确认同意' : '确认拒绝',
-    okType: type === 'approve' ? 'primary' : 'danger',
+    title: '确认同意该请求？',
+    content: '该操作可能会影响权限或应用展示位，请谨慎确认。',
+    okText: '确认同意',
+    okType: 'primary',
     cancelText: '再想想',
     async onOk() {
       detailLoading.value = true
-      const operate =
-        type === 'approve'
-          ? apply.operate === 2
-            ? 3 // 同意管理员申请
-            : 5 // 同意精选申请
-          : apply.operate === 2
-            ? 4 // 拒绝管理员申请
-            : 6 // 拒绝精选申请
-
       try {
-        const res =
-          type === 'approve'
-            ? await appApplyAgreeUsingPost({ body: { applyId: apply.applyId } })
-            : await appApplyUsingPost({
-                body: {
-                  appId: apply.appId as any,
-                  operate,
-                  appPropriety: apply.appId && apply.operate === 1 ? 99 : undefined,
-                  applyReason: apply.reason,
-                },
-              })
+        const res = await appApplyAgreeUsingPost({ body: { applyId: apply.applyId } })
         if ((res.data.code === 0 || res.data.code === 20000) && res.data.data === true) {
-          message.success(type === 'approve' ? '已同意该请求' : '已拒绝该请求')
+          message.success('已同意该请求')
           await loadPending()
         } else {
           message.error(res.data.message || '操作失败')
@@ -115,6 +102,44 @@ async function handleDecision(type: 'approve' | 'reject') {
       }
     },
   })
+}
+
+function closeRejectModal() {
+  rejectModalVisible.value = false
+  rejectReviewRemark.value = ''
+  rejectApplyReason.value = ''
+}
+
+async function submitReject() {
+  const apply = activeApply.value
+  if (!apply?.applyId) return
+  const remark = rejectReviewRemark.value?.trim()
+  if (!remark) {
+    message.warning('请填写审核备注（拒绝理由）')
+    return
+  }
+  detailLoading.value = true
+  try {
+    const res = await appApplyRejectUsingPost({
+      body: {
+        applyId: apply.applyId,
+        reviewRemark: remark,
+        applyReason: rejectApplyReason.value?.trim() || undefined,
+      },
+    })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data === true) {
+      message.success('已拒绝该请求')
+      closeRejectModal()
+      await loadPending()
+    } else {
+      message.error(res.data.message || '拒绝失败')
+    }
+  } catch (e) {
+    console.error(e)
+    message.error('操作失败，请稍后重试')
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 function handleQuickLocate() {
@@ -221,6 +246,38 @@ onMounted(() => {
         请选择左侧列表中的一条请求查看详情。
       </div>
     </section>
+
+    <a-modal
+      v-model:open="rejectModalVisible"
+      title="拒绝该请求"
+      ok-text="确认拒绝"
+      cancel-text="取消"
+      :confirm-loading="detailLoading"
+      @ok="submitReject"
+      @cancel="closeRejectModal"
+    >
+      <div class="reject-form">
+        <div class="reject-field">
+          <label class="reject-label">审核备注（拒绝理由）<span class="required">*</span></label>
+          <a-textarea
+            v-model:value="rejectReviewRemark"
+            placeholder="请填写拒绝原因，将作为审核备注反馈给用户"
+            :rows="3"
+            allow-clear
+          />
+        </div>
+        <div class="reject-field">
+          <label class="reject-label">申请理由（可修改）</label>
+          <a-textarea
+            v-model:value="rejectApplyReason"
+            placeholder="可在此修改用户填写的申请理由，留空则保持原样"
+            :rows="3"
+            allow-clear
+          />
+          <p class="reject-hint">管理员可修改用户原本的申请理由文字，修改后将保存到该条申请记录中。</p>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -411,6 +468,36 @@ onMounted(() => {
   height: 100%;
   font-size: 13px;
   color: #6b7280;
+}
+
+.reject-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reject-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reject-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.reject-label .required {
+  color: #ef4444;
+  margin-left: 2px;
+}
+
+.reject-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
 }
 
 @media (max-width: 960px) {

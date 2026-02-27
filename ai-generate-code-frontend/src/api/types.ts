@@ -61,11 +61,25 @@ export type AppApplyAgreeUsingPostResponses = {
   200: BaseResponseBoolean;
 };
 
+export type AppApplyListMyHistoryUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListApplyHistoryVO;
+};
+
 export type AppApplyListPendingUsingPostResponses = {
   /**
    * OK
    */
   200: BaseResponseListApplyVO;
+};
+
+export type AppApplyRejectUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
 };
 
 export type AppApplyUsingPostResponses = {
@@ -102,6 +116,19 @@ export type AppGoodListPageVoUsingPostResponses = {
    * OK
    */
   200: BaseResponsePageAppVO;
+};
+
+export type ApplyHistoryVO = {
+  applyId?: string;
+  operate?: number;
+  appId?: string;
+  appName?: string;
+  appPropriety?: number;
+  applyReason?: string;
+  status?: number;
+  reviewRemark?: string;
+  createTime?: string;
+  reviewTime?: string;
 };
 
 export type ApplyVO = {
@@ -189,6 +216,12 @@ export type BaseResponseAppVO = {
 export type BaseResponseBoolean = {
   code?: number;
   data?: boolean;
+  message?: string;
+};
+
+export type BaseResponseListApplyHistoryVO = {
+  code?: number;
+  data?: ApplyHistoryVO[];
   message?: string;
 };
 
@@ -350,8 +383,9 @@ export type UserAddUsingPostResponses = {
 };
 
 export type UserAppApplyHandleRequest = {
-  Id?: number;
-  option?: number;
+  applyId?: number;
+  applyReason?: string;
+  reviewRemark?: string;
 };
 
 export type UserAppApplyRequest = {

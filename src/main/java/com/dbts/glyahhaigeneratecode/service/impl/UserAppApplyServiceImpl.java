@@ -1,5 +1,7 @@
 package com.dbts.glyahhaigeneratecode.service.impl;
 
+import cn.hutool.core.util.StrUtil;
+import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -8,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.mapper.UserAppApplyMapper;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.Entity.UserAppApply;
+import com.dbts.glyahhaigeneratecode.model.VO.ApplyHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ApplyVO;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
@@ -22,6 +25,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -51,7 +55,7 @@ public class UserAppApplyServiceImpl extends ServiceImpl<UserAppApplyMapper, Use
             throw new MyException(ErrorCode.PARAMS_ERROR, "不支持的申请类型");
         }
 
-        // 如果是申请精选应用，需要校验 appId 合法且是自己的应用
+        // 如果是申请精选应用，需要校验 appId 合法且是自己的应用，并且应用当前不是精选
         App app = null;
         if (operate == 1) {
             if (appId == null || appId <= 0) {
@@ -63,6 +67,10 @@ public class UserAppApplyServiceImpl extends ServiceImpl<UserAppApplyMapper, Use
             }
             if (!loginUser.getId().equals(app.getUserId())) {
                 throw new MyException(ErrorCode.NO_AUTH_ERROR, "只能为自己的应用申请精选");
+            }
+            // 若应用已是精选（priority = GOOD_APP_PRIORITY），不允许重复申请
+            if (app.getPriority() != null && Objects.equals(app.getPriority(), AppConstant.GOOD_APP_PRIORITY)) {
+                throw new MyException(ErrorCode.OPERATION_ERROR, "该应用已是精选应用，请勿重复申请");
             }
         }
 
@@ -146,6 +154,55 @@ public class UserAppApplyServiceImpl extends ServiceImpl<UserAppApplyMapper, Use
     }
 
     @Override
+    public List<ApplyHistoryVO> listMyApplyHistoryVO(User loginUser) {
+        // 1. 权限校验：必须是普通用户
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+        ThrowUtils.throwIf(UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()), ErrorCode.NO_AUTH_ERROR, "仅普通用户可查看申请历史");
+
+        // 2. 查询当前用户的全部申请记录
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq(UserAppApply::getUserId, loginUser.getId());
+        queryWrapper.orderBy("createTime", false);
+        List<UserAppApply> applyList = this.list(queryWrapper);
+        if (applyList == null || applyList.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 3. 批量补齐应用名称（仅 operate=1 且 appId 非空）
+        Set<Long> appIds = applyList.stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getOperate() != null && item.getOperate() == 1)
+                .map(UserAppApply::getAppId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, App> appIdToApp = appIds.isEmpty()
+                ? Collections.emptyMap()
+                : appService.listByIds(appIds).stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(App::getId, Function.identity(), (oldV, newV) -> oldV));
+
+        // 4. 封装返回 ApplyHistoryVO
+        return applyList.stream()
+                .filter(Objects::nonNull)
+                .map(item -> {
+                    ApplyHistoryVO vo = new ApplyHistoryVO();
+                    vo.setApplyId(item.getId() == null ? null : String.valueOf(item.getId()));
+                    vo.setOperate(item.getOperate());
+                    vo.setAppId(item.getAppId() == null ? null : String.valueOf(item.getAppId()));
+                    App app = item.getAppId() == null ? null : appIdToApp.get(item.getAppId());
+                    vo.setAppName(app == null ? null : app.getAppName());
+                    vo.setAppPropriety(item.getAppPropriety());
+                    vo.setApplyReason(item.getApplyReason());
+                    vo.setStatus(item.getStatus());
+                    vo.setReviewRemark(item.getReviewRemark());
+                    vo.setCreateTime(item.getCreateTime());
+                    vo.setReviewTime(item.getReviewTime());
+                    return vo;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public boolean agreeApply(Long applyId, User loginUser) {
         // 1. 权限校验：必须是管理员
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
@@ -196,6 +253,48 @@ public class UserAppApplyServiceImpl extends ServiceImpl<UserAppApplyMapper, Use
         // 4. 更新申请记录状态为已通过
         apply.setStatus(1);
         apply.setReviewUserId(loginUser.getId());
+        apply.setReviewTime(LocalDateTime.now());
+        apply.setUpdateTime(LocalDateTime.now());
+        if (!this.updateById(apply)) {
+            throw new MyException(ErrorCode.OPERATION_ERROR, "更新申请状态失败");
+        }
+
+        return true;
+    }
+
+    @Override
+    public boolean rejectApply(Long applyId, String reviewRemark, String applyReason, User loginUser) {
+        // 1. 权限校验：必须是管理员，且申请用户为普通用户
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+        ThrowUtils.throwIf(!UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()), ErrorCode.NO_AUTH_ERROR, "仅管理员可操作申请");
+        ThrowUtils.throwIf(applyId == null || applyId <= 0, ErrorCode.PARAMS_ERROR, "申请 id 异常");
+        if (StrUtil.isBlank(reviewRemark)) {
+            throw new MyException(ErrorCode.PARAMS_ERROR, "审核备注不能为空");
+        }
+
+        // 2. 根据 applyId 获取待处理申请
+        UserAppApply apply = this.getById(applyId);
+        if (apply == null || !Objects.equals(apply.getStatus(), 0)) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "待处理申请不存在或已被处理");
+        }
+
+        // 校验申请用户为普通用户
+        Long applyUserId = apply.getUserId();
+        ThrowUtils.throwIf(applyUserId == null || applyUserId <= 0, ErrorCode.PARAMS_ERROR, "申请记录缺少用户信息");
+        User applyUser = userService.getById(applyUserId);
+        if (applyUser == null) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "申请关联的用户不存在");
+        }
+        ThrowUtils.throwIf(!UserConstant.DEFAULT_ROLE.equals(applyUser.getUserRole()),
+                ErrorCode.NO_AUTH_ERROR, "仅普通用户的申请可被拒绝处理");
+
+        // 3. 更新申请记录状态为已拒绝，并记录审核备注；如果管理员传入了新的申请理由，则一并覆盖
+        apply.setStatus(2);
+        apply.setReviewUserId(loginUser.getId());
+        apply.setReviewRemark(reviewRemark);
+        if (StrUtil.isNotBlank(applyReason)) {
+            apply.setApplyReason(applyReason);
+        }
         apply.setReviewTime(LocalDateTime.now());
         apply.setUpdateTime(LocalDateTime.now());
         if (!this.updateById(apply)) {
