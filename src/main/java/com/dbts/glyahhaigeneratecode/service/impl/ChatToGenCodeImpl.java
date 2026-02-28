@@ -6,8 +6,10 @@ import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
+import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ChatToGenCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     private final AppService appService;
 
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
+
+    private final ChatHistoryService chatHistoryService;
 
     /**
      * 统一入口：基于应用配置和用户输入触发代码生成（流式）
@@ -50,7 +54,6 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
                 ErrorCode.NO_AUTH_ERROR, "只能使用自己的应用生成代码");
 
         // 4. 组装最终提示词，调用 AI 代码生成门面（流式）
-        // 兼容：数据库存 value(html/multi_file) 或 枚举名(HTML/MULTI_FILE)，如 App 创建时 setCodeGenType(String.valueOf(MULTI_FILE))
         String codeGenType = app.getCodeGenType();
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
         if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
@@ -60,7 +63,32 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         }
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
 
-        return aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
+        // 5. 保存用户消息到对话历史
+        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), user.getId());
+
+        // 6. 调用 AI 生成代码（流式），收集完整回复后保存 AI 消息
+        Long userId = user.getId();
+        StringBuilder aiResponseBuilder = new StringBuilder();
+        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
+
+        return result
+                .doOnNext(aiResponseBuilder::append)
+                .doOnComplete(() -> {
+                    String fullResponse = aiResponseBuilder.toString();
+                    if (StrUtil.isNotBlank(fullResponse)) {
+                        chatHistoryService.addChatMessage(appId, fullResponse,
+                                ChatHistoryMessageTypeEnum.AI.getValue(), userId);
+                    }
+                })
+                .doOnError(e -> {
+                    log.error("AI 生成代码异常, appId={}, userId={}", appId, userId, e);
+                    try {
+                        chatHistoryService.addChatMessage(appId, "AI 回复异常: " + e.getMessage(),
+                                ChatHistoryMessageTypeEnum.ERROR.getValue(), userId);
+                    } catch (Exception ex) {
+                        log.error("保存错误消息到对话历史失败, appId={}, userId={}", appId, userId, ex);
+                    }
+                });
     }
 
     /**
@@ -86,11 +114,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     private String buildUserMessage(App app, String message) {
         String initPrompt = app.getInitPrompt();
         if (StrUtil.isBlank(initPrompt)) {
-            // 没有配置 initPrompt 时直接使用用户输入
             return message;
         }
-        // 简单用换行分隔，既保留应用的初始化语境，也保留用户当前输入
         return initPrompt + System.lineSeparator() + message;
     }
 }
-

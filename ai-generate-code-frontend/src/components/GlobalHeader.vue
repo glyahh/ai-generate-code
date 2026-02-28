@@ -19,6 +19,7 @@ const baseMenuItems = [
 const adminMenuItems = [
   { key: 'manage-users', path: '/admin/users', label: '用户管理' },
   { key: 'manage-apps', path: '/admin/apps', label: '应用管理' },
+  { key: 'manage-chats', path: '/admin/chats', label: '对话管理' },
   { key: 'manage-apply', path: '/admin/apply', label: '用户请求' },
 ]
 

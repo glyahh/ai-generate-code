@@ -255,6 +255,12 @@ export type BaseResponsePageAppVO = {
   message?: string;
 };
 
+export type BaseResponsePageChatHistory = {
+  code?: number;
+  data?: PageChatHistory;
+  message?: string;
+};
+
 export type BaseResponsePageUserVO = {
   code?: number;
   data?: PageUserVO;
@@ -291,6 +297,57 @@ export type ChatGenCodeUsingGetResponses = {
   200: ServerSentEventString[];
 };
 
+export type ChatHistory = {
+  id?: number;
+  message?: string;
+  messageType?: string;
+  appId?: number;
+  userId?: number;
+  createTime?: string;
+  updateTime?: string;
+  isDelete?: number;
+};
+
+export type ChatHistoryAdminUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponsePageChatHistory;
+};
+
+export type ChatHistoryAppAppIdUsingGetParams = {
+  appId: number;
+  lastCreateTime?: string;
+  size?: number;
+};
+
+export type ChatHistoryAppAppIdUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponsePageChatHistory;
+};
+
+export type ChatHistoryQueryRequest = {
+  pageNum?: number;
+  pageSize?: number;
+  sortField?: string;
+  sortOrder?: string;
+  id?: number;
+  message?: string;
+  messageType?: string;
+  appId?: number;
+  userId?: number;
+  lastCreateTime?: string;
+};
+
+export type ChatHistorySaveUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
+};
+
 export type DeleteRequest = {
   id?: number;
 };
@@ -308,6 +365,15 @@ export type LoginUserVO = {
 
 export type PageAppVO = {
   records?: AppVO[];
+  pageNumber?: number;
+  pageSize?: number;
+  totalPage?: number;
+  totalRow?: number;
+  optimizeCountQuery?: boolean;
+};
+
+export type PageChatHistory = {
+  records?: ChatHistory[];
   pageNumber?: number;
   pageSize?: number;
   totalPage?: number;

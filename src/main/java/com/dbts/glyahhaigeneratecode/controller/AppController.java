@@ -19,6 +19,7 @@ import com.dbts.glyahhaigeneratecode.model.VO.ApplyVO;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
+import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.UserAppApplyService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
 import com.mybatisflex.core.paginate.Page;
@@ -45,6 +46,7 @@ public class AppController {
     private final AppService appService;
     private final UserService userService;
     private final UserAppApplyService userAppApplyService;
+    private final ChatHistoryService chatHistoryService;
 
     /**
      * 【用户】创建应用（须填写 initPrompt）
@@ -106,6 +108,12 @@ public class AppController {
 
         boolean result = appService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除应用失败");
+        // 关联删除该应用的所有对话历史，失败不影响应用删除
+        try {
+            chatHistoryService.removeByAppId(deleteRequest.getId());
+        } catch (Exception e) {
+            log.warn("删除应用对话历史失败, appId={}", deleteRequest.getId(), e);
+        }
         return ResultUtils.success(true);
     }
 
@@ -199,6 +207,12 @@ public class AppController {
                 ErrorCode.PARAMS_ERROR, "删除应用请求参数异常");
         boolean result = appService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除应用失败");
+        // 关联删除该应用的所有对话历史，失败不影响应用删除
+        try {
+            chatHistoryService.removeByAppId(deleteRequest.getId());
+        } catch (Exception e) {
+            log.warn("管理员删除应用对话历史失败, appId={}", deleteRequest.getId(), e);
+        }
         return ResultUtils.success(true);
     }
 

@@ -2,8 +2,9 @@
 import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Button as AButton, Input as AInput, Spin as ASpin, Empty as AEmpty, Modal as AModal } from 'ant-design-vue'
-import type { AppVO } from '@/api'
+import type { AppVO, ChatHistory } from '@/api'
 import { appGetVoUsingGet, appApplyUsingPost } from '@/api/appController'
+import { chatHistoryAppAppIdUsingGet } from '@/api/chatHistoryController'
 import { UserLoginStore } from '@/stores/UserLogin'
 import { parseMarkdownWithCode } from '@/utils/markdownParser'
 import CodeBlock from '@/components/CodeBlock.vue'
@@ -42,9 +43,14 @@ type ChatMessage = {
   id: number
   role: 'user' | 'assistant'
   content: string
+  createTime?: string
 }
 
-const messages = ref<ChatMessage[]>([])
+/** 已加载的历史消息（来自接口） */
+const loadedHistoryRecords = ref<ChatHistory[]>([])
+const loadingHistory = ref(false)
+const loadingMoreHistory = ref(false)
+const hasMoreHistory = ref(true)
 const inputMessage = ref('')
 const sending = ref(false)
 const streaming = ref(false)
@@ -53,6 +59,40 @@ let eventSource: EventSource | null = null
 let nextMessageId = 1
 
 const hasGenerated = ref(false)
+/** 当前会话新产生的消息（不含历史） */
+const sessionMessages = ref<ChatMessage[]>([])
+
+/** 将 ChatHistory 转为 ChatMessage */
+function historyToMessage(r: ChatHistory): ChatMessage {
+  const role = (r.messageType?.toLowerCase() === 'user' ? 'user' : 'assistant') as 'user' | 'assistant'
+  return {
+    id: r.id ?? 0,
+    role,
+    content: r.message ?? '',
+    createTime: r.createTime,
+  }
+}
+
+/** 用于展示的完整消息列表（历史 + 当前会话），按 createTime 升序 */
+const displayMessages = computed(() => {
+  const historyMsgs = loadedHistoryRecords.value.map(historyToMessage)
+  const session = sessionMessages.value
+  const combined = [...historyMsgs, ...session]
+  return combined.sort((a, b) => {
+    const ta = a.createTime || ''
+    const tb = b.createTime || ''
+    if (ta && tb) return ta.localeCompare(tb)
+    if (ta) return 1
+    if (tb) return -1
+    return 0
+  })
+})
+
+/** 是否应展示网站：至少 2 条对话记录或本次会话已生成 */
+const shouldShowWebsite = computed(() => {
+  const total = displayMessages.value.length
+  return total >= 2 || hasGenerated.value
+})
 const iframeKey = ref(0)
 const chatMessagesRef = ref<HTMLElement | null>(null)
 const shouldAutoScroll = ref(true)
@@ -111,7 +151,7 @@ const previewUrl = computed(() => {
 })
 
 function appendUserMessage(text: string) {
-  messages.value.push({
+  sessionMessages.value.push({
     id: nextMessageId++,
     role: 'user',
     content: text,
@@ -124,9 +164,9 @@ function appendUserMessage(text: string) {
 }
 
 function appendAssistantMessageChunk(chunk: string) {
-  const last = messages.value[messages.value.length - 1]
+  const last = sessionMessages.value[sessionMessages.value.length - 1]
   if (!last || last.role !== 'assistant') {
-    messages.value.push({
+    sessionMessages.value.push({
       id: nextMessageId++,
       role: 'assistant',
       content: chunk,
@@ -138,9 +178,7 @@ function appendAssistantMessageChunk(chunk: string) {
     })
     return
   }
-  // 实时追加内容，这样代码块会在生成过程中就显示出来
   last.content += chunk
-  // 每次追加后立即滚动到底部，让用户看到实时生成效果
   nextTick(() => {
     if (shouldAutoScroll.value) {
       scrollToBottom()
@@ -183,7 +221,7 @@ async function sendMessage(text?: string) {
   stopStream()
 
   appendUserMessage(content)
-  messages.value.push({
+  sessionMessages.value.push({
     id: nextMessageId++,
     role: 'assistant',
     content: '',
@@ -289,6 +327,65 @@ function parseMessageContent(content: string) {
   return parseMarkdownWithCode(content)
 }
 
+/** 加载对话历史（游标分页） */
+async function loadChatHistory(lastCreateTime?: string) {
+  if (!appId.value || !appId.value.trim()) return
+  const isLoadMore = !!lastCreateTime
+  if (isLoadMore) {
+    loadingMoreHistory.value = true
+  } else {
+    loadingHistory.value = true
+  }
+  try {
+    const res = await chatHistoryAppAppIdUsingGet({
+      params: {
+        // 这里保持 appId 为字符串，避免长整型精度丢失，只在类型层面断言为 number
+        appId: appId.value as unknown as number,
+        size: 10,
+        ...(lastCreateTime ? { lastCreateTime } : {}),
+      },
+    })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      const page = res.data.data
+      const records = page?.records ?? []
+      if (isLoadMore) {
+        loadedHistoryRecords.value = [...records, ...loadedHistoryRecords.value]
+      } else {
+        loadedHistoryRecords.value = records
+      }
+      const totalRow = page?.totalRow ?? 0
+      const loaded = loadedHistoryRecords.value.length
+      hasMoreHistory.value = loaded < totalRow
+      if (loaded >= 2) {
+        hasGenerated.value = true
+      }
+    }
+  } catch (e) {
+    console.error(e)
+    if (!isLoadMore) {
+      message.error('加载对话历史失败')
+    } else {
+      message.error('加载更多历史失败')
+    }
+  } finally {
+    loadingHistory.value = false
+    loadingMoreHistory.value = false
+  }
+}
+
+function loadMoreHistory() {
+  const records = loadedHistoryRecords.value
+  if (records.length === 0 || !hasMoreHistory.value || loadingMoreHistory.value) return
+  const oldest = records.reduce((a, b) => {
+    const ta = a.createTime ?? ''
+    const tb = b.createTime ?? ''
+    return ta && tb && ta < tb ? a : b
+  })
+  if (oldest.createTime) {
+    void loadChatHistory(oldest.createTime)
+  }
+}
+
 async function loadAppInfo() {
   if (!appId.value || !appId.value.trim()) {
     message.error('应用 ID 异常')
@@ -302,10 +399,10 @@ async function loadAppInfo() {
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
       appInfo.value = res.data.data
-      // 若该应用之前已生成过代码，直接展示之前的网页预览，无需用户再发提示词
       if (appInfo.value.hasGeneratedCode) {
         hasGenerated.value = true
       }
+      await loadChatHistory()
 
       // 检查是否从首页跳转过来（需要自动提交）
       const autoSend = route.query.autoSend === 'true'
@@ -322,7 +419,7 @@ async function loadAppInfo() {
           await sendMessage(appInfo.value.initPrompt)
         } else {
           // 其他情况：只预填到输入框，等待用户确认提交
-          inputMessage.value = appInfo.value.initPrompt
+          inputMessage.value = appInfo.value.initPrompt ?? ''
         }
       }
     } else {
@@ -358,21 +455,10 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="app-chat-page">
-    <a-modal
-      v-model:open="applyFeaturedModalVisible"
-      title="申请成为精选应用"
-      :confirm-loading="false"
-      ok-text="申请"
-      cancel-text="取消"
-      @ok="handleApplyFeaturedConfirm"
-      @cancel="closeApplyFeatured"
-    >
+    <a-modal v-model:open="applyFeaturedModalVisible" title="申请成为精选应用" :confirm-loading="false" ok-text="申请"
+      cancel-text="取消" @ok="handleApplyFeaturedConfirm" @cancel="closeApplyFeatured">
       <p style="margin-bottom: 8px">你可以简单说明想成为精选应用的理由（选填）：</p>
-      <a-textarea
-        v-model:value="applyAppProprietyReason"
-        :rows="3"
-        placeholder="例如：该应用体验较好、功能完善，希望被更多用户看到"
-      />
+      <a-textarea v-model:value="applyAppProprietyReason" :rows="3" placeholder="例如：该应用体验较好、功能完善，希望被更多用户看到" />
     </a-modal>
 
     <div class="top-bar">
@@ -404,35 +490,42 @@ onBeforeUnmount(() => {
         <div ref="chatMessagesRef" class="chat-messages">
           <ASpin v-if="loadingApp" />
           <template v-else>
-            <div v-if="messages.length === 0" class="chat-empty">
+            <div v-if="displayMessages.length === 0" class="chat-empty">
               <AEmpty description="还没有对话，先从左侧输入提示词开始吧" />
             </div>
-            <div v-else v-for="m in messages" :key="m.id"
-              :class="['chat-bubble', m.role === 'user' ? 'bubble-user' : 'bubble-ai']">
-              <div class="bubble-inner">
-                <div class="bubble-role">
-                  {{ m.role === 'user' ? '我' : '应用助手' }}
-                </div>
-                <div class="bubble-content">
-                  <template
-                    v-if="m.role === 'assistant' && streaming && m.id === messages[messages.length - 1]?.id && !m.content">
-                    <div class="typing-indicator">
-                      <span class="typing-dot" />
-                      <span class="typing-dot" />
-                      <span class="typing-dot" />
-                      <span class="typing-text">应用助手思考中…</span>
-                    </div>
-                  </template>
-                  <template v-else v-for="(segment, idx) in parseMessageContent(m.content)" :key="idx">
-                    <!-- 代码块：使用独立的 CodeBlock 组件 -->
-                    <CodeBlock v-if="segment.type === 'code'" :code="segment.content" :language="segment.language"
-                      :is-streaming="streaming && m.id === messages[messages.length - 1]?.id" />
-                    <!-- 普通文本：保持原有样式 -->
-                    <span v-else class="text-segment">{{ segment.content }}</span>
-                  </template>
+            <template v-else>
+              <div v-if="hasMoreHistory && !loadingHistory" class="load-more-wrap">
+                <a-button type="link" size="small" :loading="loadingMoreHistory" @click="loadMoreHistory">
+                  加载更多历史消息
+                </a-button>
+              </div>
+              <div v-for="(m, midx) in displayMessages" :key="m.createTime ? `h-${m.id}` : `s-${m.id}-${midx}`"
+                :class="['chat-bubble', m.role === 'user' ? 'bubble-user' : 'bubble-ai']">
+                <div class="bubble-inner">
+                  <div class="bubble-role">
+                    {{ m.role === 'user' ? '我' : '应用助手' }}
+                  </div>
+                  <div class="bubble-content">
+                    <template
+                      v-if="m.role === 'assistant' && streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !m.content">
+                      <div class="typing-indicator">
+                        <span class="typing-dot" />
+                        <span class="typing-dot" />
+                        <span class="typing-dot" />
+                        <span class="typing-text">应用助手思考中…</span>
+                      </div>
+                    </template>
+                    <template v-else v-for="(segment, idx) in parseMessageContent(m.content)" :key="idx">
+                      <!-- 代码块：使用独立的 CodeBlock 组件 -->
+                      <CodeBlock v-if="segment.type === 'code'" :code="segment.content" :language="segment.language"
+                        :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id" />
+                      <!-- 普通文本：保持原有样式 -->
+                      <span v-else class="text-segment">{{ segment.content }}</span>
+                    </template>
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
           </template>
         </div>
 
@@ -467,8 +560,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="preview-body">
-          <div v-if="!hasGenerated">
-            <AEmpty description="等待生成结果，稍后将在此展示网页效果" />
+          <div v-if="!shouldShowWebsite" class="preview-empty">
+            <AEmpty description="AI 未生成内容，请先完成至少一轮对话（用户提问 + AI 回复）" />
           </div>
           <iframe v-else :key="iframeKey" class="preview-iframe" :src="previewUrl" />
         </div>
@@ -586,7 +679,20 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.2);
 }
 
+.load-more-wrap {
+  text-align: center;
+  padding: 8px 0;
+  margin-bottom: 8px;
+}
+
 .chat-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-empty {
   height: 100%;
   display: flex;
   align-items: center;
@@ -598,13 +704,7 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
 }
 
-.bubble-user {
-  justify-content: flex-end;
-}
 
-.bubble-ai {
-  justify-content: flex-start;
-}
 
 .bubble-ai .bubble-inner {
   max-width: 100%;
