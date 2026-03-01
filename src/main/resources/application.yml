@@ -7,6 +7,16 @@ spring:
     url: jdbc:mysql://localhost:3306/gly_ai_generate_code
     username: ${spring.datasource.username}
     password: ${spring.datasource.password}
+
+  #Redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      # 超过一小时自动删除存储的键值对
+      ttl: 3600
+
   profiles:
     active: local
 

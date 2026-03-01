@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -18,6 +19,9 @@ import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -159,5 +163,63 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         return chatHistoryList.stream()
                 .map(this::getChatHistoryVO)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public int turnHistoryToMemory(Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount) {
+        // 校验参数
+        ThrowUtils.throwIf(addId == null || addId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
+        ThrowUtils.throwIf(messageWindowChatMemory == null, ErrorCode.PARAMS_ERROR, "聊天内存不能为空");
+        ThrowUtils.throwIf(maxCount <= 0, ErrorCode.PARAMS_ERROR, "最大数量必须大于0");
+
+        // 获取应用的所有history,注意从1开始获取,抛开用户刚发送的那条
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq(ChatHistory::getAppId, addId);
+        // 按创建时间倒序，最新的消息在最前面
+        queryWrapper.orderBy(ChatHistory::getCreateTime, false);
+        queryWrapper.limit(1, maxCount);
+        List<ChatHistory> historyList = this.list(queryWrapper);
+
+        if (historyList == null || historyList.isEmpty()) {
+            return 0;
+        }
+
+        // 反转历史消息（按时间从早到晚写入内存）
+        Collections.reverse(historyList);
+
+        // 清空Redis中的全部消息
+        messageWindowChatMemory.clear();
+
+        // 一次添加进入缓存
+        int restoredCount = 0;
+        for (ChatHistory history : historyList) {
+            ChatHistoryMessageTypeEnum typeEnum = ChatHistoryMessageTypeEnum.getEnumByValue(history.getMessageType());
+            if (typeEnum == null) {
+                continue;
+            }
+            switch (typeEnum) {
+                case USER:
+                    messageWindowChatMemory.add(new UserMessage(history.getMessage()));
+                    restoredCount++;
+                    break;
+                case AI:
+                    messageWindowChatMemory.add(new AiMessage(history.getMessage()));
+                    restoredCount++;
+                    break;
+                default:
+                    // ERROR 等类型不写入内存
+                    log.error("在将history写入Redis管理的ChatMemory出错, 出现error枚举类");
+                    break;
+            }
+        }
+        log.info("已将对话历史加载到内存，appId={}, count={}", addId, restoredCount);
+
+        // 添加系统提示词：读取提示词文件内容到对话内存，避免只写入文件路径
+        String htmlSystemPrompt = FileUtil.readUtf8String("D:\\mainJava\\all Code\\program\\glyahh-ai-generate-code\\src\\main\\resources\\Prompt\\Single_File_Prompt.txt");
+        String multiFileSystemPrompt = FileUtil.readUtf8String("D:\\mainJava\\all Code\\program\\glyahh-ai-generate-code\\src\\main\\resources\\Prompt\\Various_File_Prompt.txt");
+        messageWindowChatMemory.add(new AiMessage(htmlSystemPrompt));
+        messageWindowChatMemory.add(new AiMessage(multiFileSystemPrompt));
+
+        return restoredCount;
     }
 }

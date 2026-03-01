@@ -1,7 +1,7 @@
 package com.dbts.glyahhaigeneratecode.core.saver;
 
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 
@@ -94,6 +94,10 @@ public abstract class CodeFileSaverTemplate<T> {
      * @param content  文件内容
      */
     protected void writeSingleFile(String Path, String fileName, String content) {
+        // 若生成内容为空，认为本次生成失败，抛出异常避免覆盖掉已有文件
+        if (StrUtil.isBlank(content)) {
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "生成的 " + fileName + " 内容为空，已终止写入");
+        }
         String filePath = Path + File.separator + fileName;
         FileUtil.writeString(content, filePath, "UTF-8");
     }

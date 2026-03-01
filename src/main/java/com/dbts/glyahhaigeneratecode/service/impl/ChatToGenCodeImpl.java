@@ -19,7 +19,6 @@ import reactor.core.publisher.Flux;
 /**
  * 应用对话生成代码外观类，串联应用配置、权限校验和代码生成
  * 门面类(工具类)
- *
  * 大致思路: 校验参数 → 查询应用 → 校验只能本人使用 → 拼接 initPrompt + 用户输入 → 调用 AiCodeGeneratorFacade 流式生成并保存代码
  */
 @Service

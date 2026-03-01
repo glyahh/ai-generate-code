@@ -73,7 +73,7 @@ function historyToMessage(r: ChatHistory): ChatMessage {
   }
 }
 
-/** 用于展示的完整消息列表（历史 + 当前会话），按 createTime 升序 */
+/** 用于展示的完整消息列表（历史 + 当前会话），按 createTime 升序，无 createTime 的当前会话消息始终排在最下面 */
 const displayMessages = computed(() => {
   const historyMsgs = loadedHistoryRecords.value.map(historyToMessage)
   const session = sessionMessages.value
@@ -82,20 +82,21 @@ const displayMessages = computed(() => {
     const ta = a.createTime || ''
     const tb = b.createTime || ''
     if (ta && tb) return ta.localeCompare(tb)
-    if (ta) return 1
-    if (tb) return -1
+    // 只有一方有 createTime 时：有时间的（历史）排前面，无时间的（当前会话）排后面
+    if (ta) return -1
+    if (tb) return 1
     return 0
   })
 })
 
-/** 是否应展示网站：至少 2 条对话记录或本次会话已生成 */
+/** 是否应展示网站：仅在已生成过静态页面时展示，避免首次对话未生成完成就挂载 iframe 导致白屏 */
 const shouldShowWebsite = computed(() => {
-  const total = displayMessages.value.length
-  return total >= 2 || hasGenerated.value
+  return !!appInfo.value?.hasGeneratedCode || hasGenerated.value
 })
 const iframeKey = ref(0)
 const chatMessagesRef = ref<HTMLElement | null>(null)
 const shouldAutoScroll = ref(true)
+const showScrollToBottom = computed(() => !shouldAutoScroll.value && displayMessages.value.length > 0)
 
 const applyFeaturedModalVisible = ref(false)
 const applyAppProprietyReason = ref('')
@@ -145,9 +146,20 @@ async function handleApplyFeaturedConfirm() {
 
 const previewUrl = computed(() => {
   if (!appInfo.value || !appId.value) return ''
-  const codeGenType = appInfo.value.codeGenType || 'multi_file'
+  const rawType = String(appInfo.value.codeGenType ?? '').trim()
+  const lower = rawType.toLowerCase()
+  // 后端可能返回枚举名（HTML / MULTI_FILE），但静态目录使用 value（html / multi_file）
+  const codeGenType =
+    lower === 'html' || lower === 'multi_file'
+      ? lower
+      : rawType.toUpperCase() === 'HTML'
+        ? 'html'
+        : rawType.toUpperCase() === 'MULTI_FILE'
+          ? 'multi_file'
+          : 'multi_file'
   const base = PREVIEW_BASE_URL.replace(/\/$/, '')
-  return `${base}/${codeGenType}_${appId.value}/`
+  // 使用版本号避免浏览器缓存旧内容；同时配合 iframeKey 触发刷新
+  return `${base}/${codeGenType}_${appId.value}/?v=${iframeKey.value}`
 })
 
 function appendUserMessage(text: string) {
@@ -281,8 +293,6 @@ async function sendMessage(text?: string) {
 
     eventSource.onerror = () => {
       stopStream()
-      hasGenerated.value = true
-      iframeKey.value += 1
       message.error('生成过程中出现错误，已结束本次对话')
     }
   } catch (e) {
@@ -302,14 +312,24 @@ function handleManualSend() {
 function handleStop() {
   if (isReadOnly.value || !streaming.value) return
   stopStream()
-  hasGenerated.value = true
-  iframeKey.value += 1
 }
 
-function scrollToBottom() {
-  if (chatMessagesRef.value) {
-    chatMessagesRef.value.scrollTop = chatMessagesRef.value.scrollHeight
+function scrollToBottom(options: { smooth?: boolean } = {}) {
+  const el = chatMessagesRef.value
+  if (!el) return
+  if (options.smooth && 'scrollTo' in el) {
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: 'smooth',
+    } as ScrollToOptions)
+  } else {
+    el.scrollTop = el.scrollHeight
   }
+}
+
+function handleScrollToBottomClick() {
+  shouldAutoScroll.value = true
+  scrollToBottom({ smooth: true })
 }
 
 function handleChatScroll() {
@@ -356,9 +376,6 @@ async function loadChatHistory(lastCreateTime?: string) {
       const totalRow = page?.totalRow ?? 0
       const loaded = loadedHistoryRecords.value.length
       hasMoreHistory.value = loaded < totalRow
-      if (loaded >= 2) {
-        hasGenerated.value = true
-      }
     }
   } catch (e) {
     console.error(e)
@@ -538,6 +555,10 @@ onBeforeUnmount(() => {
               支持多轮对话微调页面效果
             </div>
             <div class="chat-input-buttons">
+              <button v-if="showScrollToBottom" type="button" class="scroll-bottom-btn"
+                @click="handleScrollToBottomClick">
+                <span class="scroll-bottom-icon">↓</span>
+              </button>
               <AButton v-if="streaming" danger ghost :disabled="isReadOnly" @click="handleStop">
                 停止生成
               </AButton>
@@ -642,6 +663,7 @@ onBeforeUnmount(() => {
 
 .chat-panel,
 .preview-panel {
+  position: relative;
   background: rgba(255, 255, 255, 0.94);
   border-radius: 18px;
   padding: 16px;
@@ -889,6 +911,52 @@ onBeforeUnmount(() => {
   height: 100%;
   border: none;
   background: white;
+}
+
+.scroll-bottom-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: radial-gradient(circle at 30% 0%, #bbf7d0 0, rgba(34, 197, 94, 0.85) 40%, #0ea5e9 100%);
+  box-shadow:
+    0 10px 25px rgba(15, 23, 42, 0.25),
+    0 0 0 1px rgba(15, 23, 42, 0.04);
+  color: #f9fafb;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition:
+    transform 0.18s ease-out,
+    box-shadow 0.18s ease-out,
+    opacity 0.18s ease-out,
+    background 0.25s ease-out;
+  opacity: 0.98;
+}
+
+.scroll-bottom-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow:
+    0 14px 30px rgba(15, 23, 42, 0.3),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.scroll-bottom-btn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow:
+    0 6px 15px rgba(15, 23, 42, 0.25),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.scroll-bottom-icon {
+  font-size: 18px;
+  line-height: 1;
+  transform: translateY(1px);
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.35);
 }
 
 @media (max-width: 992px) {

@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.core;
 
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorService;
+import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorServiceFactory;
 import com.dbts.glyahhaigeneratecode.ai.model.HtmlCodeResult;
 import com.dbts.glyahhaigeneratecode.ai.model.MultiFileCodeResult;
 import com.dbts.glyahhaigeneratecode.core.parser.CodeParserExecutor;
@@ -18,7 +19,6 @@ import java.io.File;
 /**
  * AI 代码生成外观类，组合生成和保存功能
  * 门面类(工具类)
- *
  * 大致思路: 按枚举走分支 → 调 AI 拿代码(普通拿结果/流式拼字符串) → 解析+保存走两个 Executor → 返回目录或 Flux
  */
 @Service
@@ -27,6 +27,9 @@ public class AiCodeGeneratorFacade {
 
     @Resource
     private aiCodeGeneratorService aiCodeGeneratorService;
+
+    @Resource
+    private aiCodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
 
     private static final CodeFileSaverExecutor codeFileSaverExecutor = new CodeFileSaverExecutor();
     private static final CodeParserExecutor codeParserExecutor = new CodeParserExecutor();
@@ -41,6 +44,10 @@ public class AiCodeGeneratorFacade {
         if (codeGenTypeEnum == null) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
+
+        // 获取 AI 服务实例
+        aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId);
+
         return switch (codeGenTypeEnum) {
             case HTML -> {
                 HtmlCodeResult result = aiCodeGeneratorService.generateCodeHTML(userMessage);
@@ -69,6 +76,7 @@ public class AiCodeGeneratorFacade {
         if (codeGenTypeEnum == null) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
+
         return switch (codeGenTypeEnum) {
             case HTML -> generateAndSaveHtmlCodeStream(userMessage, appId);
             case MULTI_FILE -> generateAndSaveMultiFileCodeStream(userMessage, appId);
@@ -119,6 +127,8 @@ public class AiCodeGeneratorFacade {
      */
     private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage, Long appId) {
         // 1. 获取流式输出的复合代码(部分)   generate
+        // 获取 AI 服务实例
+        aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId);
         Flux<String> result = aiCodeGeneratorService.generateCodeMultiFileStream(userMessage);
 
         // 2. 创建StringBuilder拼接复合代码     save
@@ -132,6 +142,8 @@ public class AiCodeGeneratorFacade {
      */
     private Flux<String> generateAndSaveHtmlCodeStream(String userMessage, Long appId) {
         // 1. 获取流式输出的HTML代码(部分)  generate
+        // 获取 AI 服务实例
+        aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId);
         Flux<String> result = aiCodeGeneratorService.generateCodeHTMLStream(userMessage);
 
         // 2. 创建StringBuilder拼接HTML代码   save

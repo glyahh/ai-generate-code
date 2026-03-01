@@ -7,6 +7,7 @@ import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -71,4 +72,14 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 对话历史 VO 列表
      */
     List<ChatHistoryVO> getChatHistoryVOList(List<ChatHistory> chatHistoryList);
+
+    /**
+     * 将对话历史转为内存
+     *
+     * @param addId                   应用 id
+     * @param messageWindowChatMemory 聊天内存
+     * @param maxCount                最大数量
+     * @return 转换后的数量
+     */
+    int turnHistoryToMemory (Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount);
 }
