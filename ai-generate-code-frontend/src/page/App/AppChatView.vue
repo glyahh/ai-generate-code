@@ -4,7 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { message, Button as AButton, Input as AInput, Spin as ASpin, Empty as AEmpty, Modal as AModal } from 'ant-design-vue'
 import type { AppVO, ChatHistory } from '@/api'
 import { appGetVoUsingGet, appApplyUsingPost } from '@/api/appController'
-import { chatHistoryAppAppIdUsingGet } from '@/api/chatHistoryController'
+import {
+  chatHistoryAppAppIdUsingGet,
+  chatHistoryOpenApiExportAppIdUsingGet,
+  chatHistoryRoundCountAppIdUsingGet,
+} from '@/api/chatHistoryController'
 import { UserLoginStore } from '@/stores/UserLogin'
 import { parseMarkdownWithCode } from '@/utils/markdownParser'
 import CodeBlock from '@/components/CodeBlock.vue'
@@ -104,6 +108,97 @@ const applyAppProprietyReason = ref('')
 const canApplyFeatured = computed(
   () => isOwner.value && !isReadOnly.value && (!appInfo.value?.priority || appInfo.value.priority < 99),
 )
+
+const exportingChat = ref(false)
+
+/** 当前应用对话轮数（用户一问 + AI 一答为一轮），仅创建者/管理员展示 */
+const roundCount = ref<number | null>(null)
+const loadingRoundCount = ref(false)
+
+async function fetchRoundCount() {
+  const id = appId.value
+  if (!id || !(isOwner.value || isAdmin.value)) return
+  loadingRoundCount.value = true
+  try {
+    const res = await chatHistoryRoundCountAppIdUsingGet({
+      params: { appId: id as unknown as number },
+    })
+    const code = res?.data?.code
+    const data = res?.data?.data
+    if (code === 0 || code === 20000) {
+      roundCount.value = typeof data === 'number' ? data : null
+    } else {
+      roundCount.value = null
+    }
+  } catch {
+    roundCount.value = null
+  } finally {
+    loadingRoundCount.value = false
+  }
+}
+
+/** 将服务端返回的对话列表转为 Markdown 文本并触发下载 */
+function buildMarkdownFromHistory(records: { messageType?: string; message?: string; createTime?: string }[]): string {
+  const lines: string[] = [
+    `# 对话导出 - ${appInfo.value?.appName ?? '应用'}`,
+    '',
+    `导出时间：${new Date().toLocaleString('zh-CN')}`,
+    `共 ${records.length} 条消息`,
+    '',
+    '---',
+    '',
+  ]
+  for (const r of records) {
+    const role = r.messageType?.toLowerCase() === 'user' ? '用户' : '应用助手'
+    const time = r.createTime ? ` (${r.createTime})` : ''
+    lines.push(`## ${role}${time}`)
+    lines.push('')
+    lines.push(r.message ?? '')
+    lines.push('')
+    lines.push('')
+  }
+  return lines.join('\n')
+}
+
+async function handleExportChatToLocal() {
+  if (!appId.value) {
+    message.error('应用 ID 异常，无法导出')
+    return
+  }
+  exportingChat.value = true
+  const hide = message.loading('正在导出对话…', 0)
+  try {
+    const res = await chatHistoryOpenApiExportAppIdUsingGet({
+      params: { appId: appId.value as unknown as number },
+    })
+    hide()
+    const code = res?.data?.code
+    const data = res?.data?.data
+    if ((code === 0 || code === 20000) && Array.isArray(data)) {
+      if (data.length === 0) {
+        message.info('当前没有可导出的对话记录')
+        return
+      }
+      const md = buildMarkdownFromHistory(data)
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `对话导出-${appInfo.value?.appName ?? appId.value}-${Date.now()}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+      message.success('对话已导出到本地')
+    } else {
+      message.error(res?.data?.message ?? '导出失败')
+    }
+  } catch (e: unknown) {
+    hide()
+    const err = e as { response?: { data?: { message?: string } } }
+    message.error(err?.response?.data?.message ?? '导出失败，请稍后再试')
+  } finally {
+    exportingChat.value = false
+  }
+}
 
 function openApplyFeatured() {
   if (!canApplyFeatured.value) return
@@ -275,6 +370,7 @@ async function sendMessage(text?: string) {
           stopStream()
           hasGenerated.value = true
           iframeKey.value += 1
+          void fetchRoundCount()
           return
         }
         appendAssistantMessageChunk(data)
@@ -289,6 +385,7 @@ async function sendMessage(text?: string) {
       stopStream()
       hasGenerated.value = true
       iframeKey.value += 1
+      void fetchRoundCount()
     })
 
     eventSource.onerror = () => {
@@ -420,6 +517,7 @@ async function loadAppInfo() {
         hasGenerated.value = true
       }
       await loadChatHistory()
+      void fetchRoundCount()
 
       // 检查是否从首页跳转过来（需要自动提交）
       const autoSend = route.query.autoSend === 'true'
@@ -463,7 +561,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  stopStream()
   if (chatMessagesRef.value) {
     chatMessagesRef.value.removeEventListener('scroll', handleChatScroll)
   }
@@ -491,8 +588,23 @@ onBeforeUnmount(() => {
             一句话，生成一个 Web 应用
           </div>
         </div>
+        <div v-if="(isOwner || isAdmin) && (roundCount !== null || loadingRoundCount)" class="round-count-wrap">
+          <span class="round-count-line" aria-hidden="true" />
+          <span class="round-count-text">
+            <template v-if="loadingRoundCount">…</template>
+            <template v-else>共 {{ roundCount }} 轮对话</template>
+          </span>
+        </div>
       </div>
       <div class="top-actions">
+        <a-button
+          v-if="!isReadOnly"
+          class="ghost-btn"
+          :loading="exportingChat"
+          @click="handleExportChatToLocal"
+        >
+          导出对话到本地
+        </a-button>
         <a-button v-if="!isReadOnly" class="ghost-btn" @click="goEdit">
           编辑应用信息
         </a-button>
@@ -641,6 +753,29 @@ onBeforeUnmount(() => {
 .app-subtitle {
   font-size: 12px;
   color: #6b7280;
+}
+
+/* 应用标题右侧：纤细竖线 + 对话轮数，仅创建者/管理员可见 */
+.round-count-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  min-height: 24px;
+}
+
+.round-count-line {
+  width: 1px;
+  height: 20px;
+  background: linear-gradient(to bottom, transparent, rgba(15, 23, 42, 0.12), transparent);
+  flex-shrink: 0;
+}
+
+.round-count-text {
+  font-size: 12px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .top-actions {

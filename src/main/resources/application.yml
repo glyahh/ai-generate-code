@@ -20,10 +20,17 @@ spring:
   profiles:
     active: local
 
+  session:
+    store-type: redis
+    timeout: 2592000 # 30天过期
+
 server:
   port: 8124
   servlet:
     context-path: /api
+    session:
+      cookie:
+        max-age: 2592000
 
 langchain4j:
   open-ai:

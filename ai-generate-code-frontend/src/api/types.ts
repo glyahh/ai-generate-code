@@ -219,6 +219,12 @@ export type BaseResponseBoolean = {
   message?: string;
 };
 
+export type BaseResponseInteger = {
+  code?: number;
+  data?: number;
+  message?: string;
+};
+
 export type BaseResponseListApplyHistoryVO = {
   code?: number;
   data?: ApplyHistoryVO[];
@@ -228,6 +234,12 @@ export type BaseResponseListApplyHistoryVO = {
 export type BaseResponseListApplyVO = {
   code?: number;
   data?: ApplyVO[];
+  message?: string;
+};
+
+export type BaseResponseListChatHistoryVO = {
+  code?: number;
+  data?: ChatHistoryVO[];
   message?: string;
 };
 
@@ -328,6 +340,17 @@ export type ChatHistoryAppAppIdUsingGetResponses = {
   200: BaseResponsePageChatHistory;
 };
 
+export type ChatHistoryOpenApiExportAppIdUsingGetParams = {
+  appId: number;
+};
+
+export type ChatHistoryOpenApiExportAppIdUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListChatHistoryVO;
+};
+
 export type ChatHistoryQueryRequest = {
   pageNum?: number;
   pageSize?: number;
@@ -341,11 +364,32 @@ export type ChatHistoryQueryRequest = {
   lastCreateTime?: string;
 };
 
+export type ChatHistoryRoundCountAppIdUsingGetParams = {
+  appId: number;
+};
+
+export type ChatHistoryRoundCountAppIdUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseInteger;
+};
+
 export type ChatHistorySaveUsingPostResponses = {
   /**
    * OK
    */
   200: BaseResponseBoolean;
+};
+
+export type ChatHistoryVO = {
+  id?: number;
+  message?: string;
+  messageType?: string;
+  appId?: number;
+  userId?: number;
+  createTime?: string;
+  updateTime?: string;
 };
 
 export type DeleteRequest = {

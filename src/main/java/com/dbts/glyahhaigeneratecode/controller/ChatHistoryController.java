@@ -10,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.model.DTO.ChatHistoryQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
@@ -22,6 +23,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 对话历史 控制层。
@@ -83,6 +85,38 @@ public class ChatHistoryController {
      * @param request        HTTP 请求
      * @return 分页结果
      */
+    /**
+     * 【用户】导出某应用全部对话历史（用于生成 Markdown 到本地）
+     * 仅应用创建者和管理员可调用。
+     *
+     * @param appId   应用 id
+     * @param request HTTP 请求
+     * @return 按创建时间升序的对话历史 VO 列表
+     */
+    @GetMapping("/export/{appId}")
+    public BaseResponse<List<ChatHistoryVO>> exportChatHistory(
+            @PathVariable Long appId,
+            HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        List<ChatHistoryVO> list = chatHistoryService.listAllByAppIdForExport(appId, loginUser);
+        return ResultUtils.success(list);
+    }
+
+    /**
+     * 【用户】获取某应用的对话轮数（用户一问 + AI 一答为一轮）
+     * 仅应用创建者和管理员可调用。
+     *
+     * @param appId   应用 id
+     * @param request HTTP 请求
+     * @return 对话轮数
+     */
+    @GetMapping("/roundCount/{appId}")
+    public BaseResponse<Integer> getRoundCount(@PathVariable Long appId, HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        int rounds = chatHistoryService.countRoundsByAppId(appId, loginUser);
+        return ResultUtils.success(rounds);
+    }
+
     @GetMapping("/app/{appId}")
     public BaseResponse<Page<ChatHistory>> listChatHistory(
             @PathVariable Long appId,

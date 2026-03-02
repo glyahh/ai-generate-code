@@ -13,6 +13,7 @@ import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -20,20 +21,29 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
+import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * 对话历史 服务层实现。
+ * <p>
+ * 当对话轮数超过 {@link ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，会通过
+ * {@link #trySummarizeOldestRoundsIfNeeded} 将最早两轮用 AI 总结为一轮并同步到 Redis，
+ * 既不超过 Redis 配置条数限制，又保留有效记忆、节省 Token。
+ * </p>
  *
  * @author <a href="https://github.com/glyahh">glyahh</a>
  */
@@ -43,6 +53,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Resource
     @Lazy
     private AppService appService;
+
+    @Resource
+    private ChatModel chatModel;
+
+    /** 用于同步「前两轮合并为一条」后的消息列表到 Redis，与 DB 保持一致 */
+    @Resource
+    private ChatMemoryStore chatMemoryStore;
 
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
@@ -221,5 +238,185 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         messageWindowChatMemory.add(new AiMessage(multiFileSystemPrompt));
 
         return restoredCount;
+    }
+
+    @Override
+    public List<ChatHistoryVO> listAllByAppIdForExport(Long appId, User loginUser) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+
+        App app = appService.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        boolean isAdmin = UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole());
+        boolean isCreator = app.getUserId().equals(loginUser.getId());
+        ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权导出该应用的对话历史");
+
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq(ChatHistory::getAppId, appId);
+        queryWrapper.orderBy(ChatHistory::getCreateTime, true);
+        List<ChatHistory> list = this.list(queryWrapper);
+        log.info("导出对话历史，appId={}, count={}", appId, list != null ? list.size() : 0);
+        return getChatHistoryVOList(list != null ? list : Collections.emptyList());
+    }
+
+    @Override
+    public int countRoundsByAppId(Long appId, User loginUser) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+
+        App app = appService.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        boolean isAdmin = UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole());
+        boolean isCreator = app.getUserId().equals(loginUser.getId());
+        ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权查看该应用的对话轮数");
+
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq(ChatHistory::getAppId, appId);
+        queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
+        long count = this.count(queryWrapper);
+        log.info("统计对话轮数，appId={}, rounds={}", appId, count);
+        return (int) count;
+    }
+
+    @Override
+    public void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId) {
+        if (appId == null || appId <= 0 || userId == null) {
+            return;
+        }
+        // 仅统计该应用下用户消息条数作为「轮数」，不校验登录态（内部在对话完成后调用）
+        int roundCount = countRoundsByAppIdInternal(appId);
+        if (roundCount <= ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
+            return;
+        }
+        // 关键：每多 2 轮就合并最早 2 轮为 1 轮，循环直到不超过 20 轮（例如 26 轮 → 合并 6 次 → 20 轮）
+        while (roundCount > ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
+            // 获取最早 4 条消息
+            List<ChatHistory> oldestFour = listOldestMessagesForMerge(appId, ChatHistoryConstant.MESSAGES_PER_MERGE);
+            if (oldestFour == null || oldestFour.size() < ChatHistoryConstant.MESSAGES_PER_MERGE) {
+                log.warn("对话合并：不足 {} 条最早消息，跳过本次合并，appId={}", ChatHistoryConstant.MESSAGES_PER_MERGE, appId);
+                break;
+            }
+            String userSummary;
+            String aiSummary;
+            try {
+                String summaryText = summarizeTwoRoundsWithAi(oldestFour);
+                String[] parsed = parseSummaryResponse(summaryText);
+                userSummary = parsed[0];
+                aiSummary = parsed[1];
+            } catch (Exception e) {
+                log.error("AI 总结前两轮对话失败，跳过本次合并，appId={}", appId, e);
+                break;
+            }
+            LocalDateTime oldestCreateTime = oldestFour.getFirst().getCreateTime();
+//            List<Long> toRemoveIds = oldestFour.stream().map(ChatHistory::getId).toList();
+//            this.removeByIds(toRemoveIds);
+//            ChatHistory userSumEntity = ChatHistory.builder()
+//                    .appId(appId)
+//                    .userId(userId)
+//                    .message(userSummary)
+//                    .messageType(ChatHistoryMessageTypeEnum.USER.getValue())
+//                    .createTime(oldestCreateTime)
+//                    .build();
+//            ChatHistory aiSumEntity = ChatHistory.builder()
+//                    .appId(appId)
+//                    .userId(userId)
+//                    .message(aiSummary)
+//                    .messageType(ChatHistoryMessageTypeEnum.AI.getValue())
+//                    .createTime(oldestCreateTime)
+//                    .build();
+//            this.save(userSumEntity);
+//            this.save(aiSumEntity);
+            syncRedisAfterMerge(appId, userSummary, aiSummary);
+            roundCount--;
+            log.info("已将最早两轮合并为一轮并同步 Redis，appId={}, 当前约轮数={}", appId, roundCount);
+        }
+    }
+
+    /**
+     * 仅按 appId 统计用户消息条数（即「轮数」），不做权限校验，供内部压缩逻辑使用。
+     */
+    private int countRoundsByAppIdInternal(Long appId) {
+        QueryWrapper q = new QueryWrapper();
+        q.eq(ChatHistory::getAppId, appId);
+        q.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
+        return (int) this.count(q);
+    }
+
+    /**
+     * 按创建时间正序取该应用下最早的若干条消息（用于合并为「一轮」）。
+     */
+    private List<ChatHistory> listOldestMessagesForMerge(Long appId, int limit) {
+        QueryWrapper q = new QueryWrapper();
+        q.eq(ChatHistory::getAppId, appId);
+        q.orderBy(ChatHistory::getCreateTime, true);
+        q.limit(limit);
+        return this.list(q);
+    }
+
+    /**
+     * 调用大模型将两轮对话（4 条消息）总结为「用户总结 + AI 总结」的简短文本，便于解析。
+     * 使用简单字符串拼接构造 prompt，避免引入额外依赖。
+     */
+    private String summarizeTwoRoundsWithAi(List<ChatHistory> fourMessages) {
+        StringBuilder content = new StringBuilder();
+        for (int i = 0; i < fourMessages.size(); i++) {
+            ChatHistory m = fourMessages.get(i);
+            String role = ChatHistoryMessageTypeEnum.USER.getValue().equals(m.getMessageType()) ? "用户" : "AI";
+            content.append("第").append((i / 2) + 1).append("轮-").append(role).append("：").append(m.getMessage()).append("\n");
+        }
+        String prompt = "你是一个对话总结助手。请将以下两轮对话压缩为一段简要总结，严格按以下格式输出，不要其他内容：\n"
+                + "【用户总结】用户的主要问题和诉求摘要\n"
+                + "【AI总结】AI的回复要点摘要\n\n"
+                + "对话内容：\n" + content;
+        return chatModel.chat(prompt);
+    }
+
+    /**
+     * 从 AI 返回文本中解析出「用户总结」和「AI总结」两段。若格式不符则退回简短占位，避免写入脏数据。
+     */
+    private String[] parseSummaryResponse(String summaryText) {
+        String userSummary = "（历史对话摘要）";
+        String aiSummary = "（历史回复摘要）";
+        if (StrUtil.isBlank(summaryText)) {
+            return new String[]{userSummary, aiSummary};
+        }
+        String markerUser = "【用户总结】";
+        String markerAi = "【AI总结】";
+        int idxUser = summaryText.indexOf(markerUser);
+        int idxAi = summaryText.indexOf(markerAi);
+        if (idxUser >= 0 && idxAi > idxUser) {
+            userSummary = summaryText.substring(idxUser + markerUser.length(), idxAi).trim();
+            if (userSummary.length() > 2000) {
+                userSummary = userSummary.substring(0, 2000);
+            }
+            aiSummary = summaryText.substring(idxAi + markerAi.length()).trim();
+            if (aiSummary.length() > 2000) {
+                aiSummary = aiSummary.substring(0, 2000);
+            }
+        }
+        return new String[]{userSummary, aiSummary};
+    }
+
+    /**
+     * 将 Redis 中该应用的前 4 条消息替换为 2 条（用户总结、AI 总结），与 DB 的「两轮合并为一轮」保持一致。
+     * 使用 ChatMemoryStore 的 getMessages + updateMessages，保证与 MessageWindowChatMemory 共用同一存储。
+     */
+    private void syncRedisAfterMerge(Long appId, String userSummary, String aiSummary) {
+        try {
+            List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
+            if (messages == null || messages.size() < ChatHistoryConstant.MESSAGES_PER_MERGE) {
+                return;
+            }
+            List<ChatMessage> newList = new ArrayList<>(messages);
+            for (int i = 0; i < ChatHistoryConstant.MESSAGES_PER_MERGE; i++) {
+                newList.remove(0);
+            }
+            // 注意：先插 AI 再插 User，这样 insert(0, User) 后顺序为 [User, AI, ...]，与 DB 中「一轮=用户+AI」一致
+            newList.add(0, new AiMessage(aiSummary));
+            newList.add(0, new UserMessage(userSummary));
+            chatMemoryStore.updateMessages(appId, newList);
+        } catch (Exception e) {
+            log.error("同步 Redis 对话记忆失败，appId={}", appId, e);
+        }
     }
 }

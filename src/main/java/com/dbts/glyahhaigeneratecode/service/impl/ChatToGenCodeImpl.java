@@ -77,6 +77,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
                     if (StrUtil.isNotBlank(fullResponse)) {
                         chatHistoryService.addChatMessage(appId, fullResponse,
                                 ChatHistoryMessageTypeEnum.AI.getValue(), userId);
+                        // 超过 20 轮时，将最早两轮总结为一轮并同步 Redis，避免超限并节省 Token
+                        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, userId);
                     }
                 })
                 .doOnError(e -> {

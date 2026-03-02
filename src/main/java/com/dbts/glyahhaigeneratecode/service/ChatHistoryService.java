@@ -82,4 +82,33 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 转换后的数量
      */
     int turnHistoryToMemory (Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount);
+
+    /**
+     * 查询某应用全部对话历史（用于导出到本地，仅应用创建者或管理员可调用）
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户（用于权限校验）
+     * @return 按创建时间升序的对话历史 VO 列表
+     */
+    List<ChatHistoryVO> listAllByAppIdForExport(Long appId, User loginUser);
+
+    /**
+     * 统计某应用的对话轮数（用户一问 + AI 一答为一轮，按用户消息条数统计）
+     * 仅应用创建者或管理员可调用。
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户（用于权限校验）
+     * @return 对话轮数，非负整数
+     */
+    int countRoundsByAppId(Long appId, User loginUser);
+
+    /**
+     * 当对话轮数超过 {@link com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，
+     * 将最早的两轮用 AI 总结为一轮并写回 DB，同时把 Redis 中前 4 条替换为 2 条，保证不超限且记忆有效。
+     * 由对话完成后（如流式回复 doOnComplete）调用，无需权限校验（内部按 appId 操作）。
+     *
+     * @param appId  应用 id
+     * @param userId 用户 id（用于写入总结记录的 userId）
+     */
+    void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId);
 }

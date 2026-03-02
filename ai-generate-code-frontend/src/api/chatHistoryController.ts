@@ -47,6 +47,45 @@ export function chatHistoryAppAppIdUsingGet({
   );
 }
 
+/** 此处后端没有提供注释 GET /chatHistory/export/${param0} */
+export function chatHistoryOpenApiExportAppIdUsingGet({
+  params,
+  options,
+}: {
+  // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
+  params: API.ChatHistoryOpenApiExportAppIdUsingGetParams;
+  options?: { [key: string]: unknown };
+}) {
+  const { appId: param0, ...queryParams } = params;
+
+  return request<API.BaseResponseListChatHistoryVO>(
+    `/chatHistory/export/${param0}`,
+    {
+      method: 'GET',
+      params: { ...queryParams },
+      ...(options || {}),
+    }
+  );
+}
+
+/** 此处后端没有提供注释 GET /chatHistory/roundCount/${param0} */
+export function chatHistoryRoundCountAppIdUsingGet({
+  params,
+  options,
+}: {
+  // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
+  params: API.ChatHistoryRoundCountAppIdUsingGetParams;
+  options?: { [key: string]: unknown };
+}) {
+  const { appId: param0, ...queryParams } = params;
+
+  return request<API.BaseResponseInteger>(`/chatHistory/roundCount/${param0}`, {
+    method: 'GET',
+    params: { ...queryParams },
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 POST /chatHistory/save */
 export function chatHistorySaveUsingPost({
   body,
