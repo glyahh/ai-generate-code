@@ -2,6 +2,7 @@ package com.dbts.glyahhaigeneratecode.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.core.AiCodeGeneratorFacade;
+import com.dbts.glyahhaigeneratecode.core.handler.StreamHandlerExecutor;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
@@ -31,6 +32,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
 
     private final ChatHistoryService chatHistoryService;
+
+    private final StreamHandlerExecutor streamHandlerExecutor;
 
     /**
      * 统一入口：基于应用配置和用户输入触发代码生成（流式）
@@ -70,26 +73,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         StringBuilder aiResponseBuilder = new StringBuilder();
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
 
-        return result
-                .doOnNext(aiResponseBuilder::append)
-                .doOnComplete(() -> {
-                    String fullResponse = aiResponseBuilder.toString();
-                    if (StrUtil.isNotBlank(fullResponse)) {
-                        chatHistoryService.addChatMessage(appId, fullResponse,
-                                ChatHistoryMessageTypeEnum.AI.getValue(), userId);
-                        // 超过 20 轮时，将最早两轮总结为一轮并同步 Redis，避免超限并节省 Token
-                        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, userId);
-                    }
-                })
-                .doOnError(e -> {
-                    log.error("AI 生成代码异常, appId={}, userId={}", appId, userId, e);
-                    try {
-                        chatHistoryService.addChatMessage(appId, "AI 回复异常: " + e.getMessage(),
-                                ChatHistoryMessageTypeEnum.ERROR.getValue(), userId);
-                    } catch (Exception ex) {
-                        log.error("保存错误消息到对话历史失败, appId={}, userId={}", appId, userId, ex);
-                    }
-                });
+        // 7. 添加 AI 回复到对话历史,转换格式并返回给前端
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum);
     }
 
     /**

@@ -35,12 +35,16 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-devtools</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
+        <!-- 开发阶段的热重启工具（会引入双类加载器，导致自定义 dev.langchain4j 与 Maven 依赖冲突）
+             为了让本地改过的 dev.langchain4j 类真正覆盖依赖包中的同名类，这里先移除 devtools 依赖。
+             如需再次开启热重启，可以在不复制第三方源码的前提下再加回此依赖。 -->
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.boot</groupId>-->
+<!--            <artifactId>spring-boot-devtools</artifactId>-->
+<!--            <scope>runtime</scope>-->
+<!--            <optional>true</optional>-->
+<!--        </dependency>-->
+
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>

@@ -2,7 +2,10 @@ package com.dbts.glyahhaigeneratecode.ai;
 
 import com.dbts.glyahhaigeneratecode.ai.model.HtmlCodeResult;
 import com.dbts.glyahhaigeneratecode.ai.model.MultiFileCodeResult;
+import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.service.UserMessage;
 import reactor.core.publisher.Flux;
 
 public interface aiCodeGeneratorService {
@@ -41,4 +44,14 @@ public interface aiCodeGeneratorService {
      */
     @SystemMessage(fromResource = "Prompt/Various_File_Prompt.txt")
     Flux<String> generateCodeMultiFileStream(String userMessage);
+
+
+    /**
+     * 使用流式输出返回Vue文件
+     * @param appId  交给ai记忆
+     * @param userMessage
+     * @return
+     */
+    @SystemMessage(fromResource = "Prompt/Vue_File_Prompt.txt")
+    TokenStream generateCodeVueFileStream(@MemoryId Long appId, @UserMessage String userMessage);
 }

@@ -1,7 +1,7 @@
 package com.dbts.glyahhaigeneratecode.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.io.FileUtil;
+import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -12,6 +12,7 @@ import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
@@ -30,7 +31,9 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.core.io.ClassPathResource;
 
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -57,7 +60,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Resource
     private ChatModel chatModel;
 
-    /** 用于同步「前两轮合并为一条」后的消息列表到 Redis，与 DB 保持一致 */
+    /** 用于在 Redis 中管理对话记忆和轮数统计，仅通过压缩 Redis 降低上下文长度（不修改 DB） */
     @Resource
     private ChatMemoryStore chatMemoryStore;
 
@@ -231,13 +234,56 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
         log.info("已将对话历史加载到内存，appId={}, count={}", addId, restoredCount);
 
-        // 添加系统提示词：读取提示词文件内容到对话内存，避免只写入文件路径
-        String htmlSystemPrompt = FileUtil.readUtf8String("D:\\mainJava\\all Code\\program\\glyahh-ai-generate-code\\src\\main\\resources\\Prompt\\Single_File_Prompt.txt");
-        String multiFileSystemPrompt = FileUtil.readUtf8String("D:\\mainJava\\all Code\\program\\glyahh-ai-generate-code\\src\\main\\resources\\Prompt\\Various_File_Prompt.txt");
-        messageWindowChatMemory.add(new AiMessage(htmlSystemPrompt));
-        messageWindowChatMemory.add(new AiMessage(multiFileSystemPrompt));
+        // 根据应用的代码生成类型追加对应的系统提示词到对话内存，避免混入无关 Prompt 干扰上下文
+        appendSystemPromptToMemory(addId, messageWindowChatMemory);
 
         return restoredCount;
+    }
+
+    /**
+     * 根据应用的代码生成类型，将对应的系统 Prompt 追加到 Redis 管理的对话内存中。
+     * HTML / MULTI_FILE / VUE 分别只追加自身对应的系统提示词，避免不同模式之间相互干扰。
+     */
+    private void appendSystemPromptToMemory(Long appId, MessageWindowChatMemory messageWindowChatMemory) {
+        App app = appService.getById(appId);
+        if (app == null) {
+            log.warn("追加系统提示词失败，应用不存在, appId={}", appId);
+            return;
+        }
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
+        if (codeGenTypeEnum == null) {
+            log.warn("追加系统提示词失败，应用的 codeGenType 无效, appId={}, codeGenType={}", appId, app.getCodeGenType());
+            return;
+        }
+
+        String promptPath;
+        // 按代码生成类型选择不同的系统 Prompt
+        switch (codeGenTypeEnum) {
+            case HTML -> promptPath = "Prompt/Single_File_Prompt.txt";
+            case MULTI_FILE -> promptPath = "Prompt/Various_File_Prompt.txt";
+            case VUE -> promptPath = "Prompt/Vue_File_Prompt";
+            default -> {
+                log.warn("追加系统提示词失败，不支持的 codeGenType, appId={}, codeGenType={}", appId, codeGenTypeEnum);
+                return;
+            }
+        }
+
+        String systemPrompt = readPromptFromClasspath(promptPath);
+        if (StrUtil.isNotBlank(systemPrompt)) {
+            messageWindowChatMemory.add(new AiMessage(systemPrompt));
+        }
+    }
+
+    /**
+     * 从 classpath 读取系统 Prompt，避免硬编码磁盘绝对路径，适配不同部署环境。
+     */
+    private String readPromptFromClasspath(String classpathLocation) {
+        try (InputStream inputStream = new ClassPathResource(classpathLocation).getInputStream()) {
+            return IoUtil.readUtf8(inputStream);
+        } catch (Exception e) {
+            log.error("读取系统提示词失败, path={}", classpathLocation, e);
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "读取系统提示词失败");
+        }
     }
 
     @Override
@@ -333,13 +379,29 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     /**
-     * 仅按 appId 统计用户消息条数（即「轮数」），不做权限校验，供内部压缩逻辑使用。
+     * 仅按 appId 统计 Redis 中用户消息条数（即「轮数」），不做权限校验，供内部压缩逻辑使用。
+     * 若 Redis 统计失败，则回退到基于 DB 的统计，避免影响整体流程。
      */
     private int countRoundsByAppIdInternal(Long appId) {
-        QueryWrapper q = new QueryWrapper();
-        q.eq(ChatHistory::getAppId, appId);
-        q.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
-        return (int) this.count(q);
+        try {
+            List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
+            if (messages == null || messages.isEmpty()) {
+                return 0;
+            }
+            int userCount = 0;
+            for (ChatMessage message : messages) {
+                if (message instanceof UserMessage) {
+                    userCount++;
+                }
+            }
+            return userCount;
+        } catch (Exception e) {
+            log.warn("从 Redis 统计对话轮数失败，回退到数据库统计, appId={}", appId, e);
+            QueryWrapper q = new QueryWrapper();
+            q.eq(ChatHistory::getAppId, appId);
+            q.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
+            return (int) this.count(q);
+        }
     }
 
     /**
@@ -398,7 +460,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     /**
-     * 将 Redis 中该应用的前 4 条消息替换为 2 条（用户总结、AI 总结），与 DB 的「两轮合并为一轮」保持一致。
+     * 将 Redis 中该应用的前 4 条消息替换为 2 条（用户总结、AI 总结），仅在 Redis 中压缩上下文，不修改 DB。
      * 使用 ChatMemoryStore 的 getMessages + updateMessages，保证与 MessageWindowChatMemory 共用同一存储。
      */
     private void syncRedisAfterMerge(Long appId, String userSummary, String aiSummary) {
@@ -411,7 +473,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             for (int i = 0; i < ChatHistoryConstant.MESSAGES_PER_MERGE; i++) {
                 newList.remove(0);
             }
-            // 注意：先插 AI 再插 User，这样 insert(0, User) 后顺序为 [User, AI, ...]，与 DB 中「一轮=用户+AI」一致
+            // 注意：先插 AI 再插 User，这样 insert(0, User) 后顺序为 [User, AI, ...]，与「一轮=用户+AI」约定顺序保持一致
             newList.add(0, new AiMessage(aiSummary));
             newList.add(0, new UserMessage(userSummary));
             chatMemoryStore.updateMessages(appId, newList);

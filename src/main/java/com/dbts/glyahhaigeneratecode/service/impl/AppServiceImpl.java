@@ -5,8 +5,10 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
+import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.mapper.AppMapper;
@@ -19,8 +21,10 @@ import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -37,10 +41,14 @@ import java.util.stream.Collectors;
  * @author <a href="https://github.com/glyahh">glyahh</a>
  */
 @Service
+@Slf4j
 public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private vueProjectBuilder vueProjectBuilder;
 
     @Override
     public long createApp(App app) {
@@ -244,7 +252,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 5. 根据应用文件类型超找到本应该的路径 (参考路径生成代码)
         String codeGenType = app.getCodeGenType();
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
-        // 更稳妥的获取枚举类
         if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
             try {
                 codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
@@ -255,29 +262,56 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new MyException(ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
         }
         // 自动处理分隔符
-        Path sourceDir = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + appId);
+        Path sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + appId);
+
 
         // 6. 校验路径下的文件是否存在
-        if (!Files.isDirectory(sourceDir)) {
+        if (!Files.isDirectory(sourceDirPath)) {
             throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物目录不存在，请先生成代码再部署");
         }
-        Path indexPath = sourceDir.resolve("index.html");
+        Path indexPath = sourceDirPath.resolve("index.html");
         if (!Files.isRegularFile(indexPath)) {
             throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物缺少 index.html, 请删除再试~");
         }
         if (CodeGenTypeEnum.MULTI_FILE.equals(codeGenTypeEnum)) {
-            if (!Files.isRegularFile(sourceDir.resolve("style.css"))) {
+            if (!Files.isRegularFile(sourceDirPath.resolve("style.css"))) {
                 throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物缺少 style.css, 请删除再试~");
             }
-            if (!Files.isRegularFile(sourceDir.resolve("script.js"))) {
+            if (!Files.isRegularFile(sourceDirPath.resolve("script.js"))) {
                 throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用代码产物缺少 script.js, 请删除再试~");
             }
         }
 
+        // 6. 检查源目录是否存在
+        File sourceDir = new File(String.valueOf(sourceDirPath));
+        if (!sourceDir.exists() || !sourceDir.isDirectory()) {
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "应用代码不存在，请先生成代码");
+        }
+
+
+        // 7. Vue 项目特殊处理：执行构建
+        if (codeGenTypeEnum == CodeGenTypeEnum.VUE) {
+            // Vue 项目需要构建
+            boolean buildSuccess = vueProjectBuilder.buildProject(String.valueOf(sourceDirPath));
+            ThrowUtils.throwIf(!buildSuccess, ErrorCode.SYSTEM_ERROR, "Vue 项目构建失败，请检查代码和依赖");
+            // 检查 目标目录下 vue文件是否存在
+            File distDir = new File(String.valueOf(sourceDirPath), "dist");
+            ThrowUtils.throwIf(!distDir.exists(), ErrorCode.SYSTEM_ERROR, "Vue 项目构建完成但未生成 dist 目录");
+            // 将 dist 目录作为部署源
+            sourceDir = distDir;
+            log.info("Vue 项目构建成功，将部署 dist 目录: {}", distDir.getAbsolutePath());
+        }
+
+
+        // 8. 复制文件到部署目录
+        String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
+
+
+
         // 7. 复制文件到deploy文件夹下
         Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
         try {
-            FileUtil.copyContent(sourceDir.toFile(), deployDir.toFile(), true);
+            FileUtil.copyContent(sourceDir, deployDir.toFile(), true);
         } catch (Exception e) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "部署文件复制失败: " + e.getMessage());
         }

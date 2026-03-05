@@ -104,7 +104,7 @@ public interface ChatHistoryService extends IService<ChatHistory> {
 
     /**
      * 当对话轮数超过 {@link com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，
-     * 将最早的两轮用 AI 总结为一轮并写回 DB，同时把 Redis 中前 4 条替换为 2 条，保证不超限且记忆有效。
+     * 将最早的两轮用 AI 总结为一轮，并仅在 Redis 中用 2 条摘要消息替换前 4 条原始消息，用于压缩上下文（不修改 DB）。
      * 由对话完成后（如流式回复 doOnComplete）调用，无需权限校验（内部按 appId 操作）。
      *
      * @param appId  应用 id
