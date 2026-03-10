@@ -68,9 +68,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         // 5. 保存用户消息到对话历史
         chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), user.getId());
 
-        // 6. 调用 AI 生成代码（流式），收集完整回复后保存 AI 消息
-        Long userId = user.getId();
-        StringBuilder aiResponseBuilder = new StringBuilder();
+        // 6. 调用 AI 生成代码（流式）
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
 
         // 7. 添加 AI 回复到对话历史,转换格式并返回给前端

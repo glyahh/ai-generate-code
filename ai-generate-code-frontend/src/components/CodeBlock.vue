@@ -32,8 +32,30 @@ const highlightedCode = computed(() => {
   // 简单的关键词高亮（适用于常见语言）
   let highlighted = escaped
 
+  // Vue 单文件组件：按 HTML 模板 + 属性高亮，兼容 <template>/<script>/<style>
+  if (lang === 'vue') {
+    highlighted = escaped
+      // 高亮块级标签名
+      .replace(
+        /(&lt;\/?)(template|script|style)(\s*[^&]*?)(&gt;)/g,
+        '$1<span class="code-tag code-tag-block">$2</span>$3$4',
+      )
+      // 其他标签
+      .replace(
+        /(&lt;\/?)([\w-]+)(\s*[^&]*?)(&gt;)/g,
+        '$1<span class="code-tag">$2</span>$3$4',
+      )
+      // 属性与属性值
+      .replace(
+        /(\w+)(\s*=\s*)(['"])([^'"]*?)(\3)/g,
+        '<span class="code-attr">$1</span>$2$3<span class="code-value">$4</span>$5',
+      )
+      // 行内注释（例如 // 或 /* */ 出现在 <script> 中）
+      .replace(/(\/\/.*$)/gm, '<span class="code-comment">$1</span>')
+      .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="code-comment">$1</span>')
+  }
   // CSS 关键词
-  if (lang === 'css' || lang === 'scss' || lang === 'less') {
+  else if (lang === 'css' || lang === 'scss' || lang === 'less') {
     highlighted = escaped
       .replace(/(\w+)(\s*:\s*)/g, '<span class="code-property">$1</span>$2')
       .replace(/(:\s*)([^;]+)(;)/g, '$1<span class="code-value">$2</span>$3')

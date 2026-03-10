@@ -52,11 +52,14 @@ public class JsonMessageStreamHandler {
         // 用于跟踪已经见过的工具ID，判断是否是第一次调用
         Set<String> seenToolIds = new HashSet<>();
         return originFlux
+
                 .map(chunk -> {
                     // 解析每个 JSON 消息块,见下方函数
                     return handleJsonMessageChunk(chunk, chatHistoryStringBuilder, seenToolIds);
                 })
+
                 .filter(StrUtil::isNotEmpty) // 过滤空字串
+
                 .doOnComplete(() -> {
                     // 流式响应完成后，添加 AI 消息到对话历史, 保存到MySQL中
                     String aiResponse = chatHistoryStringBuilder.toString();
@@ -68,6 +71,7 @@ public class JsonMessageStreamHandler {
                     // 使用虚拟线程异步调用构建项目
                     vueProjectBuilder.BuildVirtualThreadForBuildVue(path);
                 })
+
                 .doOnError(error -> {
                     // 如果AI回复失败，也要记录错误消息
                     String errorMessage = "AI回复失败: " + error.getMessage();
@@ -77,6 +81,7 @@ public class JsonMessageStreamHandler {
 
     /**
      * 解析并收集 TokenStream 数据
+     * 将不同的chunk转化成对应的json字符串
      */
     private String handleJsonMessageChunk(String chunk, StringBuilder chatHistoryStringBuilder, Set<String> seenToolIds) {
         // 解析 JSON

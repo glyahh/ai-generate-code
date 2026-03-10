@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message, Button as AButton, Input as AInput, Spin as ASpin, Empty as AEmpty, Modal as AModal } from 'ant-design-vue'
+import {
+  message,
+  Button as AButton,
+  Input as AInput,
+  Spin as ASpin,
+  Empty as AEmpty,
+  Modal as AModal,
+  Tooltip as ATooltip,
+} from 'ant-design-vue'
 import type { AppVO, ChatHistory } from '@/api'
 import { appGetVoUsingGet, appApplyUsingPost } from '@/api/appController'
 import {
@@ -12,6 +20,7 @@ import {
 import { UserLoginStore } from '@/stores/UserLogin'
 import { parseMarkdownWithCode } from '@/utils/markdownParser'
 import CodeBlock from '@/components/CodeBlock.vue'
+import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8124/api'
 const PREVIEW_BASE_URL =
@@ -66,6 +75,46 @@ const hasGenerated = ref(false)
 /** 当前会话新产生的消息（不含历史） */
 const sessionMessages = ref<ChatMessage[]>([])
 
+type GeneratedFileItem = {
+  path: string
+  language?: string
+  content: string
+  updatedAt: number
+}
+
+/** 从流式工具输出中提取到的“生成文件”列表（用于 Vue 项目文件回显） */
+const generatedFiles = ref<GeneratedFileItem[]>([])
+const generatedFileMap = ref<Record<string, GeneratedFileItem>>({})
+const toolSelectHintShown = ref(false)
+
+const filesModalOpen = ref(false)
+const activeFilePath = ref<string>('')
+const activeFile = computed(() => {
+  const p = activeFilePath.value
+  if (!p) return null
+  return generatedFileMap.value[p] ?? null
+})
+const lastPreviewProbing = ref<{
+  active: boolean
+  attempts: number
+  maxAttempts: number
+  timer: number | null
+}>({
+  active: false,
+  attempts: 0,
+  maxAttempts: 10,
+  timer: null,
+})
+const refreshAppCtaVisible = ref(false)
+const refreshAppCtaHint = ref('生成完成后建议刷新一次，以避免浏览器缓存 / 资源加载时序导致预览仍显示旧内容。')
+const refreshingApp = ref(false)
+
+const isVueProject = computed(() => {
+  if (!appInfo.value) return false
+  const codeGenType = normalizeCodeGenType(appInfo.value.codeGenType)
+  return codeGenType === CodeGenTypeEnum.VUE_PROJECT
+})
+
 /** 将 ChatHistory 转为 ChatMessage */
 function historyToMessage(r: ChatHistory): ChatMessage {
   const role = (r.messageType?.toLowerCase() === 'user' ? 'user' : 'assistant') as 'user' | 'assistant'
@@ -95,6 +144,8 @@ const displayMessages = computed(() => {
 
 /** 是否应展示网站：仅在已生成过静态页面时展示，避免首次对话未生成完成就挂载 iframe 导致白屏 */
 const shouldShowWebsite = computed(() => {
+  // Vue 项目：以静态入口探测为准 + 显示托底刷新按钮，避免仅依赖 hasGeneratedCode 导致刷新后误判“未生成”
+  if (isVueProject.value) return hasGenerated.value || !!appInfo.value?.hasGeneratedCode
   return !!appInfo.value?.hasGeneratedCode || hasGenerated.value
 })
 const iframeKey = ref(0)
@@ -241,21 +292,131 @@ async function handleApplyFeaturedConfirm() {
 
 const previewUrl = computed(() => {
   if (!appInfo.value || !appId.value) return ''
-  const rawType = String(appInfo.value.codeGenType ?? '').trim()
-  const lower = rawType.toLowerCase()
-  // 后端可能返回枚举名（HTML / MULTI_FILE），但静态目录使用 value（html / multi_file）
-  const codeGenType =
-    lower === 'html' || lower === 'multi_file'
-      ? lower
-      : rawType.toUpperCase() === 'HTML'
-        ? 'html'
-        : rawType.toUpperCase() === 'MULTI_FILE'
-          ? 'multi_file'
-          : 'multi_file'
+  const codeGenType = normalizeCodeGenType(appInfo.value.codeGenType)
   const base = PREVIEW_BASE_URL.replace(/\/$/, '')
   // 使用版本号避免浏览器缓存旧内容；同时配合 iframeKey 触发刷新
-  return `${base}/${codeGenType}_${appId.value}/?v=${iframeKey.value}`
+  const entry = getPreviewEntryPath(codeGenType)
+  const entryPart = entry ? `/${entry}` : '/'
+  return `${base}/${codeGenType}_${appId.value}${entryPart}?v=${iframeKey.value}`
 })
+
+function normalizeCodeGenType(raw: unknown): string {
+  const rawType = String(raw ?? '').trim()
+  const lower = rawType.toLowerCase()
+  // 后端可能返回枚举名（HTML / MULTI_FILE / VUE_PROJECT），但静态目录使用 value（html / multi_file / vue_project）
+  if (lower === CodeGenTypeEnum.HTML) return CodeGenTypeEnum.HTML
+  if (lower === CodeGenTypeEnum.MULTI_FILE) return CodeGenTypeEnum.MULTI_FILE
+  if (lower === CodeGenTypeEnum.VUE_PROJECT) return CodeGenTypeEnum.VUE_PROJECT
+  const upper = rawType.toUpperCase()
+  if (upper === 'HTML') return CodeGenTypeEnum.HTML
+  if (upper === 'MULTI_FILE') return CodeGenTypeEnum.MULTI_FILE
+  if (upper === 'VUE_PROJECT' || upper === 'VUE') return CodeGenTypeEnum.VUE_PROJECT
+  return CodeGenTypeEnum.MULTI_FILE
+}
+
+function getPreviewEntryPath(codeGenType: string): string {
+  if (codeGenType === CodeGenTypeEnum.VUE_PROJECT) return 'dist/index.html'
+  return ''
+}
+
+function stopPreviewProbing() {
+  if (lastPreviewProbing.value.timer != null) {
+    window.clearTimeout(lastPreviewProbing.value.timer)
+  }
+  lastPreviewProbing.value.active = false
+  lastPreviewProbing.value.timer = null
+  lastPreviewProbing.value.attempts = 0
+}
+
+async function probePreviewReady(): Promise<boolean> {
+  if (!appInfo.value || !appId.value) return false
+  const codeGenType = normalizeCodeGenType(appInfo.value.codeGenType)
+  const base = PREVIEW_BASE_URL.replace(/\/$/, '')
+  const entry = getPreviewEntryPath(codeGenType)
+  const entryPart = entry ? `/${entry}` : '/index.html'
+  const url = `${base}/${codeGenType}_${appId.value}${entryPart}?probe=${Date.now()}`
+  try {
+    const res = await fetch(url, { method: 'GET', credentials: 'include', cache: 'no-store' as RequestCache })
+    if (!res.ok) return false
+    const ct = (res.headers.get('content-type') ?? '').toLowerCase()
+    // 静态入口一般为 html；若是其他类型也视为可访问（某些构建产物可能返回 application/octet-stream）
+    if (ct.includes('text/html')) return true
+    // 内容长度不可靠（可能 gzip / chunked），这里尽量少读：只要能读取到非空就算 ready
+    const text = await res.text()
+    return !!text && text.trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+function showRefreshAppCta(reason?: string) {
+  refreshAppCtaVisible.value = true
+  if (reason && reason.trim()) {
+    refreshAppCtaHint.value = reason.trim()
+  }
+}
+
+async function handleManualRefreshApp() {
+  if (!appInfo.value || !appId.value) return
+  if (!isVueProject.value) return
+  refreshingApp.value = true
+  try {
+    // 强制刷新 iframe（key 变化会重新挂载）
+    iframeKey.value += 1
+    // 刷新后立即探测一次，若已 ready 则认为可预览（即使后端 hasGeneratedCode 未同步）
+    const ready = await probePreviewReady()
+    if (ready) {
+      hasGenerated.value = true
+    } else {
+      // 未 ready 也保留按钮，避免用户无从操作
+      showRefreshAppCta('当前预览入口暂未就绪（可能仍在写入/构建）。建议稍等片刻后再次点击“刷新应用”。')
+    }
+  } finally {
+    refreshingApp.value = false
+  }
+}
+
+async function refreshPreviewWithRetry() {
+  stopPreviewProbing()
+  lastPreviewProbing.value.active = true
+  lastPreviewProbing.value.attempts = 0
+  refreshAppCtaVisible.value = false
+
+  const loop = async () => {
+    if (!lastPreviewProbing.value.active) return
+    lastPreviewProbing.value.attempts += 1
+    const ready = await probePreviewReady()
+    if (ready) {
+      hasGenerated.value = true
+      iframeKey.value += 1
+      stopPreviewProbing()
+      // 生成完成后仍提供托底刷新按钮（避免缓存/资源时序导致的“看不到”）
+      if (isVueProject.value) {
+        showRefreshAppCta(
+          'Vue 项目构建产物可能受浏览器缓存或资源加载时序影响。若预览仍异常，点一次“刷新应用”可强制重载 iframe。',
+        )
+      }
+      return
+    }
+    if (lastPreviewProbing.value.attempts >= lastPreviewProbing.value.maxAttempts) {
+      // 最后兜底刷新一次（哪怕还没探测到），避免用户一直看旧内容
+      iframeKey.value += 1
+      stopPreviewProbing()
+      if (isVueProject.value) {
+        showRefreshAppCta(
+          '已完成多次探测但入口仍可能未就绪/被缓存。你可以点击“刷新应用”强制重载预览（必要时多点几次）。',
+        )
+      }
+      return
+    }
+    const delay = Math.min(2500, 500 + lastPreviewProbing.value.attempts * 250)
+    lastPreviewProbing.value.timer = window.setTimeout(() => {
+      void loop()
+    }, delay)
+  }
+
+  void loop()
+}
 
 function appendUserMessage(text: string) {
   sessionMessages.value.push({
@@ -291,6 +452,100 @@ function appendAssistantMessageChunk(chunk: string) {
       scrollToBottom()
     }
   })
+}
+
+function showGeneratedFilesModal() {
+  filesModalOpen.value = true
+  const list = generatedFiles.value
+  const last = list.length > 0 ? (list[list.length - 1] as GeneratedFileItem | undefined) : undefined
+  if (last) activeFilePath.value = last.path
+}
+
+function parseToolWriteFileBlock(chunk: string) {
+  // 后端 `JsonMessageStreamHandler` 输出格式：
+  // [工具调用] 写入文件 path
+  // ```suffix
+  // content
+  // ```
+  const m = chunk.match(/\[工具调用\]\s*写入文件\s+([^\n]+)\n```(\w+)?\n([\s\S]*?)\n```\s*/m)
+  if (!m) return null
+  const filePath = (m[1] ?? '').trim()
+  const lang = (m[2] ?? '').trim()
+  const content = m[3] ?? ''
+  if (!filePath) return null
+  return { filePath, lang, content }
+}
+
+function recordGeneratedFile(filePath: string, language: string | undefined, content: string) {
+  const now = Date.now()
+  const existing = generatedFileMap.value[filePath]
+  const item: GeneratedFileItem = {
+    path: filePath,
+    language: language || existing?.language,
+    content,
+    updatedAt: now,
+  }
+  generatedFileMap.value = {
+    ...generatedFileMap.value,
+    [filePath]: item,
+  }
+  if (!existing) {
+    generatedFiles.value = [...generatedFiles.value, item]
+  } else {
+    generatedFiles.value = generatedFiles.value.map((it) => (it.path === filePath ? item : it))
+  }
+}
+
+function getFileNameColorClass(path: string): string {
+  const lower = path.toLowerCase()
+  if (lower.endsWith('.vue')) return 'file-path--vue'
+  if (lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.js') || lower.endsWith('.jsx'))
+    return 'file-path--script'
+  if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'file-path--style'
+  if (lower.endsWith('.html')) return 'file-path--html'
+  if (
+    lower.endsWith('package.json') ||
+    lower.endsWith('vite.config.js') ||
+    lower.endsWith('tsconfig.json') ||
+    lower.endsWith('eslint.config.js') ||
+    lower.endsWith('postcss.config.js')
+  ) {
+    return 'file-path--config'
+  }
+  if (/\.(png|jpg|jpeg|gif|svg|webp)$/.test(lower)) return 'file-path--asset'
+  return 'file-path--default'
+}
+
+function isCoreFile(path: string): boolean {
+  const lower = path.toLowerCase()
+  if (lower.includes('/src/main.') || lower.includes('\\src\\main.')) return true
+  if (lower.endsWith('/src/app.vue') || lower.endsWith('\\src\\app.vue')) return true
+  if (lower.endsWith('/src/router/index.js') || lower.endsWith('\\src\\router\\index.js')) return true
+  if (lower.endsWith('/src/router/index.ts') || lower.endsWith('\\src\\router\\index.ts')) return true
+  if (lower.includes('/src/pages/') || lower.includes('\\src\\pages\\')) return true
+  if (lower.endsWith('/src/styles/global.css') || lower.endsWith('\\src\\styles\\global.css')) return true
+  if (lower.endsWith('/index.html') && !lower.includes('node_modules')) return true
+  if (lower.endsWith('/vite.config.js') || lower.endsWith('\\vite.config.js')) return true
+  if (lower.endsWith('/package.json') || lower.endsWith('\\package.json')) return true
+  return false
+}
+
+function maybeInjectToolSelectHint(chunk: string) {
+  // 当首次检测到“写入文件”工具输出时，若没有出现过“选择工具”提示，则在当前 assistant 消息中补一段提示
+  if (toolSelectHintShown.value) return
+  if (chunk.includes('[工具调用]') && chunk.includes('写入文件')) {
+    appendAssistantMessageChunk('\n\n[选择工具] 写入文件\n\n')
+    toolSelectHintShown.value = true
+  }
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await window.navigator.clipboard.writeText(text)
+    message.success('已复制到剪贴板')
+  } catch {
+    message.error('复制失败，请检查浏览器权限')
+  }
 }
 
 function stopStream() {
@@ -358,7 +613,13 @@ async function sendMessage(text?: string) {
       try {
         const jsonData = JSON.parse(data)
         if (jsonData && typeof jsonData.d === 'string') {
-          appendAssistantMessageChunk(jsonData.d)
+          const chunk = jsonData.d
+          maybeInjectToolSelectHint(chunk)
+          const parsed = parseToolWriteFileBlock(chunk)
+          if (parsed) {
+            recordGeneratedFile(parsed.filePath, parsed.lang, parsed.content)
+          }
+          appendAssistantMessageChunk(chunk)
           // 自动滚动到底部
           nextTick(() => {
             scrollToBottom()
@@ -369,7 +630,7 @@ async function sendMessage(text?: string) {
         if (data === '[DONE]' || data === '__END__') {
           stopStream()
           hasGenerated.value = true
-          iframeKey.value += 1
+          void refreshPreviewWithRetry()
           void fetchRoundCount()
           return
         }
@@ -384,7 +645,7 @@ async function sendMessage(text?: string) {
     eventSource.addEventListener('done', () => {
       stopStream()
       hasGenerated.value = true
-      iframeKey.value += 1
+      void refreshPreviewWithRetry()
       void fetchRoundCount()
     })
 
@@ -516,8 +777,24 @@ async function loadAppInfo() {
       if (appInfo.value.hasGeneratedCode) {
         hasGenerated.value = true
       }
+      generatedFiles.value = []
+      generatedFileMap.value = {}
+      toolSelectHintShown.value = false
+      filesModalOpen.value = false
+      activeFilePath.value = ''
       await loadChatHistory()
       void fetchRoundCount()
+      // 从首页进入 Vue 项目页面：先探测一次静态入口，并显示托底“刷新应用”按钮（不强依赖 hasGeneratedCode 字段）
+      if (isVueProject.value) {
+        showRefreshAppCta(
+          '已为你加载 Vue 项目。由于浏览器缓存/资源加载顺序，预览可能不会立刻更新；需要时点击“刷新应用”强制重载。',
+        )
+        // 触发一次入口探测：若 ready 则确保 shouldShowWebsite 生效（即使 hasGeneratedCode 未正确同步）
+        const ready = await probePreviewReady()
+        if (ready) {
+          hasGenerated.value = true
+        }
+      }
 
       // 检查是否从首页跳转过来（需要自动提交）
       const autoSend = route.query.autoSend === 'true'
@@ -561,6 +838,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopPreviewProbing()
   if (chatMessagesRef.value) {
     chatMessagesRef.value.removeEventListener('scroll', handleChatScroll)
   }
@@ -569,6 +847,50 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="app-chat-page">
+    <a-modal v-model:open="filesModalOpen" title="生成文件回显" :footer="null" width="920px">
+      <div class="files-modal">
+        <div class="files-list">
+          <div class="files-list-title">文件（{{ generatedFiles.length }}）</div>
+          <div v-if="generatedFiles.length === 0" class="files-empty">
+            <AEmpty description="暂无可回显的文件（等待工具写入文件输出）" />
+          </div>
+          <button
+            v-for="f in generatedFiles"
+            :key="f.path"
+            type="button"
+            :class="['file-item', { active: f.path === activeFilePath }]"
+            @click="activeFilePath = f.path"
+          >
+            <div class="file-path-row">
+              <span class="file-path" :class="getFileNameColorClass(f.path)">{{ f.path }}</span>
+              <span v-if="isCoreFile(f.path)" class="file-core-badge">核心代码</span>
+            </div>
+            <span class="file-meta">{{ new Date(f.updatedAt).toLocaleTimeString('zh-CN') }}</span>
+          </button>
+        </div>
+        <div class="files-viewer">
+          <div v-if="!activeFile" class="files-viewer-empty">
+            <AEmpty description="请选择左侧文件查看内容" />
+          </div>
+          <div v-else class="files-viewer-inner">
+            <div class="files-viewer-header">
+              <div class="files-viewer-path">{{ activeFile.path }}</div>
+              <div class="files-viewer-actions">
+                <a-button
+                  size="small"
+                  class="ghost-btn"
+                  @click="copyToClipboard(activeFile.content)"
+                >
+                  复制内容
+                </a-button>
+              </div>
+            </div>
+            <CodeBlock :code="activeFile.content" :language="activeFile.language || 'txt'" :is-streaming="false" />
+          </div>
+        </div>
+      </div>
+    </a-modal>
+
     <a-modal v-model:open="applyFeaturedModalVisible" title="申请成为精选应用" :confirm-loading="false" ok-text="申请"
       cancel-text="取消" @ok="handleApplyFeaturedConfirm" @cancel="closeApplyFeatured">
       <p style="margin-bottom: 8px">你可以简单说明想成为精选应用的理由（选填）：</p>
@@ -616,6 +938,13 @@ onBeforeUnmount(() => {
 
     <section class="main-content">
       <div class="chat-panel">
+        <div v-if="generatedFiles.length > 0" class="generated-files-bar">
+          <div class="generated-files-left">
+            <span class="generated-files-dot" aria-hidden="true" />
+            <span class="generated-files-text">已回显 {{ generatedFiles.length }} 个文件（Vue 项目）</span>
+          </div>
+          <a-button size="small" class="ghost-btn" @click="showGeneratedFilesModal">查看文件</a-button>
+        </div>
         <div ref="chatMessagesRef" class="chat-messages">
           <ASpin v-if="loadingApp" />
           <template v-else>
@@ -685,11 +1014,25 @@ onBeforeUnmount(() => {
 
       <div class="preview-panel">
         <div class="preview-header">
-          <div class="preview-title">
-            生成的网站预览
+          <div class="preview-header-left">
+            <div class="preview-title">
+              生成的网站预览
+            </div>
+            <div class="preview-subtitle">
+              对话生成完成后自动刷新
+            </div>
           </div>
-          <div class="preview-subtitle">
-            对话生成完成后自动刷新
+          <div class="preview-header-right">
+            <ATooltip v-if="refreshAppCtaVisible && isVueProject" :title="refreshAppCtaHint">
+              <a-button
+                size="small"
+                class="ghost-btn preview-refresh-btn"
+                :loading="refreshingApp"
+                @click="handleManualRefreshApp"
+              >
+                刷新应用
+              </a-button>
+            </ATooltip>
           </div>
         </div>
         <div class="preview-body">
@@ -807,6 +1150,205 @@ onBeforeUnmount(() => {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
   min-height: 0;
   overflow: hidden;
+}
+
+.generated-files-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 20% 0%, rgba(34, 197, 94, 0.18), rgba(14, 165, 233, 0.12) 55%, rgba(15, 23, 42, 0.02));
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+
+.generated-files-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.generated-files-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22c55e, #0ea5e9);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+  flex: 0 0 auto;
+}
+
+.generated-files-text {
+  font-size: 12px;
+  color: #0f172a;
+  opacity: 0.86;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-modal {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 520px;
+}
+
+.files-list {
+  border-radius: 14px;
+  background: rgba(249, 250, 251, 1);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.files-list-title {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.file-path-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.files-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 10px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.file-item:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 1);
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.08),
+    inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.file-item.active {
+  box-shadow:
+    0 10px 22px rgba(15, 23, 42, 0.1),
+    inset 0 0 0 1px rgba(14, 165, 233, 0.45);
+}
+
+.file-path {
+  font-size: 12px;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.file-path--vue {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.file-path--script {
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.file-path--style {
+  color: #db2777;
+}
+
+.file-path--html {
+  color: #ea580c;
+}
+
+.file-path--config {
+  color: #7c3aed;
+}
+
+.file-path--asset {
+  color: #0ea5e9;
+}
+
+.file-path--default {
+  color: #0f172a;
+}
+
+.file-core-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #065f46;
+  background: linear-gradient(135deg, #bbf7d0, #6ee7b7);
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.35);
+}
+
+.file-meta {
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.files-viewer {
+  border-radius: 14px;
+  background: rgba(249, 250, 251, 1);
+  padding: 10px;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-viewer-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.files-viewer-inner {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.files-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.files-viewer-path {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.files-viewer-actions {
+  flex: 0 0 auto;
 }
 
 .chat-messages {
@@ -1019,6 +1561,19 @@ onBeforeUnmount(() => {
 
 .preview-header {
   margin-bottom: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preview-header-left {
+  min-width: 0;
+}
+
+.preview-header-right {
+  flex: 0 0 auto;
+  padding-top: 2px;
 }
 
 .preview-title {
@@ -1029,6 +1584,13 @@ onBeforeUnmount(() => {
 .preview-subtitle {
   font-size: 12px;
   color: #6b7280;
+}
+
+.preview-refresh-btn {
+  border-radius: 999px;
+  box-shadow:
+    0 10px 22px rgba(15, 23, 42, 0.1),
+    inset 0 0 0 1px rgba(14, 165, 233, 0.35);
 }
 
 .preview-body {

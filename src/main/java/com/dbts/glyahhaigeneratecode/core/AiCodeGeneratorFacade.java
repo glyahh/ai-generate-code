@@ -197,6 +197,11 @@ public class AiCodeGeneratorFacade {
                         ToolExecutedMessage toolExecutedMessage = new ToolExecutedMessage(toolExecution);
                         sink.next(JSONUtil.toJsonStr(toolExecutedMessage));
                     })
+                    // TODO:深度思考
+//                    .onPartialThinking((String partialThinking) -> {
+//                        AiThinkingMessage aiThinkingMessage = new AiThinkingMessage(partialThinking);
+//                        sink.next(JSONUtil.toJsonStr(aiThinkingMessage));
+//                    })
                     // 响应完成
                     .onCompleteResponse((ChatResponse response) -> {
                         sink.complete();

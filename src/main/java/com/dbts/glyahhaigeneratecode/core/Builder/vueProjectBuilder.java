@@ -16,6 +16,10 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class vueProjectBuilder {
 
+    /**
+     * 创建虚拟线程，并执行 Vue 项目构建任务
+     * @param projectPath
+     */
     public void BuildVirtualThreadForBuildVue (String projectPath){
         Thread.ofVirtual().name("vue-builder-"+System.currentTimeMillis())
                 .start(() -> {
