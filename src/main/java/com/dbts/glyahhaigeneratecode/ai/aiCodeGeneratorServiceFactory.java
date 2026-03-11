@@ -4,11 +4,12 @@ import com.dbts.glyahhaigeneratecode.ai.tool.FileWriteTool;
 import com.dbts.glyahhaigeneratecode.config.ReasoningChatModelConfig;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
@@ -38,7 +39,7 @@ public class aiCodeGeneratorServiceFactory {
     private OpenAiStreamingChatModel openAiStreamingChatModel;
 
     @Resource
-    private RedisChatMemoryStore redisChatMemoryStore;
+    private ChatMemoryStore chatMemoryStore;
 
     @Resource
     private ChatHistoryService chatHistoryService;
@@ -77,7 +78,7 @@ public class aiCodeGeneratorServiceFactory {
             if (appId > 0) {
                 if (isRedisMemoryEmpty(appId)) {
                     log.warn("Redis 对话记忆已空（可能过期），将重建 AI 服务并从 MySQL 重新加载历史，appId={}", appId);
-                    // 失效缓存并重新创建
+                    // 失效缓存并重新创建,废除这个键
                     serviceCache.invalidate(appId.toString() + "_" + codeGenTypeEnum);
                     service = null;
                 }
@@ -108,14 +109,16 @@ public class aiCodeGeneratorServiceFactory {
         MessageWindowChatMemory build = MessageWindowChatMemory
                 .builder()
                 .id(appId)
-                .chatMemoryStore(redisChatMemoryStore)
+                .chatMemoryStore(chatMemoryStore)
                 .maxMessages(25)
                 .build();
 
         // 预加载历史对话到内存（抛开用户刚发送的那条）
+        // Mysql -> Redis
         // 注意：appId=0 的默认 Bean 仅用于兼容旧代码，不做历史加载
         if (appId != null && appId > 0) {
             try {
+                //
                 int loadedCount = chatHistoryService.turnHistoryToMemory(appId, build, 25);
                 log.info("为应用预加载历史对话到内存，appId={}, loadedCount={}", appId, loadedCount);
             } catch (Exception e) {
@@ -130,6 +133,7 @@ public class aiCodeGeneratorServiceFactory {
                     .chatModel(chatModel)
                     .streamingChatModel(reasoningChatModel)
                     // 将memoryId一同作为ai需要记忆的内容
+                    // 将本来的ai默认记忆的Id转化为build类型的 以appId作为唯一标识的chatMemory
                     .chatMemoryProvider(memoryId -> build)
                     .tools(new FileWriteTool())
                     // 当ai调用了本来没有的tool时
@@ -152,7 +156,7 @@ public class aiCodeGeneratorServiceFactory {
      */
     private boolean isRedisMemoryEmpty(Long appId) {
         try {
-            List<ChatMessage> messages = redisChatMemoryStore.getMessages(appId);
+            List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
             return messages == null || messages.isEmpty();
         } catch (Exception e) {
             log.warn("检查 Redis 对话记忆时异常，视为需重建，appId={}", appId, e);

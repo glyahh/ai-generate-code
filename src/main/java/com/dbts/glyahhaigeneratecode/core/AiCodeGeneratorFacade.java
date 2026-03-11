@@ -98,14 +98,6 @@ public class AiCodeGeneratorFacade {
 
 
 
-
-
-
-
-
-
-
-
     /**
      * 根据代码类型和流式输出拼接代码,并保存到本地
      * @param codeGenTypeEnum

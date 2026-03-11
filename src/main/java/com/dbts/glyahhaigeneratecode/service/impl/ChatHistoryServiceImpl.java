@@ -210,6 +210,30 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 清空Redis中的全部消息
         messageWindowChatMemory.clear();
 
+        // 最小改动：从 MySQL 恢复历史时，过滤掉「曾被误存为 AI 回复」的系统提示词，避免出现两条提示词（AI + SYSTEM）
+        String systemPromptForFilter = null;
+        try {
+            // 优先按应用 codeGenType 取对应系统提示词（与 appendSystemPromptToMemory 一致）
+            App app = appService.getById(addId);
+            if (app != null) {
+                CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
+                String promptPath = null;
+                if (codeGenTypeEnum != null) {
+                    switch (codeGenTypeEnum) {
+                        case HTML -> promptPath = "Prompt/Single_File_Prompt.txt";
+                        case MULTI_FILE -> promptPath = "Prompt/Various_File_Prompt.txt";
+                        case VUE -> promptPath = "Prompt/Vue_File_Prompt.txt";
+                        default -> { }
+                    }
+                }
+                if (StrUtil.isNotBlank(promptPath)) {
+                    systemPromptForFilter = readPromptFromClasspath(promptPath);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("读取系统提示词用于过滤失败，appId={}", addId, e);
+        }
+
         // 一次添加进入缓存
         int restoredCount = 0;
         for (ChatHistory history : historyList) {
@@ -223,6 +247,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                     restoredCount++;
                     break;
                 case AI:
+                    // 过滤：若 DB 中这条 AI 消息内容就是系统提示词，则不再写入 Redis
+                    if (StrUtil.isNotBlank(systemPromptForFilter)
+                            && StrUtil.isNotBlank(history.getMessage())
+                            && history.getMessage().trim().equals(systemPromptForFilter.trim())) {
+                        log.debug("跳过写入 Redis：MySQL 中该条 AI 消息为系统提示词，appId={}", addId);
+                        break;
+                    }
                     messageWindowChatMemory.add(new AiMessage(history.getMessage()));
                     restoredCount++;
                     break;
@@ -261,7 +292,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         switch (codeGenTypeEnum) {
             case HTML -> promptPath = "Prompt/Single_File_Prompt.txt";
             case MULTI_FILE -> promptPath = "Prompt/Various_File_Prompt.txt";
-            case VUE -> promptPath = "Prompt/Vue_File_Prompt";
+            case VUE -> promptPath = "Prompt/Vue_File_Prompt.txt";
             default -> {
                 log.warn("追加系统提示词失败，不支持的 codeGenType, appId={}, codeGenType={}", appId, codeGenTypeEnum);
                 return;
@@ -278,10 +309,22 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      * 从 classpath 读取系统 Prompt，避免硬编码磁盘绝对路径，适配不同部署环境。
      */
     private String readPromptFromClasspath(String classpathLocation) {
-        try (InputStream inputStream = new ClassPathResource(classpathLocation).getInputStream()) {
+        if (StrUtil.isBlank(classpathLocation)) {
+            log.error("读取系统提示词失败，classpathLocation 为空");
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "读取系统提示词失败：路径为空");
+        }
+
+        // 拿到除了出车,空格等的字符串,更具有健壮性
+        String normalized = StrUtil.trim(classpathLocation);
+        if (StrUtil.startWithIgnoreCase(normalized, "classpath:")) {
+            normalized = StrUtil.removePrefixIgnoreCase(normalized, "classpath:");
+        }
+        normalized = StrUtil.removePrefix(normalized, "/");
+
+        try (InputStream inputStream = new ClassPathResource(normalized).getInputStream()) {
             return IoUtil.readUtf8(inputStream);
         } catch (Exception e) {
-            log.error("读取系统提示词失败, path={}", classpathLocation, e);
+            log.error("读取系统提示词失败, path={}", normalized, e);
             throw new MyException(ErrorCode.SYSTEM_ERROR, "读取系统提示词失败");
         }
     }

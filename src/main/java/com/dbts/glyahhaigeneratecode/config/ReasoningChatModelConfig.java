@@ -20,8 +20,9 @@ public class ReasoningChatModelConfig {
     private final String reasoningModelName = "qwen3-coder-next";
     private final int reasoningMaxTokens = 32768;
     // 普通模型
-    private final String modelName = "qwen3.5-plus";
+    private final String modelName = "qwen3.5-plus-2026-02-15";
     private final int maxTokens = 8192;
+
 
     @Bean
     // 返回类型 Bean名称 reasoningChatModel

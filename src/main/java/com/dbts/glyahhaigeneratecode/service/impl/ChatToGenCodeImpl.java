@@ -65,7 +65,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         }
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
 
-        // 5. 保存用户消息到对话历史
+        // 5. 保存用户消息到对话历史(Mysql)
         chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), user.getId());
 
         // 6. 调用 AI 生成代码（流式）

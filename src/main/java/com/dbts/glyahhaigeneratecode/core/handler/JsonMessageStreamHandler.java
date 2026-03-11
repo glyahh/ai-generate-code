@@ -51,6 +51,8 @@ public class JsonMessageStreamHandler {
         StringBuilder chatHistoryStringBuilder = new StringBuilder();
         // 用于跟踪已经见过的工具ID，判断是否是第一次调用
         Set<String> seenToolIds = new HashSet<>();
+
+
         return originFlux
 
                 .map(chunk -> {
@@ -89,6 +91,7 @@ public class JsonMessageStreamHandler {
         StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
         if (typeEnum != null) {
             switch (typeEnum) {
+
                 case AI_RESPONSE -> {
                     AiResponseMessage aiMessage = JSONUtil.toBean(chunk, AiResponseMessage.class);
                     String data = aiMessage.getData();
@@ -96,6 +99,7 @@ public class JsonMessageStreamHandler {
                     chatHistoryStringBuilder.append(data);
                     return data;
                 }
+
                 case TOOL_REQUEST -> {
                     ToolRequestMessage toolRequestMessage = JSONUtil.toBean(chunk, ToolRequestMessage.class);
                     String toolId = toolRequestMessage.getId();
@@ -103,12 +107,13 @@ public class JsonMessageStreamHandler {
                     if (toolId != null && !seenToolIds.contains(toolId)) {
                         // 第一次调用这个工具，记录 ID 并完整返回工具信息
                         seenToolIds.add(toolId);
-                        return "\n\n[选择工具] 写入文件\n\n";
+                        return "\n[选择工具] 写入文件\n";
                     } else {
                         // 不是第一次调用这个工具，直接返回空
                         return "";
                     }
                 }
+
                 case TOOL_EXECUTED -> {
                     ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
                     JSONObject jsonObject = JSONUtil.parseObj(toolExecutedMessage.getArguments());

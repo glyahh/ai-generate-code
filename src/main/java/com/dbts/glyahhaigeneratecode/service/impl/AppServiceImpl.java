@@ -259,11 +259,15 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             }
         }
         if (codeGenTypeEnum == null) {
+            log.info("codeGenType = {}", codeGenType);
             throw new MyException(ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
         }
         // 自动处理分隔符
-        Path sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + appId);
-
+        Path sourceDirPath = null;
+        switch (codeGenTypeEnum){
+            case VUE -> sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_project_" + appId);
+            case HTML, MULTI_FILE -> sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + appId);
+        }
 
         // 6. 校验路径下的文件是否存在
         if (!Files.isDirectory(sourceDirPath)) {
