@@ -24,6 +24,11 @@ spring:
     store-type: redis
     timeout: 2592000 # 30天过期
 
+
+
+
+
+
 server:
   port: 8124
   servlet:
@@ -31,6 +36,8 @@ server:
     session:
       cookie:
         max-age: 2592000
+
+
 
 langchain4j:
   open-ai:
@@ -63,6 +70,18 @@ langchain4j:
       max-tokens: 8192
       # 最大重试次数
       max-retries: 2
+
+
+
+
+# 添加 COS 对象存储配置（需要从腾讯云获取）
+#cos:
+#  client:
+#    host: your-custom-domain.com
+#    secretId: your-secret-id
+#    secretKey: your-secret-key
+#    region: ap-shanghai
+#    bucket: your-bucket-name
 
 
 
