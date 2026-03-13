@@ -211,6 +211,24 @@ export function appDeployUsingPost({
   });
 }
 
+/** 此处后端没有提供注释 GET /app/download/${param0} */
+export function appDownloadAppIdUsingGet({
+  params,
+  options,
+}: {
+  // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
+  params: API.AppDownloadAppIdUsingGetParams;
+  options?: { [key: string]: unknown };
+}) {
+  const { appId: param0, ...queryParams } = params;
+
+  return request<unknown>(`/app/download/${param0}`, {
+    method: 'GET',
+    params: { ...queryParams },
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 GET /app/get/vo */
 export function appGetVoUsingGet({
   params,

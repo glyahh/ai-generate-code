@@ -183,6 +183,7 @@ const canApplyFeatured = computed(
 )
 
 const exportingChat = ref(false)
+const downloadingProject = ref(false)
 
 /** 当前应用对话轮数（用户一问 + AI 一答为一轮），仅创建者/管理员展示 */
 const roundCount = ref<number | null>(null)
@@ -270,6 +271,100 @@ async function handleExportChatToLocal() {
     message.error(err?.response?.data?.message ?? '导出失败，请稍后再试')
   } finally {
     exportingChat.value = false
+  }
+}
+
+function getFileNameFromContentDisposition(
+  headerValue: string | null,
+  fallbackName: string,
+): string {
+  if (!headerValue) return fallbackName
+
+  // 优先解析 filename*（RFC 5987，UTF-8 编码）
+  const filenameStarMatch = headerValue.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  if (filenameStarMatch && filenameStarMatch[1]) {
+    try {
+      const encoded = filenameStarMatch[1].trim().replace(/^"(.*)"$/, '$1')
+      return decodeURIComponent(encoded)
+    } catch {
+      // ignore and try other strategies
+    }
+  }
+
+  // 兼容 filename="xxx"
+  const filenameMatch = headerValue.match(/filename\s*=\s*"([^"]+)"/i)
+  if (filenameMatch && filenameMatch[1]) {
+    return filenameMatch[1].trim()
+  }
+
+  // 兼容 filename=xxx（无引号）
+  const filenameNoQuoteMatch = headerValue.match(/filename\s*=\s*([^;]+)/i)
+  if (filenameNoQuoteMatch && filenameNoQuoteMatch[1]) {
+    return filenameNoQuoteMatch[1].trim()
+  }
+
+  return fallbackName
+}
+
+async function handleDownloadProjectFiles() {
+  if (!appId.value) {
+    message.error('应用 ID 异常，无法下载项目文件')
+    return
+  }
+
+  // 若还未生成代码，优先提示用户先完成一次生成
+  if (!appInfo.value?.hasGeneratedCode && !hasGenerated.value) {
+    message.warning('当前应用还没有可下载的项目代码，请先完成一次生成')
+    return
+  }
+
+  const displayName = appInfo.value?.appName || String(appId.value)
+  const fallbackFileName = `项目代码-${displayName}.zip`
+
+  downloadingProject.value = true
+  const hide = message.loading('正在打包并下载项目文件…', 0)
+  try {
+    const apiBase = API_BASE_URL.replace(/\/$/, '')
+    const url = `${apiBase}/app/download/${encodeURIComponent(String(appId.value))}`
+
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    })
+
+    if (!res.ok) {
+      // 尝试读取服务端返回的错误信息
+      let errorText: string | null = null
+      try {
+        errorText = await res.text()
+      } catch {
+        // ignore
+      }
+      message.error(errorText || '下载项目文件失败，请稍后重试')
+      return
+    }
+
+    const blob = await res.blob()
+    const disposition =
+      res.headers.get('Content-Disposition') ?? res.headers.get('content-disposition')
+    const fileName = getFileNameFromContentDisposition(disposition, fallbackFileName)
+
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+
+    message.success('项目文件下载成功')
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    message.error(err?.response?.data?.message ?? '下载项目文件失败，请稍后重试')
+  } finally {
+    hide()
+    downloadingProject.value = false
   }
 }
 
@@ -1247,7 +1342,22 @@ onBeforeUnmount(() => {
           :loading="exportingChat"
           @click="handleExportChatToLocal"
         >
-          导出对话到本地
+          导出对话
+        </a-button>
+        <a-button
+          v-if="!isReadOnly"
+          class="ghost-btn"
+          :loading="downloadingProject"
+          @click="handleDownloadProjectFiles"
+        >
+          下载项目
+        </a-button>
+        <a-button
+          v-if="!isReadOnly"
+          class="ghost-btn"
+          @click="goEdit"
+        >
+          编辑应用
         </a-button>
         <a-button
           v-if="!isReadOnly && isVueProject && generatedFiles.length > 0"
@@ -1255,9 +1365,6 @@ onBeforeUnmount(() => {
           @click="showGeneratedFilesModal"
         >
           查看项目回显
-        </a-button>
-        <a-button v-if="!isReadOnly" class="ghost-btn" @click="goEdit">
-          编辑应用信息
         </a-button>
         <a-button v-if="canApplyFeatured" class="ghost-btn" type="primary" @click="openApplyFeatured">
           我要成为精选

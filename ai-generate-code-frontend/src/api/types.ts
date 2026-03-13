@@ -100,6 +100,17 @@ export type AppDeployUsingPostResponses = {
   200: BaseResponseString;
 };
 
+export type AppDownloadAppIdUsingGetParams = {
+  appId: number;
+};
+
+export type AppDownloadAppIdUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: unknown;
+};
+
 export type AppGetVoUsingGetParams = {
   id: string;
 };

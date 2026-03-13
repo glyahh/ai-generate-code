@@ -22,9 +22,11 @@ import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.UserAppApplyService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
+import com.dbts.glyahhaigeneratecode.service.ProjectDownloadService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -47,6 +49,7 @@ public class AppController {
     private final UserService userService;
     private final UserAppApplyService userAppApplyService;
     private final ChatHistoryService chatHistoryService;
+    private final ProjectDownloadService projectDownloadService;
 
     /**
      * 【用户】创建应用（须填写 initPrompt）
@@ -312,6 +315,52 @@ public class AppController {
         // 调用服务取消部署应用
         boolean result = appService.undeployApp(appId, loginUser);
         return ResultUtils.success(result);
+    }
+
+    /**
+     * 【用户】下载应用对应的生成项目（打包为 zip）
+     *
+     * @param appId    应用 id
+     * @param request  请求
+     * @param response 响应（写入 zip）
+     */
+    @GetMapping("/download/{appId}")
+    public void downloadProject(@PathVariable Long appId,
+                                HttpServletRequest request,
+                                HttpServletResponse response) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+
+        // 校验登录用户
+        User loginUser = userService.getUserInSession(request);
+
+        // 获取应用并校验归属
+        App app = appService.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId())
+                        && !UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()),
+                ErrorCode.NO_AUTH_ERROR, "只能下载自己的应用");
+
+        // 组装 service 所需参数：appName + 项目路径
+        String appName = app.getAppName();
+
+        String codeGenType = app.getCodeGenType();
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
+            try {
+                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
+
+        String projectPath;
+        switch (codeGenTypeEnum) {
+            case VUE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_project_" + appId;
+            case HTML, MULTI_FILE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + appId;
+            default -> throw new MyException(ErrorCode.PARAMS_ERROR, "暂不支持的 codeGenType");
+        }
+
+        projectDownloadService.downloadProject(response, appName, projectPath);
     }
 
 

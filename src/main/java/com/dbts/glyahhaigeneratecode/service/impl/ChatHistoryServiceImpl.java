@@ -210,7 +210,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 清空Redis中的全部消息
         messageWindowChatMemory.clear();
 
-        // 最小改动：从 MySQL 恢复历史时，过滤掉「曾被误存为 AI 回复」的系统提示词，避免出现两条提示词（AI + SYSTEM）
+        // 拿到改对话的系统提示词 systemPromptForFilter
         String systemPromptForFilter = null;
         try {
             // 优先按应用 codeGenType 取对应系统提示词（与 appendSystemPromptToMemory 一致）
@@ -247,7 +247,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                     restoredCount++;
                     break;
                 case AI:
-                    // 过滤：若 DB 中这条 AI 消息内容就是系统提示词，则不再写入 Redis
+                    // 当ai的消息内容和系统提示词 systemPromptForFilter 相同，则不再写入 Redis
                     if (StrUtil.isNotBlank(systemPromptForFilter)
                             && StrUtil.isNotBlank(history.getMessage())
                             && history.getMessage().trim().equals(systemPromptForFilter.trim())) {

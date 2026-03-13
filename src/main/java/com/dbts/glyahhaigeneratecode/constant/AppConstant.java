@@ -1,5 +1,7 @@
 package com.dbts.glyahhaigeneratecode.constant;
 
+import java.util.List;
+
 public interface AppConstant {
 
     /**
@@ -26,5 +28,21 @@ public interface AppConstant {
      * 应用部署域名
      */
     String CODE_DEPLOY_HOST = "http://localhost";
+
+    /**
+     * 项目打包下载时需要忽略的文件或目录名称
+     */
+    List<String> PROJECT_DOWNLOAD_IGNORE_FILES = List.of(
+            "node_modules",
+            ".git",
+            "dist",
+            "build",
+            ".DS_Store",
+            ".env",
+            "target",
+            ".mvn",
+            ".idea",
+            ".vscode"
+    );
 
 }
