@@ -4,11 +4,13 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.core.util.RandomUtil;
+import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineService;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
+import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.mapper.AppMapper;
@@ -50,20 +52,26 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private vueProjectBuilder vueProjectBuilder;
 
+    @Resource
+    private aiCodeGeneratorRoutineService aiCodeGeneratorRoutine;
+
+//    @Resource
+//    private AppService appService;
+
 //    @Resource
 //    private ScreenshotService screenshotService;
 
     @Override
-    public long createApp(App app) {
-        if (app == null) {
-            throw new MyException(ErrorCode.PARAMS_ERROR, "在Service层: 创建 App 时传入的参数为空");
-        }
-        // 必须用 insert 而非 insertSelective：id 为 null 时 insertSelective 会跳过 id 列，
-        // 不会触发 @Id(snowFlakeId) 的生成逻辑，数据库会用自增返回 1,2,3...
-        int insert = this.mapper.insert(app);
-        if (insert < 1) {
-            throw new MyException(ErrorCode.OPERATION_ERROR, "创建应用失败");
-        }
+    public long createApp (User loginUser, AppAddRequest appAddRequest) {
+        App app = new App();
+        BeanUtil.copyProperties(appAddRequest, app);
+        app.setUserId(loginUser.getId());
+        CodeGenTypeEnum codeGenTypeEnum = aiCodeGeneratorRoutine.aiCodeGeneratorRoutine("根据代码类型要求,给用户以上的代码要求描述生成一个代码类型,必须严格根据代码生成类型的名字生成");
+        app.setCodeGenType(codeGenTypeEnum.getValue());
+
+        //这里最好使用这个save,不要mapper中的insert,否则id会因为没有声明而被覆盖雪花算法的值,而且其他未声明的字段会报数据库不能非空
+        boolean save = this.save(app);
+        ThrowUtils.throwIf(!save, ErrorCode.OPERATION_ERROR, "创建应用失败");
         return app.getId();
     }
 

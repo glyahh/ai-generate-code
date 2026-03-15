@@ -2,6 +2,7 @@ package com.dbts.glyahhaigeneratecode.controller;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
+import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineService;
 import com.dbts.glyahhaigeneratecode.annotation.MyRole;
 import com.dbts.glyahhaigeneratecode.common.BaseResponse;
 import com.dbts.glyahhaigeneratecode.common.DeleteRequest;
@@ -50,11 +51,13 @@ public class AppController {
     private final UserAppApplyService userAppApplyService;
     private final ChatHistoryService chatHistoryService;
     private final ProjectDownloadService projectDownloadService;
+    private final aiCodeGeneratorRoutineService aiCodeGeneratorRoutine;
+
 
     /**
      * 【用户】创建应用（须填写 initPrompt）
      *
-     * @param appAddRequest 创建请求
+     * @param appAddRequest 用户创建app的基础数据
      * @param request       请求
      * @return 应用 id
      */
@@ -62,17 +65,9 @@ public class AppController {
     public BaseResponse<Long> addMyApp(@RequestBody AppAddRequest appAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(appAddRequest == null, ErrorCode.PARAMS_ERROR, "创建应用请求参数为空");
         ThrowUtils.throwIf(StrUtil.isBlank(appAddRequest.getInitPrompt()), ErrorCode.PARAMS_ERROR, "initPrompt 必填");
-
         User loginUser = userService.getUserInSession(request);
-        App app = new App();
-        BeanUtil.copyProperties(appAddRequest, app);
-        app.setUserId(loginUser.getId());
-        app.setCodeGenType(CodeGenTypeEnum.VUE.getValue());
 
-        //这里最好使用这个save,不要mapper中的insert,否则id会因为没有声明而被覆盖雪花算法的值,而且其他未声明的字段会报数据库不能非空
-        boolean save = appService.save(app);
-        ThrowUtils.throwIf(!save, ErrorCode.OPERATION_ERROR, "创建应用失败");
-        return ResultUtils.success(app.getId());
+        return ResultUtils.success(appService.createApp(loginUser, appAddRequest));
     }
 
     /**

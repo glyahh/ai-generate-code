@@ -1,5 +1,6 @@
 package com.dbts.glyahhaigeneratecode.service;
 
+import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.mybatisflex.core.service.IService;
@@ -19,10 +20,9 @@ public interface AppService extends IService<App> {
     /**
      * 创建应用（使用 insert 以触发雪花 id 生成；createTime/updateTime 为 null 时由数据库默认值填充）
      *
-     * @param app 应用实体
      * @return 新建应用 id
      */
-    long createApp(App app);
+    long createApp(User loginUser, AppAddRequest appAddRequest);
 
     /**
      * 将应用实体转换为应用视图对象

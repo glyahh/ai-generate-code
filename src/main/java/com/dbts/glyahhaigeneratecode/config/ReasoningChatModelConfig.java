@@ -37,3 +37,9 @@ public class ReasoningChatModelConfig {
                 .build();
     }
 }
+//      # qwen3.5-plus 99%
+//      # qwen3.5-plus-2026-02-15 83%
+//      # qwen3.5-122b-a10b
+//      # qwen3.5-flash
+//      # qwen3-vl-plus-2025-12-19
+//      # qwen3.5-35b-a3b

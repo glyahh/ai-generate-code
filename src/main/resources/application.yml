@@ -39,6 +39,8 @@ server:
 
 
 
+
+
 langchain4j:
   open-ai:
     chat-model:
@@ -55,8 +57,8 @@ langchain4j:
       # 最大重试次数
       max-retries: 2
       # 结构化输出
-      strict-json-schema: true
-      response-format: json_object
+#      strict-json-schema: true
+#      response-format: json_object
 
     Streaming-chat-model:       # 使用的模型名称，例如 qwen3.5-plus
       model-name: ${langchain4j.open-ai.chat-model.model-name}

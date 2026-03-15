@@ -43,6 +43,7 @@ public class ChatToGenCodeController {
      * @return SseEmitter，按片段推送生成的代码内容
      */
     @GetMapping(value = "/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    //这个接口专门生成 text/event-stream 类型的响应内容, 浏览器会按照 SSE 协议来解析和处理这个响应，实现服务器向客户端的单向实时推送
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                                        @RequestParam String message,
                                                        HttpServletRequest request) {
