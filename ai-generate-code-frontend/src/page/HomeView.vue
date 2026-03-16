@@ -507,7 +507,12 @@ onMounted(() => {
                   </ATag>
                 </div>
                 <div class="app-meta">
-                  <span>{{ app.codeGenType || 'multi_file' }}</span>
+                  <div class="app-meta-type">
+                    <span class="app-meta-type-label">生成类型</span>
+                    <span class="app-meta-type-tag">
+                      {{ app.codeGenType || 'multi_file' }}
+                    </span>
+                  </div>
                 </div>
               </div>
               <div class="app-actions" @click.stop>
@@ -813,8 +818,43 @@ onMounted(() => {
 
 .app-meta {
   margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
   font-size: 12px;
   color: #6b7280;
+}
+
+.app-meta-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 0 0, rgba(148, 163, 184, 0.38), transparent 60%),
+    rgba(248, 250, 252, 0.95);
+  box-shadow:
+    0 6px 14px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(148, 163, 184, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.app-meta-type-label {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.app-meta-type-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0f172a;
+  background: linear-gradient(135deg, #dbeafe, #bbf7d0);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.45);
 }
 
 .app-actions {
