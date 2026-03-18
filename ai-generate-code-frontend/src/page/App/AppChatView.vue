@@ -9,6 +9,7 @@ import {
   Empty as AEmpty,
   Modal as AModal,
   Tooltip as ATooltip,
+  Alert as AAlert,
 } from 'ant-design-vue'
 import type { AppVO, ChatHistory } from '@/api'
 import { appGetVoUsingGet, appApplyUsingPost } from '@/api/appController'
@@ -21,8 +22,14 @@ import { UserLoginStore } from '@/stores/UserLogin'
 import { parseMarkdownWithCode } from '@/utils/markdownParser'
 import CodeBlock from '@/components/CodeBlock.vue'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
+import {
+  attachVisualWebsiteEditor,
+  formatSelectedElementForPrompt,
+  type VisualSelectedElementInfo,
+} from '@/utils/visualWebsiteEditor'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8124/api'
+// 与全局请求保持一致：默认走当前页面 origin 下的 `/api`
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const PREVIEW_BASE_URL =
   import.meta.env.VITE_PREVIEW_BASE_URL ?? `${API_BASE_URL.replace(/\/$/, '')}/static`
 
@@ -174,6 +181,107 @@ const iframeKey = ref(0)
 const chatMessagesRef = ref<HTMLElement | null>(null)
 const shouldAutoScroll = ref(true)
 const showScrollToBottom = computed(() => !shouldAutoScroll.value && displayMessages.value.length > 0)
+
+const previewIframeRef = ref<HTMLIFrameElement | null>(null)
+const visualEditMode = ref(false)
+const selectedElement = ref<VisualSelectedElementInfo | null>(null)
+const selectedElementDisplay = computed(() => {
+  if (!selectedElement.value) return ''
+  const info = selectedElement.value
+  return (
+    info.cssSelector ||
+    info.xpath ||
+    [info.tagName, info.id ? `#${info.id}` : '', info.className ? `.${String(info.className).split(/\s+/)[0]}` : '']
+      .filter(Boolean)
+      .join('')
+  )
+})
+
+const selectedElementTextPreview = computed(() => {
+  const info = selectedElement.value
+  if (!info) return ''
+  const t = String(info.text ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return ''
+  return t.length > 120 ? `${t.slice(0, 120)}…` : t
+})
+
+let visualEditorDetach: null | (() => void) = null
+
+function clearSelectedElement() {
+  selectedElement.value = null
+}
+
+function exitVisualEditMode() {
+  visualEditMode.value = false
+  clearSelectedElement()
+  if (visualEditorDetach) {
+    try {
+      visualEditorDetach()
+    } catch {
+      // ignore
+    }
+    visualEditorDetach = null
+  }
+}
+
+function tryAttachVisualEditor() {
+  const iframe = previewIframeRef.value
+  if (!iframe) return
+  if (!visualEditMode.value) return
+
+  // 先清理旧的，再挂新的（iframe 刷新/重载时需要重新 attach）
+  if (visualEditorDetach) {
+    try {
+      visualEditorDetach()
+    } catch {
+      // ignore
+    }
+    visualEditorDetach = null
+  }
+
+  try {
+    const res = attachVisualWebsiteEditor({
+      iframeEl: iframe,
+      onSelected: (info) => {
+        selectedElement.value = info
+      },
+      onError: (err) => {
+        // 注入失败时给出明确提示（便于定位：跨域 / CSP / 预览未就绪）
+        message.warning(err?.message || '可视化编辑注入失败，请刷新预览后重试')
+      },
+    })
+    visualEditorDetach = res.detach
+  } catch (e) {
+    visualEditMode.value = false
+    message.warning('预览尚未就绪，暂时无法进入编辑模式')
+  }
+}
+
+function toggleVisualEditMode() {
+  if (isReadOnly.value) return
+  if (!shouldShowWebsite.value) {
+    message.warning('请先完成至少一轮对话生成后再进入编辑模式')
+    return
+  }
+  visualEditMode.value = !visualEditMode.value
+  if (!visualEditMode.value) {
+    exitVisualEditMode()
+    return
+  }
+  nextTick(() => {
+    tryAttachVisualEditor()
+    message.info('已进入编辑模式：悬浮高亮元素，点击选中并锁定边框')
+  })
+}
+
+function handlePreviewIframeLoad() {
+  // 预览刷新后：若仍在编辑模式，需要重新注入监听
+  if (visualEditMode.value) {
+    nextTick(() => {
+      tryAttachVisualEditor()
+    })
+  }
+}
 
 const applyFeaturedModalVisible = ref(false)
 const applyAppProprietyReason = ref('')
@@ -988,8 +1096,20 @@ async function sendMessage(text?: string) {
     return
   }
 
+  const selectedSnapshot = selectedElement.value
+  const prompt =
+    selectedSnapshot && visualEditMode.value
+      ? `${content}\n\n${formatSelectedElementForPrompt(selectedSnapshot)}\n\n请优先根据以上元素信息，对该元素及其相关区域进行定向修改/优化（如果定位不准，请给出更稳健的选择器建议）。`
+      : content
+
+  // 发送后：清空选中并退出编辑模式（保持其余流程不变）
+  if (visualEditMode.value) {
+    exitVisualEditMode()
+  }
+
   stopStream()
 
+  // 对话区仍展示用户原始输入（不把附加信息显示给用户，避免干扰）
   appendUserMessage(content)
   sessionMessages.value.push({
     id: nextMessageId++,
@@ -1005,7 +1125,7 @@ async function sendMessage(text?: string) {
   try {
     const query = new URLSearchParams({
       appId: String(appId.value),
-      message: content,
+      message: prompt,
     })
     const apiBase = API_BASE_URL.replace(/\/$/, '')
     const url = `${apiBase}/chat/gen/code?${query.toString()}`
@@ -1256,6 +1376,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPreviewProbing()
+  exitVisualEditMode()
   if (chatMessagesRef.value) {
     chatMessagesRef.value.removeEventListener('scroll', handleChatScroll)
   }
@@ -1458,6 +1579,25 @@ onBeforeUnmount(() => {
         </div>
 
         <div :class="['chat-input-bar', { 'chat-input-bar-readonly': isReadOnly }]">
+          <div v-if="selectedElement" class="selected-element-alert">
+            <AAlert
+              type="info"
+              show-icon
+              closable
+              :message="`已选中元素：${selectedElementDisplay}`"
+              @close="clearSelectedElement"
+            >
+              <template #description>
+                <div style="white-space: pre-wrap;">
+                  {{
+                    selectedElementTextPreview
+                      ? `内容预览：${selectedElementTextPreview}\n\n发送消息时会把该元素信息附加到提示词中；你也可以手动移除选中。`
+                      : '发送消息时会把该元素信息附加到提示词中；你也可以手动移除选中。'
+                  }}
+                </div>
+              </template>
+            </AAlert>
+          </div>
           <AInput.TextArea v-model:value="inputMessage" placeholder="描述你想生成的网页，例如：一个用于展示我技术博客的个人站点……" :rows="3"
             :disabled="isReadOnly" :class="['chat-input', { 'chat-input-readonly': isReadOnly }]"
             @press-enter.prevent="handleManualSend" />
@@ -1470,6 +1610,15 @@ onBeforeUnmount(() => {
                 @click="handleScrollToBottomClick">
                 <span class="scroll-bottom-icon">↓</span>
               </button>
+              <AButton
+                v-if="!streaming"
+                class="ghost-btn"
+                :disabled="isReadOnly || !shouldShowWebsite"
+                :type="visualEditMode ? 'primary' : 'default'"
+                @click="toggleVisualEditMode"
+              >
+                {{ visualEditMode ? '退出编辑' : '编辑模式' }}
+              </AButton>
               <AButton v-if="streaming" danger ghost :disabled="isReadOnly" @click="handleStop">
                 停止生成
               </AButton>
@@ -1505,11 +1654,19 @@ onBeforeUnmount(() => {
             </ATooltip>
           </div>
         </div>
+
         <div class="preview-body">
           <div v-if="!shouldShowWebsite" class="preview-empty">
             <AEmpty description="AI 未生成内容，请先完成至少一轮对话（用户提问 + AI 回复）" />
           </div>
-          <iframe v-else :key="iframeKey" class="preview-iframe" :src="previewUrl" />
+          <iframe
+            v-else
+            ref="previewIframeRef"
+            :key="iframeKey"
+            class="preview-iframe"
+            :src="previewUrl"
+            @load="handlePreviewIframeLoad"
+          />
         </div>
       </div>
     </section>
@@ -1996,6 +2153,25 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.selected-element-alert :deep(.ant-alert) {
+  border-radius: 14px;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  background:
+    radial-gradient(circle at 0 0, rgba(14, 165, 233, 0.18), transparent 55%),
+    rgba(255, 255, 255, 0.75);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.03),
+    0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+.selected-element-alert :deep(.ant-alert-message) {
+  font-weight: 600;
+}
+
+.selected-element-alert :deep(.ant-alert-description) {
+  color: rgba(15, 23, 42, 0.72);
 }
 
 .chat-input-bar-readonly {
