@@ -73,6 +73,10 @@ langchain4j:
       # 最大重试次数
       max-retries: 2
 
+logging:
+  level:
+    dev.langchain4j.model.openai: info
+    dev.langchain4j.model.TokenCounter: info
 
 
 

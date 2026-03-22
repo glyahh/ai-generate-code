@@ -2,6 +2,7 @@ package com.dbts.glyahhaigeneratecode.ai;
 
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
 
 
 public interface aiCodeGeneratorRoutineService {
@@ -12,6 +13,6 @@ public interface aiCodeGeneratorRoutineService {
      * @return
      */
     @SystemMessage(fromResource = "Prompt/Generate_Code_Enum_Routine.txt")
-    CodeGenTypeEnum aiCodeGeneratorRoutine (String Prompt);
+    CodeGenTypeEnum aiCodeGeneratorRoutine (@UserMessage String Prompt);
 
 }

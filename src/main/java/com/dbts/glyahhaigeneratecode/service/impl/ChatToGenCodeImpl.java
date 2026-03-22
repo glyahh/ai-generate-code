@@ -68,6 +68,10 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         // 5. 保存用户消息到对话历史(Mysql)
         chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), user.getId());
 
+        // 5.5. 生成前触发「旧轮次总结压缩」，降低上下文长度与 token 消耗
+        // 说明：该压缩仅作用于 Redis 管理的上下文（不修改 DB），对后续生成请求生效。
+        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId());
+
         // 6. 调用 AI 生成代码（流式）
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
 

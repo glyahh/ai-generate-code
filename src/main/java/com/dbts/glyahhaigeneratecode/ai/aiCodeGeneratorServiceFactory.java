@@ -1,6 +1,6 @@
 package com.dbts.glyahhaigeneratecode.ai;
 
-import com.dbts.glyahhaigeneratecode.ai.tool.FileWriteTool;
+import com.dbts.glyahhaigeneratecode.ai.tool.*;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -107,7 +107,7 @@ public class aiCodeGeneratorServiceFactory {
                 .builder()
                 .id(appId)
                 .chatMemoryStore(chatMemoryStore)
-                .maxMessages(25)
+                .maxMessages(20)
                 .build();
 
         // 预加载历史对话到内存（抛开用户刚发送的那条）
@@ -116,7 +116,7 @@ public class aiCodeGeneratorServiceFactory {
         if (appId != null && appId > 0) {
             try {
                 //
-                int loadedCount = chatHistoryService.turnHistoryToMemory(appId, build, 25);
+                int loadedCount = chatHistoryService.turnHistoryToMemory(appId, build, 20);
                 log.info("为应用预加载历史对话到内存，appId={}, loadedCount={}", appId, loadedCount);
             } catch (Exception e) {
                 log.error("预加载历史对话到内存失败，appId={}", appId, e);
@@ -132,7 +132,13 @@ public class aiCodeGeneratorServiceFactory {
                     // 将memoryId一同作为ai需要记忆的内容
                     // 将本来的ai默认记忆的Id转化为build类型的 以appId作为唯一标识的chatMemory
                     .chatMemoryProvider(memoryId -> build)
-                    .tools(new FileWriteTool())
+                    .tools(
+                            new FileWriteTool(),
+                            new FileReadTool(),
+                            new FileDeleteTool(),
+                            new FileModifyTool(),
+                            new FileDirReadTool()
+                    )
                     // 当ai调用了本来没有的tool时
                     .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
                             ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())

@@ -96,6 +96,8 @@ const hasMoreHistory = ref(true)
 const inputMessage = ref('')
 const sending = ref(false)
 const streaming = ref(false)
+// 首次生成时用于提示“分析代码 ing~”，避免用户干等
+const analyzingHintCloser = ref<null | (() => void)>(null)
 
 let eventSource: EventSource | null = null
 let nextMessageId = 1
@@ -206,6 +208,7 @@ const selectedElementTextPreview = computed(() => {
 })
 
 let visualEditorDetach: null | (() => void) = null
+let visualEditAutoRefreshTimer: number | null = null
 
 function clearSelectedElement() {
   selectedElement.value = null
@@ -214,6 +217,10 @@ function clearSelectedElement() {
 function exitVisualEditMode() {
   visualEditMode.value = false
   clearSelectedElement()
+  if (visualEditAutoRefreshTimer != null) {
+    window.clearTimeout(visualEditAutoRefreshTimer)
+    visualEditAutoRefreshTimer = null
+  }
   if (visualEditorDetach) {
     try {
       visualEditorDetach()
@@ -245,6 +252,9 @@ function tryAttachVisualEditor() {
       onSelected: (info) => {
         selectedElement.value = info
       },
+      onNavigateClear: () => {
+        selectedElement.value = null
+      },
       onError: (err) => {
         // 注入失败时给出明确提示（便于定位：跨域 / CSP / 预览未就绪）
         message.warning(err?.message || '可视化编辑注入失败，请刷新预览后重试')
@@ -252,25 +262,45 @@ function tryAttachVisualEditor() {
     })
     visualEditorDetach = res.detach
   } catch (e) {
-    visualEditMode.value = false
     message.warning('预览尚未就绪，暂时无法进入编辑模式')
   }
 }
 
 function toggleVisualEditMode() {
-  if (isReadOnly.value) return
-  if (!shouldShowWebsite.value) {
-    message.warning('请先完成至少一轮对话生成后再进入编辑模式')
+  if (isReadOnly.value) {
+    message.warning('当前应用处于只读状态，无法进入编辑模式')
     return
+  }
+  // 如果预览入口尚未就绪，依然允许切换编辑态，并立刻触发一次与“刷新应用”相同的探测请求，
+  // 等 iframe 重载后 handlePreviewIframeLoad 会重新注入。
+  if (!shouldShowWebsite.value && isVueProject.value) {
+    void handleManualRefreshApp()
   }
   visualEditMode.value = !visualEditMode.value
   if (!visualEditMode.value) {
     exitVisualEditMode()
     return
   }
+
+  message.info('已进入编辑模式：悬浮高亮元素，点击选中并锁定边框')
+
+  // 立即探测一次，确保会发出与“刷新应用”一致的 ?probe= 请求（便于确认链路）。
+  void probePreviewReady().then((ready) => {
+    if (ready) hasGenerated.value = true
+  })
+
+  // 经验问题：部分项目（尤其 Vue）进入编辑模式时立即注入可能打到旧文档/尚未就绪的 iframe。
+  // 因此模拟“先点编辑模式，约 0.5s 后再触发一次刷新”的人工操作，提高生效率。
+  if (visualEditAutoRefreshTimer != null) {
+    window.clearTimeout(visualEditAutoRefreshTimer)
+  }
+  visualEditAutoRefreshTimer = window.setTimeout(() => {
+    visualEditAutoRefreshTimer = null
+    void handleManualRefreshApp()
+  })
+
   nextTick(() => {
     tryAttachVisualEditor()
-    message.info('已进入编辑模式：悬浮高亮元素，点击选中并锁定边框')
   })
 }
 
@@ -583,7 +613,6 @@ function showRefreshAppCta(reason?: string) {
 
 async function handleManualRefreshApp() {
   if (!appInfo.value || !appId.value) return
-  if (!isVueProject.value) return
   refreshingApp.value = true
   try {
     // 强制刷新 iframe（key 变化会重新挂载）
@@ -1023,7 +1052,27 @@ function buildUiSegmentsFromFullText(fullText: string): UiSegment[] {
   })
 }
 
+/** 仅附加在发给模型的 prompt 末尾，不应在用户气泡中展示 */
+const VISUAL_EDIT_MODEL_ONLY_HINT =
+  '请根据以上元素信息，对该元素及其相关区域进行定向修改/优化,注意只能修改用户选中的区域,其他区域不可动,并不要再下面的对话中提到这句话'
+
+function stripVisualEditModelOnlyHint(text: string): string {
+  const t = text ?? ''
+  if (!t.includes(VISUAL_EDIT_MODEL_ONLY_HINT)) return t
+  const withBreak = `\n\n${VISUAL_EDIT_MODEL_ONLY_HINT}`
+  if (t.endsWith(withBreak)) {
+    return t.slice(0, -withBreak.length).trimEnd()
+  }
+  if (t.endsWith(VISUAL_EDIT_MODEL_ONLY_HINT)) {
+    return t.slice(0, -VISUAL_EDIT_MODEL_ONLY_HINT.length).replace(/\n+$/, '').trimEnd()
+  }
+  return t
+}
+
 function getMessageUiSegments(m: ChatMessage): UiSegment[] {
+  if (m.role === 'user') {
+    return [{ kind: 'markdown', content: stripVisualEditModelOnlyHint(m.content ?? '') }]
+  }
   if (m.role !== 'assistant') {
     return [{ kind: 'markdown', content: m.content ?? '' }]
   }
@@ -1070,6 +1119,15 @@ function stopStream() {
     eventSource = null
   }
   streaming.value = false
+  // 结束流式时关闭“分析代码 ing~”提示
+  if (analyzingHintCloser.value) {
+    try {
+      analyzingHintCloser.value()
+    } catch {
+      // ignore
+    }
+    analyzingHintCloser.value = null
+  }
 }
 
 async function sendMessage(text?: string) {
@@ -1099,7 +1157,15 @@ async function sendMessage(text?: string) {
   const selectedSnapshot = selectedElement.value
   const prompt =
     selectedSnapshot && visualEditMode.value
-      ? `${content}\n\n${formatSelectedElementForPrompt(selectedSnapshot)}\n\n请优先根据以上元素信息，对该元素及其相关区域进行定向修改/优化（如果定位不准，请给出更稳健的选择器建议）。`
+      ? `${content}\n\n${formatSelectedElementForPrompt(selectedSnapshot)}\n\n${VISUAL_EDIT_MODEL_ONLY_HINT}`
+      : content
+
+  // 用户在可视化编辑模式下选择了元素时：
+  // - 发给 AI 的 prompt 会附带完整元素信息（如上）
+  // - 同时对话区里用户这条消息也展示一份元素信息，避免“只在记忆里存在，用户看不到选择了什么”
+  const visibleUserContent =
+    selectedSnapshot && visualEditMode.value
+      ? `${content}\n\n${formatSelectedElementForPrompt(selectedSnapshot)}`
       : content
 
   // 发送后：清空选中并退出编辑模式（保持其余流程不变）
@@ -1109,8 +1175,8 @@ async function sendMessage(text?: string) {
 
   stopStream()
 
-  // 对话区仍展示用户原始输入（不把附加信息显示给用户，避免干扰）
-  appendUserMessage(content)
+  // 对话区展示用户输入 + 选中元素信息；模型专用引导句仅在 prompt 中，展示时由 getMessageUiSegments 剥离
+  appendUserMessage(visibleUserContent)
   sessionMessages.value.push({
     id: nextMessageId++,
     role: 'assistant',
@@ -1121,6 +1187,15 @@ async function sendMessage(text?: string) {
   inputMessage.value = ''
   sending.value = true
   streaming.value = true
+
+   // 首次生成时给出“分析代码 ing~”提示，告诉用户正在分析并决定生成格式
+  if (!hasGenerated.value && !appInfo.value?.hasGeneratedCode && !analyzingHintCloser.value) {
+    try {
+      analyzingHintCloser.value = message.loading('分析代码ing~ 请不要退出界面以及其他操作', 0)
+    } catch {
+      analyzingHintCloser.value = null
+    }
+  }
 
   try {
     const query = new URLSearchParams({
@@ -1567,7 +1642,13 @@ onBeforeUnmount(() => {
                             :language="mdSeg.language"
                             :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id"
                           />
-                          <span v-else class="text-segment">{{ mdSeg.content }}</span>
+                          <!-- 流式阶段优先突出代码块：对当前流式中的最后一条助手消息，暂不渲染纯文本片段，避免代码“先以白底文本出现” -->
+                          <span
+                            v-else-if="!(streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id)"
+                            class="text-segment"
+                          >
+                            {{ mdSeg.content }}
+                          </span>
                         </template>
                       </template>
                     </template>
@@ -1613,7 +1694,6 @@ onBeforeUnmount(() => {
               <AButton
                 v-if="!streaming"
                 class="ghost-btn"
-                :disabled="isReadOnly || !shouldShowWebsite"
                 :type="visualEditMode ? 'primary' : 'default'"
                 @click="toggleVisualEditMode"
               >
@@ -1642,7 +1722,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="preview-header-right">
-            <ATooltip v-if="refreshAppCtaVisible && isVueProject" :title="refreshAppCtaHint">
+            <ATooltip
+              v-if="shouldShowWebsite"
+              :title="refreshAppCtaVisible ? refreshAppCtaHint : '强制重新加载预览 iframe，避免浏览器缓存导致仍显示旧页面'"
+            >
               <a-button
                 size="small"
                 class="ghost-btn preview-refresh-btn"

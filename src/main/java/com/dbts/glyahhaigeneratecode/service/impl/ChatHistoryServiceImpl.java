@@ -265,8 +265,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
         log.info("已将对话历史加载到内存，appId={}, count={}", addId, restoredCount);
 
-        // 根据应用的代码生成类型追加对应的系统提示词到对话内存，避免混入无关 Prompt 干扰上下文
-        appendSystemPromptToMemory(addId, messageWindowChatMemory);
+        // system prompt 由 aiCodeGeneratorService 层的 @SystemMessage 注入，此处不再追加，避免重复注入
+        // appendSystemPromptToMemory(addId, messageWindowChatMemory);
 
         return restoredCount;
     }

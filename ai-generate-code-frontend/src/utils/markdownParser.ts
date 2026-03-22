@@ -94,6 +94,18 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
     }
   }
 
+  // 兜底优化：如果最后一段是短小的“代码收尾”（如 </script></body></html>），
+  // 且前一段已经是代码块，则把这部分直接拼接进前一个代码块，避免掉到白底文本区域。
+  if (segments.length >= 2) {
+    const last = segments[segments.length - 1]
+    const prev = segments[segments.length - 2]
+    if (prev.type === 'code' && last.type === 'text' && isCodeTail(last.content)) {
+      const tail = last.content.trimEnd()
+      prev.content = `${prev.content}\n${tail}`
+      segments.pop()
+    }
+  }
+
   // 如果没有匹配到任何代码块，返回整个文本作为普通文本
   if (segments.length === 0) {
     segments.push({
@@ -103,4 +115,47 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
   }
 
   return segments
+}
+
+/**
+ * 判断一段文本是否更像“代码结尾”而不是普通说明文本：
+ * - 行数不多（避免把整段说明都当作代码）
+ * - 不包含明显中文句子
+ * - 大部分非空行以 ; / } / >/标签结尾，或以 </xxx> / // 开头
+ */
+function isCodeTail(raw: string): boolean {
+  if (!raw) return false
+  const text = raw.trim()
+  if (!text) return false
+
+  const lines = text.split(/\r?\n/)
+  if (lines.length > 10) return false
+
+  // 含有较多中文字符时，倾向认为是自然语言说明
+  const chineseMatch = text.match(/[\u4e00-\u9fa5]/g)
+  if (chineseMatch && chineseMatch.length > 10) {
+    return false
+  }
+
+  let codeLikeLines = 0
+  let nonEmptyLines = 0
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    nonEmptyLines += 1
+
+    const startsWithComment = trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')
+    const startsWithClosingTag = trimmed.startsWith('</')
+    const endsWithCodePunct = /[;{}>\]]$/.test(trimmed)
+
+    if (startsWithComment || startsWithClosingTag || endsWithCodePunct) {
+      codeLikeLines += 1
+    }
+  }
+
+  if (nonEmptyLines === 0) return false
+
+  // 至少一半以上的非空行具备“代码样子”
+  return codeLikeLines / nonEmptyLines >= 0.6
 }

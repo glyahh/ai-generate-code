@@ -66,7 +66,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         App app = new App();
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
-        CodeGenTypeEnum codeGenTypeEnum = aiCodeGeneratorRoutine.aiCodeGeneratorRoutine("根据代码类型要求,给用户以上的代码要求描述生成一个代码类型,必须严格根据代码生成类型的名字生成");
+        CodeGenTypeEnum codeGenTypeEnum = aiCodeGeneratorRoutine.aiCodeGeneratorRoutine(app.getInitPrompt());
         app.setCodeGenType(codeGenTypeEnum.getValue());
 
         //这里最好使用这个save,不要mapper中的insert,否则id会因为没有声明而被覆盖雪花算法的值,而且其他未声明的字段会报数据库不能非空

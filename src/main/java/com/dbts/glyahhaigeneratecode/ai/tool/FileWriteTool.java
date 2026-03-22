@@ -15,6 +15,12 @@ import java.nio.file.StandardOpenOption;
 /**
  * 文件写入工具
  * 支持 AI 通过工具调用的方式写入文件
+ *
+ * 整体逻辑:
+ * 1. 先解析并拼接出文件的绝对路径
+ * 2. 确保父级目录已创建（不存在则自动创建）
+ * 3. 以覆盖写入的方式写入新内容
+ * 4. 返回相对路径给 AI，避免泄露本地绝对路径
  */
 @Slf4j
 public class FileWriteTool {
