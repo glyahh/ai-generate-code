@@ -7,7 +7,7 @@ public interface ChatHistoryConstant {
 
     /**
      * 超过该轮数后启动「前两轮合并为一轮」的压缩机制，避免 Redis 超限并节省 Token。
-     * 与 Redis maxMessages(25) 配合：预留系统提示词等空间，实际有效轮数控制在此以内。
+     * 与 Redis maxMessages(20) 配合：预留系统提示词等空间，实际有效轮数控制在此以内。
      */
     int MAX_ROUNDS_BEFORE_SUMMARY = 20;
 

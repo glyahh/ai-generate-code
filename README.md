@@ -13,7 +13,16 @@
 - **对话历史沉淀**：
   - 保存用户/AI消息、错误消息
   - 分页游标加载、按应用导出全量历史、统计对话轮数
-  - **超 20 轮自动摘要**（将最早两轮总结为一轮，减少上下文与 Token 消耗）
+  - **超 20 轮自动摘要**（将最早两轮总结为一轮，减少上下文与 Token 消耗；合并结果写入 **Redis 对话记忆**，不直接改 MySQL）
+- **AI 上下文与 Token 优化（后端）**：
+  - **生成前触发摘要**：用户每次发起对话生成前，调用 `trySummarizeOldestRoundsIfNeeded`：当 Redis 中「用户消息轮数」超过 `ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY`（20）时，将最早两轮对话经大模型压缩为更短摘要并回写 Redis，降低后续请求的 prompt 长度。
+  - **记忆窗口**：`MessageWindowChatMemory` 使用 **`maxMessages(20)`**（与 `turnHistoryToMemory(..., 20)` 对齐），限制单次请求带入的历史条数。
+  - **生成 Prompt 精简**：`Prompt/Single_File_Prompt.txt`、`Various_File_Prompt.txt`、`Vue_File_Prompt.txt` 等已收敛冗长示例与「一步步思考」类表述，引导模型**直接输出可落盘结果**，减少 completion 与推理类 token。
+- **应用对话页 / 可视化编辑（前端）**：
+  - 预览区支持 **编辑模式**：父页在 iframe 上覆层采集指针事件，向同源预览页注入高亮与选中逻辑（`ai-generate-code-frontend/src/utils/visualWebsiteEditor.ts`）。
+  - **单击**：选中元素，信息可附加到用户提示词；**双击**：向 iframe 内目标派发穿透点击（含 `a[href]` 归一），便于 **Vue Router / SPA** 进入子页面而不被「只选中不导航」拦截。
+  - **路由切换后清除选中**：监听 iframe 内 `location.href` 变化（定时轮询 + `hashchange` / `popstate`），在子页面跳转后清除子页 outline 与父页选中框，并清空「已选中元素」提示（`onNavigateClear`）。
+  - **刷新应用**：预览区头部「刷新应用」在**任意已生成预览类型**（HTML / 多文件 / Vue）下均可显示，通过递增 iframe 版本参数强制重载预览，避免缓存导致旧页面。
 - **权限与运营能力**：
   - 用户注册/登录/注销、会话态登录
   - 管理员：用户管理、应用管理（列表/更新/删除）
@@ -56,7 +65,11 @@
   - `controller/`：应用、对话生成、历史、静态资源、用户等接口
   - `core/`：`AiCodeGeneratorFacade` + parser/saver 执行器
   - `service/`：应用部署、对话历史、申请审核等业务
+  - **对话与生成串联**：`service/impl/ChatToGenCodeImpl` 在保存用户消息后、调用 AI 前触发 `ChatHistoryService.trySummarizeOldestRoundsIfNeeded`；`service/impl/ChatHistoryServiceImpl` 实现摘要与 Redis 同步；`ai/aiCodeGeneratorServiceFactory` 配置 LangChain4j `MessageWindowChatMemory`（`maxMessages(20)`）与历史预载。
+  - **资源**：`src/main/resources/Prompt/*.txt` 为各代码生成类型的系统提示词（可随产品迭代调整长度与约束）。
 - **前端**：`ai-generate-code-frontend/`（Vue3 + Vite）
+  - **应用对话页**：`src/page/App/AppChatView.vue`（预览 iframe、编辑模式开关、「刷新应用」、选中元素与提示词拼接）
+  - **可视化编辑注入**：`src/utils/visualWebsiteEditor.ts`
 - **生成产物**：
   - `temp/code_output/`：生成并落盘后的可预览代码
   - `temp/code_deploy/`：部署后的静态站点目录（按 `deployKey`）
@@ -96,10 +109,10 @@ npm run dev
   - [ ] 应用封面图
   - [ ] 项目下载
   - [ ] 智能路由
-- [ ] **第九期：可视化修改**
-  - [ ] 方案设计
-  - [ ] 前端开发
-  - [ ] 后端开发
+- [ ] **第九期：可视化修改**（已部分落地，持续迭代）
+  - [x] 方案设计（预览 iframe 覆层 + 同源注入 + 选中信息回传）
+  - [x] 前端开发（编辑模式、单击选中 / 双击导航、路由变更清选中、全类型「刷新应用」）
+  - [ ] 后端开发（若后续需服务端持久化选中元数据或协同编辑，可再扩展）
 - [ ] **第十期：AI 工作流**
   - [ ] LangGraph4j 调研 / 接入
   - [ ] 工作流开发
