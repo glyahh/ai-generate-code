@@ -38,6 +38,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -63,6 +66,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     /** 用于在 Redis 中管理对话记忆和轮数统计，仅通过压缩 Redis 降低上下文长度（不修改 DB） */
     @Resource
     private ChatMemoryStore chatMemoryStore;
+
+    private static final int MEMORY_AI_MESSAGE_MAX_LENGTH = 2400;
+    private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 900;
+    private static final int MEMORY_AI_CODE_SUMMARY_MAX_LENGTH = 500;
+    private static final Pattern HTML_BLOCK_PATTERN = Pattern.compile("```html\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CSS_BLOCK_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
+    private static final Pattern JS_BLOCK_PATTERN = Pattern.compile("```(?:js|javascript)\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
 
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
@@ -212,11 +222,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
         // 拿到改对话的系统提示词 systemPromptForFilter
         String systemPromptForFilter = null;
+        CodeGenTypeEnum appCodeGenTypeEnum = null;
         try {
             // 优先按应用 codeGenType 取对应系统提示词（与 appendSystemPromptToMemory 一致）
             App app = appService.getById(addId);
             if (app != null) {
                 CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
+                appCodeGenTypeEnum = codeGenTypeEnum;
                 String promptPath = null;
                 if (codeGenTypeEnum != null) {
                     switch (codeGenTypeEnum) {
@@ -254,7 +266,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                         log.debug("跳过写入 Redis：MySQL 中该条 AI 消息为系统提示词，appId={}", addId);
                         break;
                     }
-                    messageWindowChatMemory.add(new AiMessage(history.getMessage()));
+                    // 仅对 HTML / MULTI_FILE 的超长历史 AI 代码做内存压缩，降低后续请求 token 消耗
+                    String aiMessageForMemory = compactAiMessageForMemory(history.getMessage(), appCodeGenTypeEnum);
+                    messageWindowChatMemory.add(new AiMessage(aiMessageForMemory));
                     restoredCount++;
                     break;
                 default:
@@ -269,6 +283,92 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // appendSystemPromptToMemory(addId, messageWindowChatMemory);
 
         return restoredCount;
+    }
+
+    /**
+     * 将历史 AI 长消息压缩后写入 ChatMemory（仅影响后续发给模型的上下文，不改 DB 原文）：
+     * - 仅 HTML / MULTI_FILE 生效
+     * - 优先保留 html/css/js 三个代码块的前缀片段
+     * - 其余类型或短消息保持原样，避免影响现有行为
+     */
+    private String compactAiMessageForMemory(String rawMessage, CodeGenTypeEnum codeGenTypeEnum) {
+        if (StrUtil.isBlank(rawMessage)) {
+            return rawMessage;
+        }
+        if (codeGenTypeEnum != CodeGenTypeEnum.HTML && codeGenTypeEnum != CodeGenTypeEnum.MULTI_FILE) {
+            return rawMessage;
+        }
+        if (rawMessage.length() <= MEMORY_AI_MESSAGE_MAX_LENGTH) {
+            return rawMessage;
+        }
+
+        String html = extractAndTrimCodeBlock(rawMessage, HTML_BLOCK_PATTERN, MEMORY_AI_CODE_BLOCK_KEEP_LENGTH, "HTML");
+        String css = extractAndTrimCodeBlock(rawMessage, CSS_BLOCK_PATTERN, MEMORY_AI_CODE_BLOCK_KEEP_LENGTH, "CSS");
+        String js = extractAndTrimCodeBlock(rawMessage, JS_BLOCK_PATTERN, MEMORY_AI_CODE_BLOCK_KEEP_LENGTH, "JavaScript");
+
+        StringBuilder sb = new StringBuilder(2800);
+        sb.append("[历史AI代码已压缩，仅用于降低上下文 token]\n");
+        sb.append("原消息较长，以下为关键代码片段摘要：\n");
+        if (StrUtil.isNotBlank(html)) {
+            sb.append("```html\n").append(html).append("\n```\n");
+        }
+        if (StrUtil.isNotBlank(css)) {
+            sb.append("```css\n").append(css).append("\n```\n");
+        }
+        if (StrUtil.isNotBlank(js)) {
+            sb.append("```javascript\n").append(js).append("\n```\n");
+        }
+
+        // 若未提取到代码块，退化为头部截断，保证仍有历史语义
+        if (sb.length() < 80) {
+            String head = rawMessage.substring(0, Math.min(MEMORY_AI_MESSAGE_MAX_LENGTH, rawMessage.length()));
+            return head + "\n...（历史内容已截断）";
+        }
+        return sb.toString();
+    }
+
+    private String extractAndTrimCodeBlock(String message, Pattern pattern, int maxLen, String langLabel) {
+        Matcher matcher = pattern.matcher(message);
+        if (!matcher.find()) {
+            return "";
+        }
+        String code = StrUtil.blankToDefault(matcher.group(1), "");
+        if (code.length() <= maxLen) {
+            return code;
+        }
+        String summarized = summarizeLongCodeBlock(code, langLabel);
+        if (StrUtil.isNotBlank(summarized)) {
+            return "/* 历史代码块较长，以下为自动总结 */\n" + summarized;
+        }
+        return code.substring(0, maxLen) + "\n// ...历史代码片段已截断";
+    }
+
+    /**
+     * 超长代码块摘要：让模型归纳“做了哪些内容”，用于压缩历史上下文。
+     * 若摘要失败，返回空串，调用方再走原截断兜底。
+     */
+    private String summarizeLongCodeBlock(String code, String langLabel) {
+        try {
+            String prompt = "请阅读以下 " + langLabel + " 代码，简要总结它“做了哪些功能和关键逻辑”。\n"
+                    + "要求：\n"
+                    + "1) 用中文，2-5 行。\n"
+                    + "2) 只写功能与逻辑要点，不要建议，不要改写代码。\n"
+                    + "3) 不要包含 markdown 代码块标记。\n\n"
+                    + "代码如下：\n"
+                    + code;
+            String summary = chatModel.chat(prompt);
+            if (StrUtil.isBlank(summary)) {
+                return "";
+            }
+            String normalized = summary.trim();
+            if (normalized.length() > MEMORY_AI_CODE_SUMMARY_MAX_LENGTH) {
+                normalized = normalized.substring(0, MEMORY_AI_CODE_SUMMARY_MAX_LENGTH);
+            }
+            return normalized;
+        } catch (Exception e) {
+            log.warn("超长代码块摘要失败，lang={}", langLabel, e);
+            return "";
+        }
     }
 
     /**
@@ -522,6 +622,42 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             chatMemoryStore.updateMessages(appId, newList);
         } catch (Exception e) {
             log.error("同步 Redis 对话记忆失败，appId={}", appId, e);
+        }
+    }
+
+    @Override
+    public void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+        if (appId == null || appId <= 0) {
+            return;
+        }
+        if (codeGenTypeEnum != CodeGenTypeEnum.HTML && codeGenTypeEnum != CodeGenTypeEnum.MULTI_FILE) {
+            return;
+        }
+        try {
+            List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
+            if (messages == null || messages.isEmpty()) {
+                return;
+            }
+            boolean changed = false;
+            List<ChatMessage> newList = new ArrayList<>(messages.size());
+            for (ChatMessage message : messages) {
+                if (message instanceof AiMessage aiMessage) {
+                    String raw = aiMessage.text();
+                    String compacted = compactAiMessageForMemory(raw, codeGenTypeEnum);
+                    if (!Objects.equals(raw, compacted)) {
+                        changed = true;
+                    }
+                    newList.add(new AiMessage(compacted));
+                } else {
+                    newList.add(message);
+                }
+            }
+            if (changed) {
+                chatMemoryStore.updateMessages(appId, newList);
+                log.info("已在线压缩 Redis 历史上下文，appId={}, codeGenType={}", appId, codeGenTypeEnum.getValue());
+            }
+        } catch (Exception e) {
+            log.warn("在线压缩 Redis 历史上下文失败，appId={}", appId, e);
         }
     }
 }

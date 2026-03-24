@@ -1,10 +1,13 @@
-package com.dbts.glyahhaigeneratecode.ai.tool;
+package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
+import cn.hutool.json.JSONObject;
+import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,7 +26,8 @@ import java.nio.file.StandardOpenOption;
  * 4. 读取原始内容并按旧内容 → 新内容进行替换后回写
  */
 @Slf4j
-public class FileModifyTool {
+@Component
+public class FileModifyTool extends BaseTool {
 
     @Tool("修改文件内容，用新内容替换指定的旧内容")
     public String modifyFile(
@@ -93,7 +97,9 @@ public class FileModifyTool {
                 "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
                 "vite.config.js", "vite.config.ts", "vue.config.js",
                 "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json",
-                "index.html", "main.js", "main.ts", "App.vue", ".gitignore", "README.md"
+                // 允许对 `src/App.vue` 进行局部可视化编辑（例如只改标题/文案），
+                // 否则会导致 `modifyFile` 无法生效，从而出现“修改用户代码效果失败”。
+                "index.html", "main.js", "main.ts", ".gitignore", "README.md"
         };
         for (String important : importantFiles) {
             if (important.equalsIgnoreCase(fileName)) {
@@ -101,6 +107,32 @@ public class FileModifyTool {
             }
         }
         return false;
+    }
+
+    @Override
+    public String getToolName() {
+        return "modifyFile";
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "修改文件";
+    }
+
+    @Override
+    public String generateToolExecutedResult(JSONObject arguments) {
+        return String.format("""
+            [工具调用] %s %s
+            替换前:
+            ```
+            %s
+            ```
+            替换后:
+            ```
+            %s
+            ```
+            """, getDisplayName(), arguments.getStr("relativeFilePath"),
+                arguments.getStr("oldContent"), arguments.getStr("newContent"));
     }
 }
 

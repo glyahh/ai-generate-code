@@ -10,6 +10,7 @@ import {
   Pagination as APagination,
   Empty as AEmpty,
   Tag as ATag,
+  Tooltip as ATooltip,
 } from 'ant-design-vue'
 import type { AppVO } from '@/api'
 import {
@@ -20,6 +21,7 @@ import {
   appUndeployUsingPost,
 } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
+import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -27,8 +29,65 @@ const userLoginStore = UserLoginStore()
 const prompt = ref('')
 const creating = ref(false)
 
+const codeTypePickerOpen = ref(false)
+const selectedCodeType = ref<string>(CodeGenTypeEnum.MULTI_FILE)
+
+const CODE_TYPE_CHOICES: Array<{
+  label: string
+  value: CodeGenTypeEnum
+  tip: string
+  accent: 'html' | 'multi_file' | 'vue_project'
+}> = [
+  {
+    label: 'HTML',
+    value: CodeGenTypeEnum.HTML,
+    tip: '适合：单文件静态页面、简单落地页、无需构建流程的轻量作品',
+    accent: 'html',
+  },
+  {
+    label: '多文件',
+    value: CodeGenTypeEnum.MULTI_FILE,
+    tip: '适合：需要清晰目录结构的原生 HTML/CSS/JS 多文件项目（多个页面/模块化交互）',
+    accent: 'multi_file',
+  },
+  {
+    label: 'Vue',
+    value: CodeGenTypeEnum.VUE_PROJECT,
+    tip: '适合：SPA/组件化/路由与状态管理的项目（需要更丰富页面结构）',
+    accent: 'vue_project',
+  },
+]
+
+const selectedCodeTypeLabel = computed(() => {
+  return CODE_TYPE_CHOICES.find((x) => x.value === selectedCodeType.value)?.label ?? '多文件'
+})
+
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
+const DEPLOY_FALLBACK_PORT = String(import.meta.env.VITE_DEPLOY_FALLBACK_PORT ?? '8124')
+
+function normalizeDeployUrl(rawUrl: unknown): string {
+  // debug 证据：后端返回的 deploy url 在本地开发场景可能缺少协议或端口，直接 window.open 会失败。
+  const raw = String(rawUrl ?? '').trim()
+  if (!raw) return ''
+  try {
+    // 允许后端返回完整 URL；同时统一补齐 localhost 缺省端口，避免命中 :80 导致打不开。
+    const abs = raw.startsWith('http://') || raw.startsWith('https://')
+      ? new URL(raw)
+      : new URL(raw.startsWith('//') ? `${window.location.protocol}${raw}` : `http://${raw}`)
+    if (abs.hostname === 'localhost' && !abs.port) {
+      abs.port = DEPLOY_FALLBACK_PORT
+    }
+    return abs.toString()
+  } catch {
+    // 若返回的是相对路径（例如 /xxx/），按当前站点补全，至少保证“一键访问”是可打开的 URL。
+    try {
+      return new URL(raw, window.location.origin).toString()
+    } catch {
+      return raw
+    }
+  }
+}
 
 const quickPrompts = [
   {
@@ -122,7 +181,7 @@ async function handleCreateApp() {
       body: {
         appName: buildAppNameFromPrompt(content),
         initPrompt: content,
-        codeGenType: 'multi_file',
+        codeGenType: selectedCodeType.value,
       },
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
@@ -132,7 +191,11 @@ async function handleCreateApp() {
       router.push({
         name: 'app-chat',
         params: { id: appId },
-        query: { autoSend: 'true' },
+        query: {
+          autoSend: 'true',
+          // 兼容参数：当前约束由后端按 app.codeGenType 控制
+          codeTypeChoice: selectedCodeTypeLabel.value,
+        },
       })
     } else {
       message.error(res.data.message || '创建应用失败')
@@ -149,6 +212,17 @@ function handleQuickPrompt(item: { label: string; value: string }) {
   if (creating.value) return
   // 只填充文案，不直接创建应用，交由用户点击“开始生成”
   prompt.value = item.value
+}
+
+function toggleCodeTypePicker() {
+  if (creating.value) return
+  codeTypePickerOpen.value = !codeTypePickerOpen.value
+}
+
+function selectCodeType(value: CodeGenTypeEnum) {
+  if (creating.value) return
+  selectedCodeType.value = value
+  codeTypePickerOpen.value = false
 }
 
 async function loadMyApps() {
@@ -231,7 +305,8 @@ async function handleDeploy(app: AppVO) {
     })
     hide()
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
-      const url = res.data.data
+      // debug 证据：部署成功但无法访问时，优先在前端归一化 URL，规避“缺协议/缺端口”问题。
+      const url = normalizeDeployUrl(res.data.data)
       deployUrl.value = url
       deployModalVisible.value = true
       message.success('部署成功')
@@ -289,6 +364,11 @@ async function handleDeployCopy() {
 
 function handleDeployVisit() {
   if (!deployUrl.value) return
+  // debug 证据：若 URL 格式异常，明确给出提示，避免用户点了没反应。
+  if (!/^https?:\/\//i.test(deployUrl.value)) {
+    message.error('部署地址格式异常，请复制地址后手动检查')
+    return
+  }
   window.open(deployUrl.value, '_blank')
 }
 
@@ -381,6 +461,38 @@ onMounted(() => {
                 支持自然语言描述，越具体效果越好
               </div>
               <div class="prompt-actions">
+                <div class="code-type-picker-wrap">
+                  <button
+                    type="button"
+                    class="code-type-picker-btn"
+                    :aria-expanded="codeTypePickerOpen"
+                    @click="toggleCodeTypePicker"
+                  >
+                    <span class="code-type-picker-btn-label">代码类型</span>
+                    <span class="code-type-picker-btn-value">{{ selectedCodeTypeLabel }}</span>
+                    <span class="code-type-picker-btn-caret">▾</span>
+                  </button>
+                  <div v-show="codeTypePickerOpen" class="code-type-options">
+                    <ATooltip
+                      v-for="c in CODE_TYPE_CHOICES"
+                      :key="c.value"
+                      :title="c.tip"
+                      placement="right"
+                    >
+                      <button
+                        type="button"
+                        class="code-type-option-btn"
+                        :class="[
+                          `code-type-option-btn--${c.accent}`,
+                          selectedCodeType === c.value ? 'is-selected' : '',
+                        ]"
+                        @click="selectCodeType(c.value)"
+                      >
+                        {{ c.label }}
+                      </button>
+                    </ATooltip>
+                  </div>
+                </div>
                 <AButton type="primary" shape="round" :loading="creating" @click="handleCreateApp">
                   开始生成
                 </AButton>
@@ -690,6 +802,164 @@ onMounted(() => {
   gap: 8px;
 }
 
+.code-type-picker-wrap {
+  position: relative;
+}
+
+.code-type-picker-btn {
+  height: 36px;
+  border-radius: 999px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  transition:
+    transform 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    border-color 0.16s ease-out;
+  color: #0f172a;
+  position: relative;
+  overflow: hidden;
+}
+
+.code-type-picker-btn::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 999px;
+  background: linear-gradient(
+    120deg,
+    rgba(59, 130, 246, 0.55),
+    rgba(45, 212, 191, 0.45),
+    rgba(244, 114, 182, 0.35)
+  );
+  opacity: 0;
+  transition: opacity 0.16s ease-out;
+  z-index: 0;
+}
+
+.code-type-picker-btn > * {
+  position: relative;
+  z-index: 1;
+}
+
+.code-type-picker-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+}
+
+.code-type-picker-btn:hover::before {
+  opacity: 1;
+}
+
+.code-type-picker-btn-label {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.code-type-picker-btn-value {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.code-type-picker-btn-caret {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.code-type-options {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: -30px;
+  z-index: 20;
+
+  width: 120px;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+
+  animation: codeTypePickerPop 160ms ease-out;
+}
+
+@keyframes codeTypePickerPop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.code-type-option-btn {
+  height: 34px;
+  width: 100%;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition:
+    transform 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    background 0.16s ease-out,
+    border-color 0.16s ease-out;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.8);
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.code-type-option-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.code-type-option-btn--html {
+  --accent: rgba(249, 115, 22, 0.9);
+}
+.code-type-option-btn--multi_file {
+  --accent: rgba(34, 197, 94, 0.92);
+}
+.code-type-option-btn--vue_project {
+  --accent: rgba(59, 130, 246, 0.95);
+}
+
+.code-type-option-btn.is-selected {
+  background: color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.7));
+  border-color: color-mix(in srgb, var(--accent) 55%, rgba(15, 23, 42, 0.08));
+  color: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+}
+
+.code-type-option-btn.is-selected:hover {
+  border-color: color-mix(in srgb, var(--accent) 70%, rgba(15, 23, 42, 0.08));
+}
+
 .apps-section {
   background: #ffffff;
   border-radius: 20px;
@@ -812,6 +1082,7 @@ onMounted(() => {
   line-height: 1.6;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

@@ -1,10 +1,14 @@
-package com.dbts.glyahhaigeneratecode.ai.tool;
+package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
+import cn.hutool.core.io.FileUtil;
+import cn.hutool.json.JSONObject;
+import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,7 +27,8 @@ import java.nio.file.StandardOpenOption;
  * 4. 返回相对路径给 AI，避免泄露本地绝对路径
  */
 @Slf4j
-public class FileWriteTool {
+@Component
+public class FileWriteTool extends BaseTool {
 
     //告诉ai这个方法的作用
     @Tool("写入文件到指定路径")
@@ -60,5 +65,29 @@ public class FileWriteTool {
             log.error(errorMessage, e);
             return errorMessage;
         }
+    }
+
+    @Override
+    public String getToolName() {
+        return "writeFile";
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "写入文件";
+    }
+
+    // JSONObject 为 AI 调用工具时序列化后的参数 JSON，按 key 取值
+    @Override
+    public String generateToolExecutedResult(JSONObject arguments) {
+        return String.format("""
+            [工具调用] %s %s
+            文件内容:
+            ```%s
+            %s
+            ```
+            """, getDisplayName(), arguments.getStr("relativeFilePath"),
+                FileUtil.getSuffix(arguments.getStr("relativeFilePath")),
+                arguments.getStr("content"));
     }
 }

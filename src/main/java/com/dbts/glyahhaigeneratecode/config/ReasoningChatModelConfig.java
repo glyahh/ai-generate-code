@@ -22,7 +22,7 @@ public class ReasoningChatModelConfig {
     private final String reasoningModelName = "qwen3-coder-next";
     private final int reasoningMaxTokens = 32768;
     // 普通模型
-    private final String modelName = "glm-4.7";
+    private final String modelName = "qwen3-vl-flash-2026-01-22";
     private final int maxTokens = 8192;
 
 

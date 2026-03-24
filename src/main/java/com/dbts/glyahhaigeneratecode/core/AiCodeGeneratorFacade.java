@@ -8,6 +8,7 @@ import com.dbts.glyahhaigeneratecode.ai.model.MultiFileCodeResult;
 import com.dbts.glyahhaigeneratecode.ai.model.message.AiResponseMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.ToolExecutedMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
+import com.dbts.glyahhaigeneratecode.core.context.HtmlMultiFileEditContextBuilder;
 import com.dbts.glyahhaigeneratecode.core.parser.CodeParserExecutor;
 import com.dbts.glyahhaigeneratecode.core.saver.CodeFileSaverExecutor;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
@@ -27,6 +28,8 @@ import java.io.File;
  * AI 代码生成外观类，组合生成和保存功能
  * 门面类(工具类)
  * 大致思路: 按枚举走分支 → 调 AI 拿代码(普通拿结果/流式拼字符串) → 解析+保存走两个 Executor → 返回目录或 Flux
+ *
+ * 这是整个项目的灵魂根源
  */
 @Service
 @Slf4j
@@ -37,6 +40,9 @@ public class AiCodeGeneratorFacade {
 
     @Resource
     private aiCodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
+
+    @Resource
+    private HtmlMultiFileEditContextBuilder htmlMultiFileEditContextBuilder;
 
     private static final CodeFileSaverExecutor codeFileSaverExecutor = new CodeFileSaverExecutor();
     private static final CodeParserExecutor codeParserExecutor = new CodeParserExecutor();
@@ -110,7 +116,9 @@ public class AiCodeGeneratorFacade {
         return result.doOnNext(CodeBuilder::append)
                 .doOnComplete(() -> {
                     try {
+                        // 拿到代码的类型(Html这种)
                         Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, CodeBuilder.toString());
+                        // 根据类型保存代码
                         File file = codeFileSaverExecutor.execute(codeGenTypeEnum, executeResult, appId);
                         log.info("保存的目录: {}", file.getAbsolutePath());
                     } catch (Exception e) {
@@ -129,7 +137,9 @@ public class AiCodeGeneratorFacade {
         // 1. 获取流式输出的复合代码(部分)   generate
         // 获取 AI 服务实例
         aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.MULTI_FILE);
-        Flux<String> result = aiCodeGeneratorService.generateCodeMultiFileStream(userMessage);
+        // 仅在“修改意图 + 已有文件”时附加片段上下文；否则保持原消息不变
+        String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.MULTI_FILE, appId);
+        Flux<String> result = aiCodeGeneratorService.generateCodeMultiFileStream(finalPrompt);
 
         // 2. 创建StringBuilder拼接复合代码     save
         return processCodeStream(CodeGenTypeEnum.MULTI_FILE, result, appId);
@@ -144,7 +154,9 @@ public class AiCodeGeneratorFacade {
         // 1. 获取流式输出的HTML代码(部分)  generate
         // 获取 AI 服务实例
         aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.HTML);
-        Flux<String> result = aiCodeGeneratorService.generateCodeHTMLStream(userMessage);
+        // 构造提示词    (压缩ai对话历史)
+        String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.HTML, appId);
+        Flux<String> result = aiCodeGeneratorService.generateCodeHTMLStream(finalPrompt);
 
         // 2. 创建StringBuilder拼接HTML代码   save
         return processCodeStream(CodeGenTypeEnum.HTML, result, appId);
@@ -167,16 +179,19 @@ public class AiCodeGeneratorFacade {
 
 
     /**
+     * 将工具调用的TokenStream转化成Flux<String>发往前端
+     *
      * 将TokenStream转换为Flux  适配器
      * @param tokenStream
      * @return
      */
-    private Flux<String> turnTokenStreamToFlex(TokenStream tokenStream) {
+    private Flux<String> turnTokenStreamToFlex (TokenStream tokenStream) {
         // 响应式编程
         return Flux.create(sink -> {
                     // AI回复
-            tokenStream.onPartialResponse((String partialResponse) -> {
+                    tokenStream.onPartialResponse((String partialResponse) -> {
                         AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
+                        // 将ai普通恢复转换成Json格式
                         sink.next(JSONUtil.toJsonStr(aiResponseMessage));
                     })
                     // 工具执行请求

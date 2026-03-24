@@ -1,10 +1,11 @@
 package com.dbts.glyahhaigeneratecode.core.handler;
 
-import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.dbts.glyahhaigeneratecode.ai.model.message.*;
+import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
+import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
@@ -33,6 +34,8 @@ public class JsonMessageStreamHandler {
     @Resource
     private vueProjectBuilder vueProjectBuilder;
 
+    @Resource
+    private ToolManager toolManager;
 
     /**
      * 处理 TokenStream（VUE_PROJECT）
@@ -105,28 +108,28 @@ public class JsonMessageStreamHandler {
                     String toolId = toolRequestMessage.getId();
                     // 检查是否是第一次看到这个工具 ID
                     if (toolId != null && !seenToolIds.contains(toolId)) {
-                        // 第一次调用这个工具，记录 ID 并完整返回工具信息
                         seenToolIds.add(toolId);
-                        return "\n[选择工具] 写入文件\n";
-                    } else {
-                        // 不是第一次调用这个工具，直接返回空
-                        return "";
+                        BaseTool tool = toolManager.getTool(toolRequestMessage.getName());
+                        if (tool != null) {
+                            return tool.generateToolRequestResponse();
+                        }
+                        return String.format("\n\n[选择工具] %s\n",
+                                StrUtil.blankToDefault(toolRequestMessage.getName(), "未知工具"));
                     }
+                    return "";
                 }
 
                 case TOOL_EXECUTED -> {
                     ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
                     JSONObject jsonObject = JSONUtil.parseObj(toolExecutedMessage.getArguments());
-                    String relativeFilePath = jsonObject.getStr("relativeFilePath");
-                    String suffix = FileUtil.getSuffix(relativeFilePath);
-                    String content = jsonObject.getStr("content");
-                    String result = String.format("""
-                            [工具调用] 写入文件 %s
-                            ```%s
-                            %s
-                            ```
-                            """, relativeFilePath, suffix, content);
-                    // 输出前端和要持久化的内容
+                    BaseTool tool = toolManager.getTool(toolExecutedMessage.getName());
+                    String result;
+                    if (tool != null) {
+                        result = tool.generateToolExecutedResult(jsonObject);
+                    } else {
+                        // 未注册工具时兜底（兼容旧流式消息或名称不一致）
+                        result = fallbackToolExecutedFormatting(toolExecutedMessage.getName(), jsonObject);
+                    }
                     String output = String.format("\n\n%s\n\n", result);
                     chatHistoryStringBuilder.append(output);
                     return output;
@@ -138,5 +141,17 @@ public class JsonMessageStreamHandler {
             }
         }
         throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的消息类型");
+    }
+
+    /**
+     * 当 {@link ToolManager} 中找不到对应工具时的兜底：固定前缀「滚木工具」，仅展示工具英文名与路径，不展开参数正文。
+     */
+    private String fallbackToolExecutedFormatting(String toolName, JSONObject jsonObject) {
+        String path = StrUtil.blankToDefault(
+                jsonObject.getStr("relativeFilePath"),
+                jsonObject.getStr("relativeDirPath"));
+        return String.format("[滚木工具] %s %s",
+                StrUtil.blankToDefault(toolName, "滚木"),
+                StrUtil.blankToDefault(path, "-"));
     }
 }

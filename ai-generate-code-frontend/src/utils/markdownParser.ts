@@ -1,6 +1,9 @@
 /**
  * Markdown 代码块解析工具
  * 用于将 AI 返回的 markdown 格式文本解析成代码块和普通文本片段
+ *
+ * 结束围栏必须与 CommonMark 一致：独占一行（行前最多 3 个空格），仅由反引号与行尾空白组成。
+ * 这样不会把源码里出现的连续 ```（如字符串 "```"）误当作围栏结束。
  */
 
 export interface TextSegment {
@@ -9,104 +12,141 @@ export interface TextSegment {
   language?: string // 代码块的语言类型（如 'css', 'javascript', 'html' 等）
 }
 
+/** 行首可选 0–3 空格 + ``` + info，整行以换行结束 */
+const OPEN_FENCE_LINE_RE = /(?:^|[\r\n])( {0,3})(`{3,})([^\r\n]*)\r?\n/
+
+/**
+ * 判断一行是否为「闭合围栏行」：缩进后反引号串长度 >= minRun，且其后仅有空白
+ */
+export function isClosingFenceLine(lineRaw: string, minRun: number): boolean {
+  const line = lineRaw.replace(/\r$/, '')
+  let i = 0
+  while (i < line.length && i < 4 && line[i] === ' ') i++
+
+  let ticks = 0
+  while (i + ticks < line.length && line[i + ticks] === '`') ticks++
+  i += ticks
+  if (ticks < minRun) return false
+
+  while (i < line.length) {
+    if (line[i] !== ' ' && line[i] !== '\t') return false
+    i++
+  }
+  return true
+}
+
+/**
+ * 从 text[from] 起按行扫描，找到第一行闭合围栏；返回该行起始下标与消费结束下标（含围栏行后的换行）
+ */
+export function findClosingFenceLineRange(
+  text: string,
+  from: number,
+  minFenceRun: number,
+): { closeLineStart: number; consumeEnd: number } | null {
+  const n = text.length
+  let pos = from
+
+  while (pos < n) {
+    const lineEndIdx = text.indexOf('\n', pos)
+    const end = lineEndIdx === -1 ? n : lineEndIdx
+    let line = text.slice(pos, end)
+    if (line.endsWith('\r')) line = line.slice(0, -1)
+
+    if (isClosingFenceLine(line, minFenceRun)) {
+      const consumeEnd = lineEndIdx === -1 ? n : lineEndIdx + 1
+      return { closeLineStart: pos, consumeEnd }
+    }
+    if (lineEndIdx === -1) break
+    pos = lineEndIdx + 1
+  }
+  return null
+}
+
+/**
+ * 流式工具写入 buffer：在整块代码 buffer 内查找「行对齐」的结束围栏（与 parseMarkdownWithCode 规则一致）
+ */
+export function findLineAlignedClosingFenceInBuffer(
+  buffer: string,
+  minBackticks = 3,
+): { codeEnd: number; consumeEnd: number } | null {
+  const found = findClosingFenceLineRange(buffer, 0, minBackticks)
+  if (!found) return null
+  return { codeEnd: found.closeLineStart, consumeEnd: found.consumeEnd }
+}
+
 /**
  * 解析包含代码块的 markdown 文本
- * 支持格式：```语言名\n代码内容\n```
- * 支持流式输出：即使代码块未完成（只有开始标记 ```语言名\n，没有结束标记 ```），也会实时显示
- * 
- * @param text 原始文本内容
- * @returns 解析后的文本片段数组
+ * 支持格式：```语言名\n代码内容\n```（结束 ``` 必须独占一行）
+ * 支持流式输出：只有开始围栏、尚无结束围栏时，将剩余内容视为未完成代码块
  */
 export function parseMarkdownWithCode(text: string): TextSegment[] {
   const segments: TextSegment[] = []
-  // 匹配完整的代码块：```语言名\n代码内容\n```
-  // 兼容不同换行符（\n 或 \r\n）
-  const codeBlockRegex = /```(\w+)?\r?\n([\s\S]*?)```/g
+  let cursor = 0
+  const n = text.length
 
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-  const matches: RegExpExecArray[] = []
+  while (cursor < n) {
+    const slice = text.slice(cursor)
+    const m = slice.match(OPEN_FENCE_LINE_RE)
+    if (!m || m.index === undefined) {
+      const rest = text.slice(cursor)
+      if (rest.trim()) {
+        segments.push({ type: 'text', content: rest })
+      }
+      break
+    }
 
-  // 先收集所有完整的代码块匹配
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    matches.push(match)
-  }
+    const relIdx = m.index
+    const absOpenMatchStart = cursor + relIdx
+    const openFullLen = m[0].length
+    const absOpenEnd = absOpenMatchStart + openFullLen
+    const fenceRunLen = (m[2] ?? '```').length
+    const info = (m[3] ?? '').trim()
+    const language = (info.split(/\s+/)[0] || 'text').toLowerCase()
 
-  // 处理所有完整的代码块
-  for (const match of matches) {
-    // 添加代码块之前的普通文本
-    if (match.index > lastIndex) {
-      const textContent = text.substring(lastIndex, match.index)
-      if (textContent.trim()) {
-        segments.push({
-          type: 'text',
-          content: textContent,
-        })
+    if (absOpenMatchStart > cursor) {
+      const textBefore = text.slice(cursor, absOpenMatchStart)
+      if (textBefore.trim()) {
+        segments.push({ type: 'text', content: textBefore })
       }
     }
 
-    // 添加代码块
-    const language = match[1] || 'text' // 如果没有指定语言，默认为 'text'
-    const codeContent = match[2].trim() // 去除首尾空白
+    const contentStart = absOpenEnd
+    const close = findClosingFenceLineRange(text, contentStart, fenceRunLen)
+
+    if (!close) {
+      // opening 前的文本已在上方处理，这里只追加未完成代码块
+      const afterOpen = text.slice(contentStart)
+      segments.push({
+        type: 'code',
+        content: afterOpen,
+        language: language,
+      })
+      break
+    }
+
+    const codeRaw = text.slice(contentStart, close.closeLineStart)
+    const codeContent = codeRaw.replace(/\s+$/, '')
 
     segments.push({
       type: 'code',
       content: codeContent,
-      language: language.toLowerCase(),
+      language: language,
     })
 
-    lastIndex = match.index + match[0].length
+    cursor = close.consumeEnd
   }
 
-  // 检查是否有未完成的代码块（流式输出中，代码块还没写完）
-  const remainingText = text.substring(lastIndex)
-
-  // 查找未完成的代码块：有 ```语言名\n 但没有对应的结束 ```，同样兼容 \n / \r\n
-  const incompleteCodeBlockRegex = /```(\w+)?\r?\n([\s\S]*)$/
-  const incompleteMatch = remainingText.match(incompleteCodeBlockRegex)
-
-  if (incompleteMatch) {
-    // 有未完成的代码块
-    const beforeCodeBlock = remainingText.substring(0, incompleteMatch.index)
-    if (beforeCodeBlock.trim()) {
-      segments.push({
-        type: 'text',
-        content: beforeCodeBlock,
-      })
-    }
-
-    // 添加未完成的代码块（实时显示正在生成的代码）
-    const language = incompleteMatch[1] || 'text'
-    const codeContent = incompleteMatch[2] // 不 trim，保留实时生成的内容
-
-    segments.push({
-      type: 'code',
-      content: codeContent,
-      language: language.toLowerCase(),
-    })
-  } else {
-    // 没有未完成的代码块，添加剩余的普通文本
-    if (remainingText.trim()) {
-      segments.push({
-        type: 'text',
-        content: remainingText,
-      })
-    }
-  }
-
-  // 兜底优化：如果最后一段是短小的“代码收尾”（如 </script></body></html>），
-  // 且前一段已经是代码块，则把这部分直接拼接进前一个代码块，避免掉到白底文本区域。
+  // 兜底：末尾短小“代码收尾”并入上一代码块（与旧逻辑一致，处理极端截断）
   if (segments.length >= 2) {
     const last = segments[segments.length - 1]
     const prev = segments[segments.length - 2]
-    if (prev.type === 'code' && last.type === 'text' && isCodeTail(last.content)) {
+    if (prev && last && prev.type === 'code' && last.type === 'text' && isCodeTail(last.content)) {
       const tail = last.content.trimEnd()
       prev.content = `${prev.content}\n${tail}`
       segments.pop()
     }
   }
 
-  // 如果没有匹配到任何代码块，返回整个文本作为普通文本
   if (segments.length === 0) {
     segments.push({
       type: 'text',
@@ -114,25 +154,22 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
     })
   }
 
-  return segments
+  // 强兜底：把“疑似泄漏出的代码文本”并回前一个代码块，避免白底文本溢出
+  return mergeLeakedCodeLikeText(segments)
 }
 
 /**
- * 判断一段文本是否更像“代码结尾”而不是普通说明文本：
- * - 行数不多（避免把整段说明都当作代码）
- * - 不包含明显中文句子
- * - 大部分非空行以 ; / } / >/标签结尾，或以 </xxx> / // 开头
+ * 判断一段文本是否更像“代码结尾”而不是普通说明文本
  */
 function isCodeTail(raw: string): boolean {
   if (!raw) return false
-  const text = raw.trim()
-  if (!text) return false
+  const t = raw.trim()
+  if (!t) return false
 
-  const lines = text.split(/\r?\n/)
+  const lines = t.split(/\r?\n/)
   if (lines.length > 10) return false
 
-  // 含有较多中文字符时，倾向认为是自然语言说明
-  const chineseMatch = text.match(/[\u4e00-\u9fa5]/g)
+  const chineseMatch = t.match(/[\u4e00-\u9fa5]/g)
   if (chineseMatch && chineseMatch.length > 10) {
     return false
   }
@@ -156,6 +193,63 @@ function isCodeTail(raw: string): boolean {
 
   if (nonEmptyLines === 0) return false
 
-  // 至少一半以上的非空行具备“代码样子”
   return codeLikeLines / nonEmptyLines >= 0.6
+}
+
+/**
+ * 把紧跟在代码块后的“代码样文本”并回代码块：
+ * 目标是兜住模型输出中围栏异常导致的泄漏，避免代码区外出现大段白底文本。
+ */
+function mergeLeakedCodeLikeText(segments: TextSegment[]): TextSegment[] {
+  if (!segments.length) return segments
+  const out: TextSegment[] = []
+
+  for (const seg of segments) {
+    const prev = out[out.length - 1]
+    if (prev && prev.type === 'code' && seg.type === 'text' && isLikelyLeakedCodeText(seg.content)) {
+      const leak = seg.content.trimEnd()
+      prev.content = `${prev.content}\n${leak}`
+      continue
+    }
+    out.push(seg)
+  }
+  return out
+}
+
+/**
+ * 比 isCodeTail 更激进的判定：
+ * - 允许更长行数
+ * - 一旦出现高置信代码特征（关键字/DOM API/闭合标签/大量符号）即归并
+ */
+function isLikelyLeakedCodeText(raw: string): boolean {
+  if (!raw) return false
+  const text = raw.trim()
+  if (!text) return false
+
+  const lines = text.split(/\r?\n/)
+  if (lines.length > 200) return false
+
+  const chineseMatch = text.match(/[\u4e00-\u9fa5]/g)
+  if (chineseMatch && chineseMatch.length > 40) return false
+
+  const strongSignal =
+    /(^|\n)\s*(const|let|var|function|class|if|for|while|switch|return|import|export)\b/.test(text) ||
+    /document\.(querySelector|getElementById|createElement|addEventListener)\b/.test(text) ||
+    /(^|\n)\s*<\/?[a-zA-Z][^>]*>\s*$/.test(text) ||
+    /=>/.test(text)
+  if (strongSignal) return true
+
+  let nonEmpty = 0
+  let codeLike = 0
+  for (const line of lines) {
+    const s = line.trim()
+    if (!s) continue
+    nonEmpty++
+    const startsCode = /^(\/\/|\/\*|\*|<\/|\.?[#\w-]+\s*\{|const\b|let\b|var\b|if\s*\(|for\s*\(|while\s*\(|return\b)/.test(s)
+    const endsCode = /[;{}>\],)]$/.test(s)
+    const hasOps = /[=<>:+\-*/]/.test(s)
+    if (startsCode || endsCode || hasOps) codeLike++
+  }
+  if (nonEmpty === 0) return false
+  return codeLike / nonEmpty >= 0.5
 }

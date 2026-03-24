@@ -28,9 +28,14 @@ public enum CodeGenTypeEnum {
         if (ObjUtil.isEmpty(value)) {
             return null;
         }
+        // 前端 codeGenType 可能传入 vue_project，但后端枚举 value 约定为 vue
+        String normalized = String.valueOf(value).trim();
+        if ("vue_project".equalsIgnoreCase(normalized)) {
+            normalized = "vue";
+        }
         // 注意这里的value不是字段的value，而是返回所有枚举类的方法
         for (CodeGenTypeEnum anEnum : CodeGenTypeEnum.values()) {
-            if (anEnum.value.equals(value)) {
+            if (anEnum.value.equals(normalized)) {
                 return anEnum;
             }
         }

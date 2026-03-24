@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.ai;
 
-import com.dbts.glyahhaigeneratecode.ai.tool.*;
+import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
+import com.dbts.glyahhaigeneratecode.ai.tool.tools.*;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -44,6 +45,9 @@ public class aiCodeGeneratorServiceFactory {
     @Resource
     private StreamingChatModel reasoningChatModel;
 
+    @Resource
+    private ToolManager toolManager;
+
     /**
      * AI 服务实例缓存
      * 缓存策略：
@@ -81,6 +85,8 @@ public class aiCodeGeneratorServiceFactory {
                 }
             }
             if (service != null) {
+                // 缓存命中时也执行一次在线压缩，避免旧的超长历史 AI 消息持续放大请求 token
+                chatHistoryService.compactMemoryMessagesIfNeeded(appId, codeGenTypeEnum);
                 log.info("从缓存中获取 AI 服务实例，appId: {}", appId);
                 return service;
             }
@@ -133,11 +139,7 @@ public class aiCodeGeneratorServiceFactory {
                     // 将本来的ai默认记忆的Id转化为build类型的 以appId作为唯一标识的chatMemory
                     .chatMemoryProvider(memoryId -> build)
                     .tools(
-                            new FileWriteTool(),
-                            new FileReadTool(),
-                            new FileDeleteTool(),
-                            new FileModifyTool(),
-                            new FileDirReadTool()
+                            toolManager.getAllTools()
                     )
                     // 当ai调用了本来没有的tool时
                     .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->

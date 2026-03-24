@@ -109,9 +109,11 @@ export function markRejectNotificationRead(
   const idx = all.findIndex((item) => item.userId === userIdStr && item.appId === appIdStr);
   if (idx < 0) return;
 
-  if (!all[idx].unread) return;
+  const cur = all[idx]
+  if (!cur || !cur.unread) return;
+
   all[idx] = {
-    ...all[idx],
+    ...cur,
     unread: false,
   };
   saveAll(all);

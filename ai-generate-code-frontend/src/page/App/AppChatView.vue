@@ -19,7 +19,14 @@ import {
   chatHistoryRoundCountAppIdUsingGet,
 } from '@/api/chatHistoryController'
 import { UserLoginStore } from '@/stores/UserLogin'
-import { parseMarkdownWithCode } from '@/utils/markdownParser'
+import {
+  parseMarkdownWithCode,
+  findLineAlignedClosingFenceInBuffer,
+} from '@/utils/markdownParser'
+import {
+  extractToolModifyFileNewContentBlocksFromText,
+  extractToolWriteFileBlocksFromText,
+} from '@/utils/toolOutputAdapters/toolOutputBlockParsers'
 import CodeBlock from '@/components/CodeBlock.vue'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 import {
@@ -68,7 +75,11 @@ type ChatMessage = {
 }
 
 type UiMarkdownSegment = { kind: 'markdown'; content: string }
-type UiToolRequestSegment = { kind: 'tool_request'; label: string }
+type UiToolRequestSegment = {
+  kind: 'tool_request'
+  rawLabel: string
+  toolName: string
+}
 type UiToolExecutedWriteFileSegment = {
   kind: 'tool_executed_write_file'
   filePath: string
@@ -76,16 +87,53 @@ type UiToolExecutedWriteFileSegment = {
   content: string
   done: boolean
 }
-type UiSegment = UiMarkdownSegment | UiToolRequestSegment | UiToolExecutedWriteFileSegment
 
-type ToolExecStage = 'markdown' | 'tool_exec_wait_fence' | 'tool_exec_stream'
+type UiToolExecutedModifyFileSegment = {
+  kind: 'tool_executed_modify_file'
+  filePath: string
+  language: string
+  beforeContent: string
+  afterContent: string
+  beforeDone: boolean
+  afterDone: boolean
+  done: boolean
+}
+
+type UiToolExecutedSimpleToolSegment = {
+  kind: 'tool_executed_simple_tool'
+  toolTitle: string
+  filePath: string
+  message: string
+  done: boolean
+}
+
+type UiSegment =
+  | UiMarkdownSegment
+  | UiToolRequestSegment
+  | UiToolExecutedWriteFileSegment
+  | UiToolExecutedModifyFileSegment
+  | UiToolExecutedSimpleToolSegment
+
+type ToolExecStage =
+  | 'markdown'
+  | 'tool_exec_wait_fence'
+  | 'tool_exec_stream'
+  | 'tool_exec_modify_wait_before_fence'
+  | 'tool_exec_modify_stream_before'
+  | 'tool_exec_modify_wait_after_fence'
+  | 'tool_exec_modify_stream_after'
 type AssistantUiState = {
   segments: UiSegment[]
   buffer: string
   stage: ToolExecStage
   pendingFilePath?: string
   pendingLanguage?: string
+  pendingModifyPart?: 'before' | 'after'
+  /** 工具代码块起始围栏的反引号个数（与闭合行对齐规则一致） */
+  pendingFenceLen?: number
   activeToolIndex?: number
+  /** 折叠重复的“选择工具”提示，避免流式阶段刷屏 */
+  lastToolRequestName?: string
 }
 
 /** 已加载的历史消息（来自接口） */
@@ -98,6 +146,9 @@ const sending = ref(false)
 const streaming = ref(false)
 // 首次生成时用于提示“分析代码 ing~”，避免用户干等
 const analyzingHintCloser = ref<null | (() => void)>(null)
+
+// 仅用于把用户在首页选择的“代码类型”追加到发送给 AI 的 prompt 末尾（不回显到前端对话气泡）
+const codeTypePromptChoiceOnce = ref<string | null>(null)
 
 let eventSource: EventSource | null = null
 let nextMessageId = 1
@@ -690,6 +741,7 @@ function createAssistantUiState(): AssistantUiState {
     segments: [],
     buffer: '',
     stage: 'markdown',
+    lastToolRequestName: undefined,
   }
 }
 
@@ -729,6 +781,36 @@ function getActiveToolExecutedSegment(state: AssistantUiState): UiToolExecutedWr
   if (idx == null) return null
   const seg = state.segments[idx]
   if (seg && seg.kind === 'tool_executed_write_file') return seg
+  return null
+}
+
+function ensureToolExecutedModifyFileSegment(
+  state: AssistantUiState,
+  filePath: string,
+  language: string,
+): UiToolExecutedModifyFileSegment {
+  const seg: UiToolExecutedModifyFileSegment = {
+    kind: 'tool_executed_modify_file',
+    filePath,
+    language: language || 'text',
+    beforeContent: '',
+    afterContent: '',
+    beforeDone: false,
+    afterDone: false,
+    done: false,
+  }
+  state.activeToolIndex = state.segments.length
+  state.segments.push(seg)
+  return seg
+}
+
+function getActiveToolExecutedModifyFileSegment(
+  state: AssistantUiState,
+): UiToolExecutedModifyFileSegment | null {
+  const idx = state.activeToolIndex
+  if (idx == null) return null
+  const seg = state.segments[idx]
+  if (seg && seg.kind === 'tool_executed_modify_file') return seg
   return null
 }
 
@@ -785,125 +867,432 @@ function flushSafeMarkdown(state: AssistantUiState, keepTail = 80) {
 function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string) {
   state.buffer += chunk ?? ''
 
-  const TOOL_REQUEST_MARK = '[选择工具] 写入文件'
-  const TOOL_EXEC_HEADER_RE = /\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*\r?\n/
+  const TOOL_REQUEST_ANY_RE = /\[选择工具\]\s*([^\r\n]+)\s*\r?\n/
+
+  const TOOL_EXEC_HEADER_RE_WRITE_FILE = /\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*\r?\n/
+  const TOOL_EXEC_HEADER_RE_MODIFY_FILE = /\[工具调用\]\s*修改文件\s+([^\r\n]+)\s*\r?\n/
+  const TOOL_EXEC_HEADER_RE_DELETE_FILE = /\[工具调用\]\s*删除文件\s+([^\r\n]+)\s*\r?\n/
+  const TOOL_EXEC_HEADER_RE_READ_FILE = /\[工具调用\]\s*读取文件\s+([^\r\n]+)\s*\r?\n/
+  const TOOL_EXEC_HEADER_RE_READ_DIR = /\[工具调用\]\s*读取目录结构\s+([^\r\n]+)\s*\r?\n/
+
+  const inferLanguageFromFilePath = (p: string): string => {
+    const lower = (p || '').toLowerCase()
+    if (lower.endsWith('.vue')) return 'vue'
+    if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'typescript'
+    if (lower.endsWith('.js') || lower.endsWith('.jsx')) return 'javascript'
+    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'css'
+    if (lower.endsWith('.html')) return 'html'
+    return 'text'
+  }
 
   const loopGuardMax = 2000
   let loopGuard = 0
 
   while (state.buffer && loopGuard++ < loopGuardMax) {
     if (state.stage === 'markdown') {
-      const idxRequest = state.buffer.indexOf(TOOL_REQUEST_MARK)
-      const mExec = state.buffer.match(TOOL_EXEC_HEADER_RE)
-      const idxExec = mExec ? (mExec.index ?? -1) : -1
+      const mReqAny = TOOL_REQUEST_ANY_RE.exec(state.buffer)
+      const idxRequestAny = mReqAny ? (mReqAny.index ?? -1) : -1
+
+      const mExecWrite = state.buffer.match(TOOL_EXEC_HEADER_RE_WRITE_FILE)
+      const idxExecWrite = mExecWrite ? (mExecWrite.index ?? -1) : -1
+      const mExecModify = state.buffer.match(TOOL_EXEC_HEADER_RE_MODIFY_FILE)
+      const idxExecModify = mExecModify ? (mExecModify.index ?? -1) : -1
+      const mExecDelete = state.buffer.match(TOOL_EXEC_HEADER_RE_DELETE_FILE)
+      const idxExecDelete = mExecDelete ? (mExecDelete.index ?? -1) : -1
+      const mExecRead = state.buffer.match(TOOL_EXEC_HEADER_RE_READ_FILE)
+      const idxExecRead = mExecRead ? (mExecRead.index ?? -1) : -1
+      const mExecDir = state.buffer.match(TOOL_EXEC_HEADER_RE_READ_DIR)
+      const idxExecDir = mExecDir ? (mExecDir.index ?? -1) : -1
 
       // 没有任何工具标记：尽量流式把 buffer 大部分吐到 markdown
-      if (idxRequest < 0 && idxExec < 0) {
+      if (
+        idxRequestAny < 0 &&
+        idxExecWrite < 0 &&
+        idxExecModify < 0 &&
+        idxExecDelete < 0 &&
+        idxExecRead < 0 &&
+        idxExecDir < 0
+      ) {
         flushSafeMarkdown(state, 80)
         break
       }
 
       // 找到最靠前的事件
-      let nextIdx = idxRequest
-      let nextType: 'tool_request' | 'tool_exec' = 'tool_request'
-      if (idxRequest < 0 || (idxExec >= 0 && idxExec < idxRequest)) {
-        nextIdx = idxExec
-        nextType = 'tool_exec'
+      const candidates: Array<{
+        idx: number
+        type:
+          | 'tool_request_any'
+          | 'tool_exec_write'
+          | 'tool_exec_modify'
+          | 'tool_exec_delete'
+          | 'tool_exec_read'
+          | 'tool_exec_dir'
+        toolName?: string
+      }> = []
+
+      if (idxRequestAny >= 0) {
+        const toolName = (mReqAny?.[1] ?? '').trim()
+        candidates.push({ idx: idxRequestAny, type: 'tool_request_any', toolName })
+      }
+      if (idxExecWrite >= 0) {
+        candidates.push({ idx: idxExecWrite, type: 'tool_exec_write' })
+      }
+      if (idxExecModify >= 0) {
+        candidates.push({ idx: idxExecModify, type: 'tool_exec_modify' })
+      }
+      if (idxExecDelete >= 0) {
+        candidates.push({ idx: idxExecDelete, type: 'tool_exec_delete' })
+      }
+      if (idxExecRead >= 0) {
+        candidates.push({ idx: idxExecRead, type: 'tool_exec_read' })
+      }
+      if (idxExecDir >= 0) {
+        candidates.push({ idx: idxExecDir, type: 'tool_exec_dir' })
+      }
+
+      candidates.sort((a, b) => a.idx - b.idx)
+      const next = candidates[0]
+      if (!next) {
+        flushSafeMarkdown(state, 80)
+        break
       }
 
       // 先把事件前面的普通文本作为 markdown 吐出
-      const before = state.buffer.slice(0, nextIdx)
+      const before = state.buffer.slice(0, next.idx)
       if (before) appendMarkdown(state, before)
-      state.buffer = state.buffer.slice(nextIdx)
+      state.buffer = state.buffer.slice(next.idx)
 
-      if (nextType === 'tool_request') {
-        // 消费掉 TOOL_REQUEST mark
-        // 视觉优化：减少与上下文的空行（后端通常会包一层 \n\n）
+      if (next.type === 'tool_request_any') {
+        // 证据：流式阶段会连续出现大量 `[选择工具] 写入文件`，导致 UI 被胶囊刷屏。
+        // 修复：同名工具请求仅展示一次，直到后续出现其它工具或实际工具执行头。
         trimTrailingNewlinesInLastMarkdown(state, 2)
-        state.buffer = state.buffer.slice(TOOL_REQUEST_MARK.length)
+
+        const mReqNow = TOOL_REQUEST_ANY_RE.exec(state.buffer)
+        if (!mReqNow) {
+          flushSafeMarkdown(state, 40)
+          break
+        }
+
+        const raw = (mReqNow[0] ?? '').trim()
+        const toolName = (mReqNow[1] ?? next.toolName ?? '').trim() || '未知工具'
+
+        state.buffer = state.buffer.slice(mReqNow[0].length)
         state.buffer = consumeLeadingNewlines(state.buffer, 2)
-        state.segments.push({ kind: 'tool_request', label: TOOL_REQUEST_MARK })
+        if (state.lastToolRequestName !== toolName) {
+          state.segments.push({
+            kind: 'tool_request',
+            rawLabel: raw,
+            toolName,
+          })
+          state.lastToolRequestName = toolName
+        }
         toolSelectHintShown.value = true
         continue
       }
 
-      // TOOL_EXEC：消费 header 行，并进入等待 fence
-      const m = state.buffer.match(TOOL_EXEC_HEADER_RE)
-      if (!m) {
-        // header 可能被 chunk 截断
-        flushSafeMarkdown(state, 120)
-        break
+      if (next.type === 'tool_exec_write') {
+        // TOOL_EXEC(writeFile)：消费 header 行，并进入等待 fence
+        const m = state.buffer.match(TOOL_EXEC_HEADER_RE_WRITE_FILE)
+        if (!m) {
+          // header 可能被 chunk 截断
+          flushSafeMarkdown(state, 120)
+          break
+        }
+        const filePath = (m[1] ?? '').trim()
+        const headerLen = m[0].length
+        state.buffer = state.buffer.slice(headerLen)
+        state.pendingFilePath = filePath
+        // 进入真实工具执行后，重置“选择工具”去重状态，允许下一轮提示正常出现。
+        state.lastToolRequestName = undefined
+        state.stage = 'tool_exec_wait_fence'
+        continue
       }
-      const filePath = (m[1] ?? '').trim()
-      const headerLen = m[0].length
-      state.buffer = state.buffer.slice(headerLen)
-      state.pendingFilePath = filePath
-      state.stage = 'tool_exec_wait_fence'
-      continue
+
+      if (next.type === 'tool_exec_modify') {
+        // TOOL_EXEC(modifyFile)：创建卡片并进入解析“替换前/替换后”围栏
+        const m = state.buffer.match(TOOL_EXEC_HEADER_RE_MODIFY_FILE)
+        if (!m) {
+          flushSafeMarkdown(state, 120)
+          break
+        }
+        const filePath = (m[1] ?? '').trim()
+        const headerLen = m[0].length
+        state.buffer = state.buffer.slice(headerLen)
+        // 与 writeFile 一致：执行开始后清空去重状态。
+        state.lastToolRequestName = undefined
+
+        const lang = inferLanguageFromFilePath(filePath)
+        ensureToolExecutedModifyFileSegment(state, filePath, lang)
+        state.pendingFilePath = filePath
+        state.pendingLanguage = lang
+        state.pendingModifyPart = 'before'
+        state.stage = 'tool_exec_modify_wait_before_fence'
+        continue
+      }
+
+      if (next.type === 'tool_exec_delete') {
+        const m = state.buffer.match(TOOL_EXEC_HEADER_RE_DELETE_FILE)
+        if (!m) {
+          flushSafeMarkdown(state, 120)
+          break
+        }
+        const filePath = (m[1] ?? '').trim()
+        const headerLen = m[0].length
+        state.buffer = state.buffer.slice(headerLen)
+        state.lastToolRequestName = undefined
+
+        removeGeneratedFile(filePath)
+
+        state.segments.push({
+          kind: 'tool_executed_simple_tool',
+          toolTitle: '[工具调用] 删除文件',
+          filePath,
+          message: `删除文件：${filePath}`,
+          done: true,
+        })
+        continue
+      }
+
+      if (next.type === 'tool_exec_read') {
+        const m = state.buffer.match(TOOL_EXEC_HEADER_RE_READ_FILE)
+        if (!m) {
+          flushSafeMarkdown(state, 120)
+          break
+        }
+        const filePath = (m[1] ?? '').trim()
+        const headerLen = m[0].length
+        state.buffer = state.buffer.slice(headerLen)
+        state.lastToolRequestName = undefined
+
+        state.segments.push({
+          kind: 'tool_executed_simple_tool',
+          toolTitle: '[工具调用] 读取文件',
+          filePath,
+          message: `读取文件：${filePath}`,
+          done: true,
+        })
+        continue
+      }
+
+      if (next.type === 'tool_exec_dir') {
+        const m = state.buffer.match(TOOL_EXEC_HEADER_RE_READ_DIR)
+        if (!m) {
+          flushSafeMarkdown(state, 120)
+          break
+        }
+        const filePath = (m[1] ?? '').trim()
+        const headerLen = m[0].length
+        state.buffer = state.buffer.slice(headerLen)
+        state.lastToolRequestName = undefined
+
+        state.segments.push({
+          kind: 'tool_executed_simple_tool',
+          toolTitle: '[工具调用] 读取目录结构',
+          filePath,
+          message: `目录结构：${filePath}`,
+          done: true,
+        })
+        continue
+      }
     }
 
     if (state.stage === 'tool_exec_wait_fence') {
-      // 期望：```suffix\n
-      const fenceRe = /^```(\w+)?\r?\n/
+      // 后端 FileWriteTool 的工具执行结果格式为：
+      // [工具调用] 写入文件 xxx\n
+      // 文件内容:\n
+      // ```lang\n
+      // ...
+      // 因为 streaming chunk 可能被截断，所以这里允许 header 后的：
+      // 1) 空行/换行
+      // 2) 可选“文件内容:”行
+      // 3) 围栏前最多 0-3 空格缩进
+      state.buffer = consumeLeadingNewlines(state.buffer, 3)
+      state.buffer = state.buffer.replace(/^\s*文件内容:\s*\r?\n/, '')
+      state.buffer = consumeLeadingNewlines(state.buffer, 2)
+
+      // 期望：``` 或更多反引号 + 可选语言/信息 + 换行（与 markdown 围栏一致）
+      const fenceRe = /^ {0,3}(`{3,})([^\r\n]*)\r?\n/
       const mFence = state.buffer.match(fenceRe)
       if (!mFence) {
-        // fence 行可能被截断：先把过多的空白/换行丢到 markdown（保持视觉连贯），但保留尾部用于匹配
-        flushSafeMarkdown(state, 120)
+        // 证据：这里如果把等待中的片段误吐到 markdown，会打断「文件内容 + 围栏」序列，
+        // 导致后续即使收齐围栏也无法进入代码流式卡片（用户只看到工具气泡）。
+        // 修复：等待围栏阶段只缓存，不向 markdown 外吐。
         break
       }
-      const lang = (mFence[1] ?? '').trim() || 'text'
+      const fenceRunLen = (mFence[1] ?? '```').length
+      const info = (mFence[2] ?? '').trim()
+      const lang = info.split(/\s+/)[0] || 'text'
       state.pendingLanguage = lang
+      state.pendingFenceLen = fenceRunLen
       state.buffer = state.buffer.slice(mFence[0].length)
       ensureToolExecutedSegment(state, state.pendingFilePath ?? '', lang)
       state.stage = 'tool_exec_stream'
       continue
     }
 
-    // tool_exec_stream：流式追加到卡片内部代码区，直到遇到 closing fence
-    const toolSeg = getActiveToolExecutedSegment(state)
-    if (!toolSeg) {
-      // 防御：状态异常则退回 markdown
-      state.stage = 'markdown'
-      continue
-    }
-
-    const closeIdx = state.buffer.indexOf('\n```')
-    const closeIdxCr = state.buffer.indexOf('\r\n```')
-    let idx = closeIdx
-    let closeLen = 4
-    if (idx < 0 || (closeIdxCr >= 0 && closeIdxCr < idx)) {
-      idx = closeIdxCr
-      closeLen = 5
-    }
-
-    if (idx >= 0) {
-      const codePart = state.buffer.slice(0, idx)
-      toolSeg.content += codePart
-      toolSeg.done = true
-      if (toolSeg.filePath) {
-        recordGeneratedFile(toolSeg.filePath, toolSeg.language, toolSeg.content)
+    if (state.stage === 'tool_exec_stream') {
+      // tool_exec_stream：流式追加到卡片内部代码区，直到遇到 closing fence
+      const toolSeg = getActiveToolExecutedSegment(state)
+      if (!toolSeg) {
+        // 防御：状态异常则退回 markdown
+        state.stage = 'markdown'
+        continue
       }
-      // 消费掉 closing fence（包含前导换行）
-      state.buffer = state.buffer.slice(idx + closeLen)
-      // 还可能紧跟一个换行
-      if (state.buffer.startsWith('\r\n')) state.buffer = state.buffer.slice(2)
-      else if (state.buffer.startsWith('\n')) state.buffer = state.buffer.slice(1)
 
-      // 清理 pending，并回到 markdown
-      state.pendingFilePath = undefined
-      state.pendingLanguage = undefined
-      state.activeToolIndex = undefined
-      state.stage = 'markdown'
-      continue
-    }
+      const minRun = state.pendingFenceLen ?? 3
+      const closeRange = findLineAlignedClosingFenceInBuffer(state.buffer, minRun)
 
-    // 没有结束 fence：尽量把 buffer 大部分作为代码流式追加（保留少量 tail 防止 fence 被截断）
-    if (state.buffer.length > 120) {
-      const flushLen = state.buffer.length - 40
-      toolSeg.content += state.buffer.slice(0, flushLen)
-      state.buffer = state.buffer.slice(flushLen)
+      if (closeRange) {
+        const codePart = state.buffer.slice(0, closeRange.codeEnd)
+        toolSeg.content += codePart
+        toolSeg.done = true
+        if (toolSeg.filePath) {
+          recordGeneratedFile(toolSeg.filePath, toolSeg.language, toolSeg.content)
+        }
+        state.buffer = state.buffer.slice(closeRange.consumeEnd)
+
+        state.pendingFilePath = undefined
+        state.pendingLanguage = undefined
+        state.pendingFenceLen = undefined
+        state.activeToolIndex = undefined
+        state.stage = 'markdown'
+        continue
+      }
+
+      // 没有结束 fence：尽量把 buffer 大部分作为代码流式追加（保留少量 tail 防止 fence 被截断）
+      if (state.buffer.length > 120) {
+        const flushLen = state.buffer.length - 40
+        toolSeg.content += state.buffer.slice(0, flushLen)
+        state.buffer = state.buffer.slice(flushLen)
+        break
+      }
       break
     }
+
+    if (state.stage === 'tool_exec_modify_wait_before_fence') {
+      // 期望 token 序列：
+      // 替换前:\n
+      // ```(\n|lang...\n)
+      state.buffer = consumeLeadingNewlines(state.buffer, 3)
+      state.buffer = state.buffer.replace(/^\s*替换前:\s*\r?\n/, '')
+      state.buffer = consumeLeadingNewlines(state.buffer, 2)
+
+      const fenceRe = /^ {0,3}(`{3,})([^\r\n]*)\r?\n/
+      const mFence = state.buffer.match(fenceRe)
+      if (!mFence) {
+        // 同上：等待 `替换前` 围栏时仅缓存，避免破坏后续代码块解析。
+        break
+      }
+
+      const fenceRunLen = (mFence[1] ?? '```').length
+      const info = (mFence[2] ?? '').trim()
+      const langFromFence = info.split(/\s+/)[0] || ''
+
+      const seg = getActiveToolExecutedModifyFileSegment(state)
+      if (seg && langFromFence) {
+        seg.language = langFromFence
+      }
+
+      state.pendingFenceLen = fenceRunLen
+      state.buffer = state.buffer.slice(mFence[0].length)
+      state.pendingModifyPart = 'before'
+      state.stage = 'tool_exec_modify_stream_before'
+      continue
+    }
+
+    if (state.stage === 'tool_exec_modify_stream_before') {
+      const seg = getActiveToolExecutedModifyFileSegment(state)
+      if (!seg) {
+        state.stage = 'markdown'
+        continue
+      }
+
+      const minRun = state.pendingFenceLen ?? 3
+      const closeRange = findLineAlignedClosingFenceInBuffer(state.buffer, minRun)
+      if (closeRange) {
+        const codePart = state.buffer.slice(0, closeRange.codeEnd)
+        seg.beforeContent += codePart
+        seg.beforeDone = true
+        state.buffer = state.buffer.slice(closeRange.consumeEnd)
+        state.stage = 'tool_exec_modify_wait_after_fence'
+        continue
+      }
+
+      if (state.buffer.length > 120) {
+        const flushLen = state.buffer.length - 40
+        seg.beforeContent += state.buffer.slice(0, flushLen)
+        state.buffer = state.buffer.slice(flushLen)
+        break
+      }
+      break
+    }
+
+    if (state.stage === 'tool_exec_modify_wait_after_fence') {
+      state.buffer = consumeLeadingNewlines(state.buffer, 3)
+      state.buffer = state.buffer.replace(/^\s*替换后:\s*\r?\n/, '')
+      state.buffer = consumeLeadingNewlines(state.buffer, 2)
+
+      const fenceRe = /^ {0,3}(`{3,})([^\r\n]*)\r?\n/
+      const mFence = state.buffer.match(fenceRe)
+      if (!mFence) {
+        // 同上：等待 `替换后` 围栏时仅缓存，避免“只显示工具调用，不显示代码块”。
+        break
+      }
+
+      const fenceRunLen = (mFence[1] ?? '```').length
+      const info = (mFence[2] ?? '').trim()
+      const langFromFence = info.split(/\s+/)[0] || ''
+
+      const seg = getActiveToolExecutedModifyFileSegment(state)
+      if (seg && langFromFence) {
+        seg.language = langFromFence
+      }
+
+      state.pendingFenceLen = fenceRunLen
+      state.buffer = state.buffer.slice(mFence[0].length)
+      state.pendingModifyPart = 'after'
+      state.stage = 'tool_exec_modify_stream_after'
+      continue
+    }
+
+    if (state.stage === 'tool_exec_modify_stream_after') {
+      const seg = getActiveToolExecutedModifyFileSegment(state)
+      if (!seg) {
+        state.stage = 'markdown'
+        continue
+      }
+
+      const minRun = state.pendingFenceLen ?? 3
+      const closeRange = findLineAlignedClosingFenceInBuffer(state.buffer, minRun)
+      if (closeRange) {
+        const codePart = state.buffer.slice(0, closeRange.codeEnd)
+        seg.afterContent += codePart
+        seg.afterDone = true
+        seg.done = true
+
+        if (seg.filePath) {
+          recordGeneratedFile(seg.filePath, seg.language, seg.afterContent)
+        }
+
+        state.buffer = state.buffer.slice(closeRange.consumeEnd)
+        state.pendingFilePath = undefined
+        state.pendingLanguage = undefined
+        state.pendingFenceLen = undefined
+        state.pendingModifyPart = undefined
+        state.activeToolIndex = undefined
+        state.stage = 'markdown'
+        continue
+      }
+
+      if (state.buffer.length > 120) {
+        const flushLen = state.buffer.length - 40
+        seg.afterContent += state.buffer.slice(0, flushLen)
+        state.buffer = state.buffer.slice(flushLen)
+        break
+      }
+      break
+    }
+
     break
   }
 }
@@ -942,35 +1331,14 @@ function showGeneratedFilesModal() {
 }
 
 function parseToolWriteFileBlock(chunk: string) {
-  // 后端 `JsonMessageStreamHandler` 输出格式：
-  // [工具调用] 写入文件 path
-  // ```suffix
-  // content
-  // ```
-  const m = chunk.match(/\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*\r?\n```(\w+)?\r?\n([\s\S]*?)\r?\n```\s*/m)
-  if (!m) return null
-  const filePath = (m[1] ?? '').trim()
-  const lang = (m[2] ?? '').trim()
-  const content = m[3] ?? ''
-  if (!filePath) return null
-  return { filePath, lang, content }
+  const list = extractToolWriteFileBlocksFromText(chunk ?? '')
+  const first = list[0]
+  if (!first) return null
+  return { filePath: first.filePath, lang: first.lang ?? '', content: first.content }
 }
 
 function extractToolWriteFileBlocks(text: string): Array<{ filePath: string; lang?: string; content: string }> {
-  const out: Array<{ filePath: string; lang?: string; content: string }> = []
-  if (!text) return out
-  const re = /\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*\r?\n```(\w+)?\r?\n([\s\S]*?)\r?\n```/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    const filePath = (m[1] ?? '').trim()
-    if (!filePath) continue
-    out.push({
-      filePath,
-      lang: (m[2] ?? '').trim() || undefined,
-      content: m[3] ?? '',
-    })
-  }
-  return out
+  return extractToolWriteFileBlocksFromText(text ?? '')
 }
 
 function recordGeneratedFile(filePath: string, language: string | undefined, content: string) {
@@ -991,6 +1359,18 @@ function recordGeneratedFile(filePath: string, language: string | undefined, con
   } else {
     generatedFiles.value = generatedFiles.value.map((it) => (it.path === filePath ? item : it))
   }
+}
+
+function removeGeneratedFile(filePath: string) {
+  if (!filePath) return
+  const existing = generatedFileMap.value[filePath]
+  if (!existing) return
+
+  const nextMap = { ...generatedFileMap.value }
+  delete nextMap[filePath]
+  generatedFileMap.value = nextMap
+
+  generatedFiles.value = generatedFiles.value.filter((it) => it.path !== filePath)
 }
 
 function getFileNameColorClass(path: string): string {
@@ -1092,14 +1472,30 @@ function rebuildGeneratedFilesFromHistory() {
   generatedFileMap.value = {}
   toolSelectHintShown.value = false
 
+  const inferLanguageFromPath = (p: string): string => {
+    const lower = (p || '').toLowerCase()
+    if (lower.endsWith('.vue')) return 'vue'
+    if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'typescript'
+    if (lower.endsWith('.js') || lower.endsWith('.jsx')) return 'javascript'
+    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'css'
+    if (lower.endsWith('.html')) return 'html'
+    return 'text'
+  }
+
   for (const r of loadedHistoryRecords.value) {
     const msg = r.message ?? ''
-    if (msg.includes('[选择工具] 写入文件')) {
+    if (msg.includes('[选择工具] 写入文件') || msg.includes('[选择工具] 修改文件')) {
       toolSelectHintShown.value = true
     }
     const blocks = extractToolWriteFileBlocks(msg)
     for (const b of blocks) {
       recordGeneratedFile(b.filePath, b.lang, b.content)
+    }
+
+    // 兼容后端使用 modifyFile 做局部替换：在历史回放时也更新“生成文件”回显
+    const modifyBlocks = extractToolModifyFileNewContentBlocksFromText(msg)
+    for (const b of modifyBlocks) {
+      recordGeneratedFile(b.filePath, inferLanguageFromPath(b.filePath), b.content)
     }
   }
 }
@@ -1155,10 +1551,16 @@ async function sendMessage(text?: string) {
   }
 
   const selectedSnapshot = selectedElement.value
-  const prompt =
+  // 不再在前端拼接“代码类型提示词”；让后端按 appInfo.codeGenType 决定输出格式
+  // （仍然清空一次性变量，避免未来误复用产生重复约束）
+  codeTypePromptChoiceOnce.value = null
+
+  const promptBase =
     selectedSnapshot && visualEditMode.value
       ? `${content}\n\n${formatSelectedElementForPrompt(selectedSnapshot)}\n\n${VISUAL_EDIT_MODEL_ONLY_HINT}`
       : content
+
+  const prompt = promptBase
 
   // 用户在可视化编辑模式下选择了元素时：
   // - 发给 AI 的 prompt 会附带完整元素信息（如上）
@@ -1415,6 +1817,13 @@ async function loadAppInfo() {
       if (hasInitPrompt) {
         if (autoSend) {
           // 从首页创建的应用：自动提交初始提示词
+          // 兼容读取 codeTypeChoice 参数（当前前端不再拼接提示词，约束由后端按 appInfo.codeGenType 控制）
+          const codeTypeChoice =
+            typeof route.query.codeTypeChoice === 'string' && route.query.codeTypeChoice.trim()
+              ? route.query.codeTypeChoice.trim()
+              : null
+          codeTypePromptChoiceOnce.value = codeTypeChoice
+
           // 清除 query 参数，避免刷新页面时重复自动发送
           router.replace({
             name: 'app-chat',
@@ -1609,7 +2018,7 @@ onBeforeUnmount(() => {
                       <!-- TOOL_REQUEST：选择工具卡片（一次性） -->
                       <div v-if="segment.kind === 'tool_request'" class="tool-hint-pill">
                         <span class="tool-hint-label">选择工具</span>
-                        <span class="tool-hint-main">写入文件</span>
+                        <span class="tool-hint-main">{{ segment.toolName }}</span>
                       </div>
 
                       <!-- TOOL_EXECUTED：写入文件卡片（可流式追加） -->
@@ -1633,6 +2042,68 @@ onBeforeUnmount(() => {
                         />
                       </div>
 
+                      <!-- TOOL_EXECUTED：修改文件卡片（替换前/替换后） -->
+                      <div v-else-if="segment.kind === 'tool_executed_modify_file'" class="tool-exec-card">
+                        <div class="tool-exec-header">
+                          <div class="tool-call-badge">使用工具</div>
+                          <div class="tool-exec-meta">
+                            <div class="tool-call-title">[工具调用] 修改文件</div>
+                            <div class="tool-call-path">{{ segment.filePath }}</div>
+                          </div>
+                          <div class="tool-exec-actions">
+                            <a-button
+                              size="small"
+                              class="ghost-btn"
+                              @click="copyToClipboard(segment.afterContent)"
+                            >
+                              复制替换后
+                            </a-button>
+                          </div>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 8px">
+                          <div class="tool-call-title" style="font-size: 12px; font-weight: 600; color: #111827">
+                            替换前
+                          </div>
+                          <CodeBlock
+                            :code="segment.beforeContent"
+                            :language="segment.language"
+                            :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !segment.beforeDone"
+                          />
+
+                          <div class="tool-call-title" style="font-size: 12px; font-weight: 600; color: #111827">
+                            替换后
+                          </div>
+                          <CodeBlock
+                            :code="segment.afterContent"
+                            :language="segment.language"
+                            :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !segment.afterDone"
+                          />
+                        </div>
+                      </div>
+
+                      <!-- TOOL_EXECUTED：其它工具简单输出卡片 -->
+                      <div v-else-if="segment.kind === 'tool_executed_simple_tool'" class="tool-exec-card">
+                        <div class="tool-exec-header">
+                          <div class="tool-call-badge">使用工具</div>
+                          <div class="tool-exec-meta">
+                            <div class="tool-call-title">{{ segment.toolTitle }}</div>
+                            <div class="tool-call-path">{{ segment.filePath }}</div>
+                          </div>
+                        </div>
+                        <div
+                          style="
+                            margin-top: 2px;
+                            font-size: 12px;
+                            color: #4b5563;
+                            white-space: pre-wrap;
+                            line-height: 1.5;
+                          "
+                        >
+                          {{ segment.message }}
+                        </div>
+                      </div>
+
                       <!-- 普通 markdown：仍保持流式解析与代码块渲染 -->
                       <template v-else>
                         <template v-for="(mdSeg, mdIdx) in parseMarkdownWithCode(segment.content)" :key="`md-${idx}-${mdIdx}`">
@@ -1642,11 +2113,9 @@ onBeforeUnmount(() => {
                             :language="mdSeg.language"
                             :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id"
                           />
-                          <!-- 流式阶段优先突出代码块：对当前流式中的最后一条助手消息，暂不渲染纯文本片段，避免代码“先以白底文本出现” -->
-                          <span
-                            v-else-if="!(streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id)"
-                            class="text-segment"
-                          >
+                          <!-- 证据：隐藏流式 markdown 会导致“生成计划/生成完毕”等说明文本在生成时不可见。
+                               修复：流式阶段也展示文本片段，保证与历史回显一致。 -->
+                          <span v-else class="text-segment">
                             {{ mdSeg.content }}
                           </span>
                         </template>

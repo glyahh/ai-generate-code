@@ -62,7 +62,7 @@ public interface AppService extends IService<App> {
      * 部署应用
      *
      * @param appId 应用 id
-     * @return 访问部署应用的url
+     * @return 部署标识 deployKey（由控制层拼接最终访问 URL，避免环境端口/上下文路径不一致）
      */
     String deployApp(Long appId, User loginUser);
 

@@ -66,7 +66,17 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         App app = new App();
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
-        CodeGenTypeEnum codeGenTypeEnum = aiCodeGeneratorRoutine.aiCodeGeneratorRoutine(app.getInitPrompt());
+
+        // 优先使用前端显式选择的 codeGenType，避免 LLM 路由器覆盖用户意图。
+        // 如前端传入 vue_project（但后端 value 约定为 vue），CodeGenTypeEnum#getEnumByValue 会做兼容映射。
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(appAddRequest.getCodeGenType());
+        if (codeGenTypeEnum == null) {
+            codeGenTypeEnum = aiCodeGeneratorRoutine.aiCodeGeneratorRoutine(app.getInitPrompt());
+        }
+        if (codeGenTypeEnum == null) {
+            // 显式 if：便于静态分析准确收窄空值分支
+            throw new MyException(ErrorCode.PARAMS_ERROR, "生成类型无法确定");
+        }
         app.setCodeGenType(codeGenTypeEnum.getValue());
 
         //这里最好使用这个save,不要mapper中的insert,否则id会因为没有声明而被覆盖雪花算法的值,而且其他未声明的字段会报数据库不能非空
@@ -274,11 +284,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             log.info("codeGenType = {}", codeGenType);
             throw new MyException(ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
         }
-        // 自动处理分隔符
+
+        // 生成对应的data-output中的文件夹名
         Path sourceDirPath = null;
         switch (codeGenTypeEnum){
             case VUE -> sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_project_" + appId);
-            case HTML, MULTI_FILE -> sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + appId);
+            case HTML, MULTI_FILE -> sourceDirPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + appId);
+        }
+        if (sourceDirPath == null) {
+            // 防御式：避免枚举扩展后 switch 未覆盖导致 NPE
+            throw new MyException(ErrorCode.PARAMS_ERROR, "应用 codeGenType 无法确定部署路径");
         }
 
         // 6. 校验路径下的文件是否存在
@@ -305,7 +320,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
 
 
-        // 7. Vue 项目特殊处理：执行构建
+        // 7. Vue 项目特殊处理：执行npm构建
         if (codeGenTypeEnum == CodeGenTypeEnum.VUE) {
             // Vue 项目需要构建
             boolean buildSuccess = vueProjectBuilder.buildProject(String.valueOf(sourceDirPath));
@@ -318,11 +333,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             log.info("Vue 项目构建成功，将部署 dist 目录: {}", distDir.getAbsolutePath());
         }
 
-
         // 8. 复制文件到部署目录
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
-
-
 
         // 7. 复制文件到deploy文件夹下
         Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
@@ -341,20 +353,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new MyException(ErrorCode.OPERATION_ERROR, "部署信息更新失败");
         }
 
-        // 9. 返回结果
-        String host = AppConstant.CODE_DEPLOY_HOST;
-        if (StrUtil.isBlank(host)) {
-            host = "http://localhost";
-        }
-        // 如果末尾有/,移除,否则不变
-        host = StrUtil.removeSuffix(host, "/");
-
-//        // 10. 构建应用访问 URL
-//        String appDeployUrl = String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
-//        // 11. 异步生成截图并更新应用封面
-//        generateAppScreenshotAsync(appId, appDeployUrl);
-
-        return host + "/" + deployKey + "/";
+        // 9. 返回 deployKey；最终 URL 由控制层按“当前请求域名+端口+context-path”拼接，避免返回错误主机。
+        return deployKey;
     }
 
     /**

@@ -120,7 +120,17 @@ class AiServiceStreamingResponseHandler implements StreamingChatResponseHandler 
             for (ToolExecutionRequest toolExecutionRequest : aiMessage.toolExecutionRequests()) {
                 String toolName = toolExecutionRequest.name();
                 ToolExecutor toolExecutor = toolExecutors.get(toolName);
-                String toolExecutionResult = toolExecutor.execute(toolExecutionRequest, memoryId);
+                String toolExecutionResult;
+                try {
+                    // NOTE(debug): 某些模型会在超长/复杂参数下产出非严格 JSON 参数，
+                    // 这里做单次工具调用级别兜底，避免一个工具参数异常导致整条 SSE 中断。
+                    toolExecutionResult = toolExecutor.execute(toolExecutionRequest, memoryId);
+                } catch (Exception e) {
+                    LOG.error("Tool execution failed, fallback as tool error result. toolName={}, toolId={}",
+                            toolName, toolExecutionRequest.id(), e);
+                    toolExecutionResult = "[tool_execution_error] "
+                            + (e.getMessage() == null ? "unknown error" : e.getMessage());
+                }
                 ToolExecutionResultMessage toolExecutionResultMessage =
                         ToolExecutionResultMessage.from(toolExecutionRequest, toolExecutionResult);
                 addToMemory(toolExecutionResultMessage);

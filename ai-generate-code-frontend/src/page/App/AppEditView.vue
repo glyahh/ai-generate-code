@@ -60,7 +60,7 @@ async function loadDetail() {
     const res = await fn({
       // 这里使用字符串形式 ID，避免 Long 精度丢失
       params: { id: appIdForRequest.value },
-    })
+    } as any)
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
       appInfo.value = res.data.data
       form.value = {
@@ -87,7 +87,7 @@ async function handleSubmit() {
     if (isAdmin.value) {
       const body: AppAdminUpdateRequest = {
         // BigInt -> string，后端用 Long 接收
-        id: appIdForRequest.value,
+        id: appIdForRequest.value as any,
         appName: form.value.appName,
         cover: form.value.cover || undefined,
         priority: form.value.priority,

@@ -282,15 +282,41 @@ public class AppController {
      * @return 部署 URL
      */
     @PostMapping("/deploy")
-    public BaseResponse<String> deployApp(@RequestBody AppDeployRequest appDeployRequest, HttpServletRequest request) {
+    public BaseResponse<String> deployApp (@RequestBody AppDeployRequest appDeployRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(appDeployRequest == null, ErrorCode.PARAMS_ERROR);
         Long appId = appDeployRequest.getAppId();
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
         // 获取当前登录用户
         User loginUser = userService.getUserInSession(request);
-        // 调用服务部署应用
-        String deployUrl = appService.deployApp(appId, loginUser);
+        // 调用服务部署应用，仅返回 deployKey（避免服务层硬编码 host 导致 URL 错误）。
+        String deployKey = appService.deployApp(appId, loginUser);
+        String deployUrl = buildDeployUrlFromRequest(request, deployKey);
         return ResultUtils.success(deployUrl);
+    }
+
+    /**
+     * 根据当前请求动态拼接部署访问地址（包含协议/域名/端口/context-path）。
+     */
+    private String buildDeployUrlFromRequest(HttpServletRequest request, String deployKey) {
+        // debug 修复：之前返回 http://localhost/{key}/ 会丢失端口和 /api，导致最终 404。
+        String scheme = request.getScheme();
+        String serverName = request.getServerName();
+        int serverPort = request.getServerPort();
+        String contextPath = request.getContextPath();
+
+        StringBuilder base = new StringBuilder();
+        base.append(scheme).append("://").append(serverName);
+        if (!(("http".equalsIgnoreCase(scheme) && serverPort == 80)
+                || ("https".equalsIgnoreCase(scheme) && serverPort == 443))) {
+            base.append(":").append(serverPort);
+        }
+        if (StrUtil.isNotBlank(contextPath)) {
+            if (!contextPath.startsWith("/")) {
+                base.append("/");
+            }
+            base.append(StrUtil.removeSuffix(contextPath, "/"));
+        }
+        return base + "/deploy/" + deployKey + "/";
     }
 
     /**
@@ -351,7 +377,8 @@ public class AppController {
         String projectPath;
         switch (codeGenTypeEnum) {
             case VUE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_project_" + appId;
-            case HTML, MULTI_FILE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + appId;
+            // debug 修复：下载路径与生成目录命名保持一致，避免“目录不存在”误报。
+            case HTML, MULTI_FILE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_" + appId;
             default -> throw new MyException(ErrorCode.PARAMS_ERROR, "暂不支持的 codeGenType");
         }
 

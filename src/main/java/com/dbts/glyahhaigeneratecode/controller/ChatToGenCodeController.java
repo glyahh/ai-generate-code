@@ -54,8 +54,19 @@ public class ChatToGenCodeController {
         User loginUser = userService.getUserInSession(request);
         // 调用服务生成代码（流式）
         Flux<String> contentFlux = chatToGenCodeService.chatToGenCode(appId, message, loginUser);
+
+        // SSE 场景：必须保证异常时仍然以 text/event-stream 可写的方式结束；
+        // 否则异常会被全局异常处理器捕获，尝试写普通 BaseResponse，导致
+        // HttpMessageNotWritableException: No converter ... for 'text/event-stream'（二次报错）。
+        Flux<String> safeContentFlux = contentFlux.onErrorResume(e -> {
+            log.error("SSE 流式生成失败，将以错误文本+done 事件收尾。", e);
+            String msg = e.getMessage();
+            String safeMsg = (msg == null || msg.isBlank()) ? "未知错误" : msg;
+            return Flux.just("[生成失败] " + safeMsg);
+        });
+
         // 转换为 ServerSentEvent 格式
-        return contentFlux
+        return safeContentFlux
                 .map(chunk -> {
                     Map<String, String> wrapper = Map.of("d", chunk);
                     String jsonData = JSONUtil.toJsonStr(wrapper);

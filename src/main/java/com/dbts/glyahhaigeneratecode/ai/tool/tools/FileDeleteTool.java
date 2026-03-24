@@ -1,10 +1,13 @@
-package com.dbts.glyahhaigeneratecode.ai.tool;
+package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
+import cn.hutool.json.JSONObject;
+import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,7 +25,8 @@ import java.nio.file.Paths;
  * 4. 删除文件
  */
 @Slf4j
-public class FileDeleteTool {
+@Component
+public class FileDeleteTool extends BaseTool {
 
     @Tool("删除指定路径的文件")
     public String deleteFile(
@@ -85,6 +89,25 @@ public class FileDeleteTool {
             }
         }
         return false;
+    }
+
+    @Override
+    public String getToolName() {
+        return "deleteFile";
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "删除文件";
+    }
+
+
+    // 此处JSONObject arguments作为ai调用工具类自动传入的参数的json,使用string取出key的值
+    @Override
+    public String generateToolExecutedResult(JSONObject arguments) {
+        return  String.format("""
+            [工具调用] %s %s
+            """, getDisplayName(), arguments.getStr("relativeFilePath"));
     }
 }
 

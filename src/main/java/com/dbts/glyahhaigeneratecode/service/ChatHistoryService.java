@@ -8,6 +8,7 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -111,4 +112,13 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @param userId 用户 id（用于写入总结记录的 userId）
      */
     void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId);
+
+    /**
+     * 在线压缩 Redis ChatMemory 中的超长历史 AI 消息（仅影响模型上下文，不改 DB 历史文本）。
+     * 主要用于 HTML / MULTI_FILE 场景下，缓存命中时也能降低后续请求 token。
+     *
+     * @param appId           应用 id
+     * @param codeGenTypeEnum 代码生成类型
+     */
+    void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum);
 }
