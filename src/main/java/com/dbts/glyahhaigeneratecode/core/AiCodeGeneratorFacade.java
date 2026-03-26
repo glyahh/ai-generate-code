@@ -81,11 +81,21 @@ public class AiCodeGeneratorFacade {
     /**
      * 统一入口：根据类型生成并保存代码(流式)
      *
-     * @param userMessage     用户提示词
-     * @param codeGenTypeEnum 生成类型
+     * @param userMessage     用户提示词/
+     *
+     *
+     *
+     * enTypeEnum 生成类型
      * @return 保存的目录
      */
     public Flux<String> generateAndSaveCodeStream (String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, false);
+    }
+
+    /**
+     * 统一入口：根据类型生成并保存代码(流式)（可选首轮工具白名单）
+     */
+    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId, boolean firstRound) {
         if (codeGenTypeEnum == null) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
@@ -93,7 +103,7 @@ public class AiCodeGeneratorFacade {
         return switch (codeGenTypeEnum) {
             case HTML -> generateAndSaveHtmlCodeStream(userMessage, appId);
             case MULTI_FILE -> generateAndSaveMultiFileCodeStream(userMessage, appId);
-            case VUE -> generateAndSaveVueCodeStream(userMessage, appId);
+            case VUE -> generateAndSaveVueCodeStream(userMessage, appId, firstRound);
             default -> {
                 String errorMessage = "不支持的生成类型：" + codeGenTypeEnum.getValue();
                 throw new MyException(ErrorCode.SYSTEM_ERROR, errorMessage);
@@ -167,10 +177,10 @@ public class AiCodeGeneratorFacade {
      * @param userMessage
      * @return
      */
-    private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId) {
+    private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound) {
         // 1. 获取流式输出的Vue代码(部分)  generate
         // 获取 AI 服务实例
-        aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE);
+        aiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound);
         TokenStream tokenStream = aiCodeGeneratorService.generateCodeVueFileStream(appId, userMessage);
 
         // 2. 返回拼接好的Vue+工具请求代码

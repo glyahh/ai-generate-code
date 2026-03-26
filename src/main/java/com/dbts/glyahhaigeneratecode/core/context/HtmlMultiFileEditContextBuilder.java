@@ -61,11 +61,13 @@ public class HtmlMultiFileEditContextBuilder {
             return userMessage;
         }
 
+        // <文件, 类型>
         Map<String, String> existingFiles = loadExistingFiles(codeGenTypeEnum, appId);
         if (existingFiles.isEmpty()) {
             return userMessage;
         }
 
+        // 提取关键词
         List<String> keywords = extractKeywords(userMessage);
         String context = buildEditContext(existingFiles, keywords, codeGenTypeEnum);
         if (StrUtil.isBlank(context)) {

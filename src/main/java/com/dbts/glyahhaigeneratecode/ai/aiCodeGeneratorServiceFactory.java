@@ -1,7 +1,6 @@
 package com.dbts.glyahhaigeneratecode.ai;
 
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
-import com.dbts.glyahhaigeneratecode.ai.tool.tools.*;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -71,6 +70,18 @@ public class aiCodeGeneratorServiceFactory {
      * @return
      */
     public aiCodeGeneratorService getAiCodeGeneratorService(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+        return getAiCodeGeneratorService(appId, codeGenTypeEnum, false);
+    }
+
+    /**
+     * 获取 ai 代码生成器服务（支持首轮工具白名单控制）
+     */
+    public aiCodeGeneratorService getAiCodeGeneratorService(Long appId, CodeGenTypeEnum codeGenTypeEnum, boolean firstRound) {
+        // 首轮且 VUE：只暴露 writeFile，避免把“受限工具集”实例缓存到后续轮次
+        if (firstRound && codeGenTypeEnum == CodeGenTypeEnum.VUE) {
+            log.info("首轮 VUE 对话，创建 writeFile-only AI 服务，appId={}", appId);
+            return createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum, true);
+        }
         // 从缓存中获取 aiCodeGeneratorService
         aiCodeGeneratorService service = serviceCache.getIfPresent(appId.toString() + "_" + codeGenTypeEnum);
         if (service != null) {
@@ -93,7 +104,7 @@ public class aiCodeGeneratorServiceFactory {
         }
 
         // 否则，创建一个新的 aiCodeGeneratorService
-        service = createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum);
+        service = createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum, false);
         log.info("创建一个新的 AI 服务实例，appId: {}, service: {}", appId, service);
         serviceCache.put(appId.toString() + "_" + codeGenTypeEnum, service);
 
@@ -107,6 +118,13 @@ public class aiCodeGeneratorServiceFactory {
      * @return
      */
     public aiCodeGeneratorService createAiCodeGeneratorServiceForEachApp(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+        return createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum, false);
+    }
+
+    /**
+     * 根据 appId 为每一个应用创建一个 aiCodeGeneratorService（可选首轮工具白名单）
+     */
+    public aiCodeGeneratorService createAiCodeGeneratorServiceForEachApp(Long appId, CodeGenTypeEnum codeGenTypeEnum, boolean firstRound) {
 
         //根据 appId 为每一个应用创建一个 aiCodeGeneratorService
         MessageWindowChatMemory build = MessageWindowChatMemory
@@ -139,7 +157,7 @@ public class aiCodeGeneratorServiceFactory {
                     // 将本来的ai默认记忆的Id转化为build类型的 以appId作为唯一标识的chatMemory
                     .chatMemoryProvider(memoryId -> build)
                     .tools(
-                            toolManager.getAllTools()
+                            firstRound ? toolManager.getWriteFileOnlyTools() : toolManager.getAllTools()
                     )
                     // 当ai调用了本来没有的tool时
                     .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
@@ -205,7 +223,7 @@ public class aiCodeGeneratorServiceFactory {
         }
 
         // 否则，创建一个新的 aiCodeGeneratorService
-        service = createAiCodeGeneratorServiceForEachApp(appId, CodeGenTypeEnum.MULTI_FILE);
+        service = createAiCodeGeneratorServiceForEachApp(appId, CodeGenTypeEnum.MULTI_FILE, false);
         log.info("创建一个新的 AI 服务实例，appId: {}, service: {}", appId, service);
         serviceCache.put(appId.toString() + "_" + CodeGenTypeEnum.MULTI_FILE, service);
 

@@ -11,6 +11,8 @@ export type ApplyReviewNotification = {
   reviewedAt: string;
 };
 
+type IdLike = number | string | undefined | null;
+
 function isBrowser() {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
@@ -45,36 +47,45 @@ function saveAll(list: ApplyReviewNotification[]) {
   }
 }
 
-function toId(value: number | string | undefined | null): string | null {
-  if (value === undefined || value === null) return null;
+function toId(value: IdLike): string | null {
+  if (value == null) return null;
   const str = String(value).trim();
-  return str ? str : null;
+  return str || null;
 }
 
-export function saveRejectNotification(
-  userId: number | string | undefined | null,
-  appId: number | string | undefined | null,
-  reviewRemark: string,
-) {
+/** 解析两个 ID 参数，任意一个无效则返回 null */
+function parseIds(
+  userId: IdLike,
+  appId: IdLike,
+): { userIdStr: string; appIdStr: string } | null {
   const userIdStr = toId(userId);
   const appIdStr = toId(appId);
+  if (!userIdStr || !appIdStr) return null;
+  return { userIdStr, appIdStr };
+}
+
+/** 从列表中找到匹配的通知下标 */
+function findIndex(all: ApplyReviewNotification[], userIdStr: string, appIdStr: string): number {
+  return all.findIndex((item) => item.userId === userIdStr && item.appId === appIdStr);
+}
+
+export function saveRejectNotification(userId: IdLike, appId: IdLike, reviewRemark: string) {
+  const ids = parseIds(userId, appId);
   const remark = reviewRemark.trim();
+  if (!ids || !remark) return;
 
-  if (!userIdStr || !appIdStr || !remark) return;
-
+  const { userIdStr, appIdStr } = ids;
   const all = loadAll();
-  const now = new Date().toISOString();
-  const idx = all.findIndex((item) => item.userId === userIdStr && item.appId === appIdStr);
-
   const next: ApplyReviewNotification = {
     userId: userIdStr,
     appId: appIdStr,
     reviewRemark: remark,
     status: 'rejected',
     unread: true,
-    reviewedAt: now,
+    reviewedAt: new Date().toISOString(),
   };
 
+  const idx = findIndex(all, userIdStr, appIdStr);
   if (idx >= 0) {
     all[idx] = next;
   } else {
@@ -83,47 +94,31 @@ export function saveRejectNotification(
   saveAll(all);
 }
 
-export function getRejectNotification(
-  userId: number | string | undefined | null,
-  appId: number | string | undefined | null,
-): ApplyReviewNotification | null {
-  const userIdStr = toId(userId);
-  const appIdStr = toId(appId);
-  if (!userIdStr || !appIdStr) return null;
+export function getRejectNotification(userId: IdLike, appId: IdLike): ApplyReviewNotification | null {
+  const ids = parseIds(userId, appId);
+  if (!ids) return null;
 
-  const all = loadAll();
-  const found = all.find((item) => item.userId === userIdStr && item.appId === appIdStr);
-  if (!found || found.status !== 'rejected') return null;
-  return found;
+  const { userIdStr, appIdStr } = ids;
+  const found = loadAll().find((item) => item.userId === userIdStr && item.appId === appIdStr);
+  return found?.status === 'rejected' ? found : null;
 }
 
-export function markRejectNotificationRead(
-  userId: number | string | undefined | null,
-  appId: number | string | undefined | null,
-) {
-  const userIdStr = toId(userId);
-  const appIdStr = toId(appId);
-  if (!userIdStr || !appIdStr) return;
+export function markRejectNotificationRead(userId: IdLike, appId: IdLike) {
+  const ids = parseIds(userId, appId);
+  if (!ids) return;
 
+  const { userIdStr, appIdStr } = ids;
   const all = loadAll();
-  const idx = all.findIndex((item) => item.userId === userIdStr && item.appId === appIdStr);
-  if (idx < 0) return;
+  const idx = findIndex(all, userIdStr, appIdStr);
+  const cur = all[idx];
+  if (!cur?.unread) return;
 
-  const cur = all[idx]
-  if (!cur || !cur.unread) return;
-
-  all[idx] = {
-    ...cur,
-    unread: false,
-  };
+  all[idx] = { ...cur, unread: false };
   saveAll(all);
 }
 
-export function hasUnreadRejectNotification(
-  userId: number | string | undefined | null,
-  appId: number | string | undefined | null,
-): boolean {
+export function hasUnreadRejectNotification(userId: IdLike, appId: IdLike): boolean {
   const notification = getRejectNotification(userId, appId);
-  return !!notification && notification.unread;
+  return !!notification?.unread;
 }
 

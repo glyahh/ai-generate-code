@@ -57,4 +57,16 @@ public class ToolManager {
     public BaseTool[] getAllTools() {
         return tools;
     }
+
+    /**
+     * 首轮对话仅允许写文件，降低误调用 read/modify/delete 带来的副作用风险。
+     */
+    public BaseTool[] getWriteFileOnlyTools() {
+        BaseTool writeFileTool = toolMap.get("writeFile");
+        if (writeFileTool == null) {
+            log.warn("writeFile 工具未注册，降级返回全部工具");
+            return tools;
+        }
+        return new BaseTool[]{writeFileTool};
+    }
 }

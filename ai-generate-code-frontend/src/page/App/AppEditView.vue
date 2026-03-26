@@ -48,6 +48,10 @@ const form = ref<{
 
 const isAdmin = computed(() => userLoginStore.userLogin?.userRole === 'admin')
 
+function isSuccess(code: number | undefined): boolean {
+  return code === 0 || code === 20000
+}
+
 async function loadDetail() {
   if (!appIdBigInt.value) {
     message.error('应用 ID 异常')
@@ -57,16 +61,14 @@ async function loadDetail() {
   loading.value = true
   try {
     const fn = isAdmin.value ? appAdminGetVoUsingGet : appGetVoUsingGet
-    const res = await fn({
-      // 这里使用字符串形式 ID，避免 Long 精度丢失
-      params: { id: appIdForRequest.value },
-    } as any)
-    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
-      appInfo.value = res.data.data
+    const res = await fn({ params: { id: appIdForRequest.value } } as any)
+    if (isSuccess(res.data.code) && res.data.data) {
+      const data = res.data.data
+      appInfo.value = data
       form.value = {
-        appName: appInfo.value.appName || '',
-        cover: appInfo.value.cover || '',
-        priority: appInfo.value.priority,
+        appName: data.appName || '',
+        cover: data.cover || '',
+        priority: data.priority,
       }
     } else {
       message.error(res.data.message || '获取应用信息失败')
@@ -84,34 +86,22 @@ async function handleSubmit() {
   await formRef.value?.validate()
   loading.value = true
   try {
-    if (isAdmin.value) {
-      const body: AppAdminUpdateRequest = {
-        // BigInt -> string，后端用 Long 接收
-        id: appIdForRequest.value as any,
-        appName: form.value.appName,
-        cover: form.value.cover || undefined,
-        priority: form.value.priority,
-      }
-      const res = await appAdminUpdateUsingPost({ body })
-      if (res.data.code === 0 || res.data.code === 20000) {
-        message.success('保存成功')
-        router.back()
-      } else {
-        message.error(res.data.message || '保存失败')
-      }
+    const commonFields = {
+      id: appIdForRequest.value as any,
+      appName: form.value.appName,
+      cover: form.value.cover || undefined,
+    }
+    const res = isAdmin.value
+      ? await appAdminUpdateUsingPost({
+          body: { ...commonFields, priority: form.value.priority } as AppAdminUpdateRequest,
+        })
+      : await appUpdateUsingPost({ body: commonFields as any as AppUpdateRequest })
+
+    if (isSuccess(res.data.code)) {
+      message.success('保存成功')
+      router.back()
     } else {
-      const body = {
-        id: appIdForRequest.value,
-        appName: form.value.appName,
-        cover: form.value.cover || undefined,
-      } as any as AppUpdateRequest
-      const res = await appUpdateUsingPost({ body })
-      if (res.data.code === 0 || res.data.code === 20000) {
-        message.success('保存成功')
-        router.back()
-      } else {
-        message.error(res.data.message || '保存失败')
-      }
+      message.error(res.data.message || '保存失败')
     }
   } catch (e) {
     console.error(e)

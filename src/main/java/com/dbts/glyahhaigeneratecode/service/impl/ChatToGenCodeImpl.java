@@ -65,6 +65,10 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         }
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
 
+        // 4.5 首轮判定：在写入本轮 user 消息前统计，round=0 代表首轮
+        int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
+        boolean firstRound = roundsBefore == 0;
+
         // 5. 保存用户消息到对话历史(Mysql)
         chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), user.getId());
 
@@ -73,7 +77,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId());
 
         // 6. 调用 AI 生成代码（流式）
-        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
+        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
 
         // 7. 添加 AI 回复到对话历史,转换格式并返回给前端
         return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum);

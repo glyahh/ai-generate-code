@@ -50,11 +50,11 @@ public class JsonMessageStreamHandler {
     public Flux<String> handle(Flux<String> originFlux,
                                ChatHistoryService chatHistoryService,
                                long appId, User loginUser) {
+
         // 收集数据用于生成后端记忆格式
         StringBuilder chatHistoryStringBuilder = new StringBuilder();
         // 用于跟踪已经见过的工具ID，判断是否是第一次调用
         Set<String> seenToolIds = new HashSet<>();
-
 
         return originFlux
 
@@ -113,7 +113,7 @@ public class JsonMessageStreamHandler {
                         if (tool != null) {
                             return tool.generateToolRequestResponse();
                         }
-                        return String.format("\n\n[选择工具] %s\n",
+                        return String.format("[选择工具] %s",
                                 StrUtil.blankToDefault(toolRequestMessage.getName(), "未知工具"));
                     }
                     return "";
@@ -130,7 +130,7 @@ public class JsonMessageStreamHandler {
                         // 未注册工具时兜底（兼容旧流式消息或名称不一致）
                         result = fallbackToolExecutedFormatting(toolExecutedMessage.getName(), jsonObject);
                     }
-                    String output = String.format("\n\n%s\n\n", result);
+                    String output = String.format("%s", result);
                     chatHistoryStringBuilder.append(output);
                     return output;
                 }

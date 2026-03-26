@@ -336,7 +336,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (code.length() <= maxLen) {
             return code;
         }
-        String summarized = summarizeLongCodeBlock(code, langLabel);
+        String summarized = summarizeLongCodeBlock(code, langLabel); // fatch的代码 代码类型(HTML这种)
         if (StrUtil.isNotBlank(summarized)) {
             return "/* 历史代码块较长，以下为自动总结 */\n" + summarized;
         }
@@ -355,7 +355,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                     + "2) 只写功能与逻辑要点，不要建议，不要改写代码。\n"
                     + "3) 不要包含 markdown 代码块标记。\n\n"
                     + "代码如下：\n"
-                    + code;
+                    + code
+                    + "注意总结篇幅在" + MEMORY_AI_CODE_SUMMARY_MAX_LENGTH + "个字符以内";
             String summary = chatModel.chat(prompt);
             if (StrUtil.isBlank(summary)) {
                 return "";

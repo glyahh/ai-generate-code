@@ -58,13 +58,18 @@ const CODE_TYPE_CHOICES: Array<{
   },
 ]
 
-const selectedCodeTypeLabel = computed(() => {
-  return CODE_TYPE_CHOICES.find((x) => x.value === selectedCodeType.value)?.label ?? '多文件'
-})
+const selectedCodeTypeLabel = computed(
+  () => CODE_TYPE_CHOICES.find((x) => x.value === selectedCodeType.value)?.label ?? '多文件',
+)
 
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
 const DEPLOY_FALLBACK_PORT = String(import.meta.env.VITE_DEPLOY_FALLBACK_PORT ?? '8124')
+
+/** 判断接口响应是否成功 */
+function isSuccess(code: number | undefined): boolean {
+  return code === 0 || code === 20000
+}
 
 function normalizeDeployUrl(rawUrl: unknown): string {
   // debug 证据：后端返回的 deploy url 在本地开发场景可能缺少协议或端口，直接 window.open 会失败。
@@ -184,7 +189,7 @@ async function handleCreateApp() {
         codeGenType: selectedCodeType.value,
       },
     })
-    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+    if (isSuccess(res.data.code) && res.data.data) {
       const appId = res.data.data
       message.success('应用创建成功，正在进入对话页面')
       // 添加 autoSend 标识，表示从首页创建，需要自动提交初始提示词
@@ -225,6 +230,13 @@ function selectCodeType(value: CodeGenTypeEnum) {
   codeTypePickerOpen.value = false
 }
 
+/** 将关键字解析为 id 或 appName 查询参数 */
+function keywordToQuery(keyword: string): { id?: any; appName?: string } {
+  const kw = keyword.trim()
+  if (!kw) return {}
+  return /^\d+$/.test(kw) ? { id: kw } : { appName: kw }
+}
+
 async function loadMyApps() {
   if (!isLogin.value) {
     myApps.value.records = []
@@ -233,17 +245,14 @@ async function loadMyApps() {
   }
   myApps.value.loading = true
   try {
-    const keyword = myApps.value.keyword.trim()
-    const isId = keyword && /^\d+$/.test(keyword)
     const res = await appMyListPageVoUsingPost({
       body: {
         pageNum: myApps.value.pageNum,
         pageSize: myApps.value.pageSize,
-        id: isId ? (keyword as any) : undefined,
-        appName: !isId && keyword ? keyword : undefined,
+        ...keywordToQuery(myApps.value.keyword),
       },
     })
-    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+    if (isSuccess(res.data.code) && res.data.data) {
       myApps.value.records = res.data.data.records || []
       myApps.value.total = res.data.data.totalRow || 0
     }
@@ -255,17 +264,14 @@ async function loadMyApps() {
 async function loadGoodApps() {
   goodApps.value.loading = true
   try {
-    const keyword = goodApps.value.keyword.trim()
-    const isId = keyword && /^\d+$/.test(keyword)
     const res = await appGoodListPageVoUsingPost({
       body: {
         pageNum: goodApps.value.pageNum,
         pageSize: goodApps.value.pageSize,
-        id: isId ? (keyword as any) : undefined,
-        appName: !isId && keyword ? keyword : undefined,
+        ...keywordToQuery(goodApps.value.keyword),
       },
     })
-    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+    if (isSuccess(res.data.code) && res.data.data) {
       goodApps.value.records = res.data.data.records || []
       goodApps.value.total = res.data.data.totalRow || 0
     }
@@ -304,10 +310,9 @@ async function handleDeploy(app: AppVO) {
       body: { appId: app.id },
     })
     hide()
-    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
-      // debug 证据：部署成功但无法访问时，优先在前端归一化 URL，规避“缺协议/缺端口”问题。
-      const url = normalizeDeployUrl(res.data.data)
-      deployUrl.value = url
+    if (isSuccess(res.data.code) && res.data.data) {
+      // debug 证据：部署成功但无法访问时，优先在前端归一化 URL，规避”缺协议/缺端口”问题。
+      deployUrl.value = normalizeDeployUrl(res.data.data)
       deployModalVisible.value = true
       message.success('部署成功')
     } else {
@@ -336,10 +341,10 @@ async function handleUndeploy(app: AppVO) {
           body: { appId: app.id as any },
         })
         hide()
-        if ((res.data.code === 0 || res.data.code === 20000) && res.data.data === true) {
+        if (isSuccess(res.data.code) && res.data.data === true) {
           message.success('下线成功')
         } else {
-          // 未成功下线时统一提示“好像还没有部署哦”
+          // 未成功下线时统一提示”好像还没有部署哦”
           message.error('好像还没有部署哦')
         }
       } catch (e) {
@@ -391,7 +396,7 @@ async function handleDeleteApp(app: AppVO) {
         const res = await appOpenApiDeleteUsingPost({
           body: { id: app.id as any },
         })
-        if (res.data.code === 0 || res.data.code === 20000) {
+        if (isSuccess(res.data.code)) {
           message.success('删除成功')
           await loadMyApps()
         } else {
