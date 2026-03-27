@@ -88,7 +88,9 @@ public class JsonMessageStreamHandler {
      * 解析并收集 TokenStream 数据
      * 将不同的chunk转化成对应的json字符串
      */
-    private String handleJsonMessageChunk(String chunk, StringBuilder chatHistoryStringBuilder, Set<String> seenToolIds) {
+    private String handleJsonMessageChunk(String chunk,
+                                          StringBuilder chatHistoryStringBuilder,
+                                          Set<String> seenToolIds) {
         // 解析 JSON
         StreamMessage streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
         StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
@@ -106,16 +108,18 @@ public class JsonMessageStreamHandler {
                 case TOOL_REQUEST -> {
                     ToolRequestMessage toolRequestMessage = JSONUtil.toBean(chunk, ToolRequestMessage.class);
                     String toolId = toolRequestMessage.getId();
+                    String toolName = StrUtil.blankToDefault(toolRequestMessage.getName(), "未知工具");
                     // 检查是否是第一次看到这个工具 ID
                     if (toolId != null && !seenToolIds.contains(toolId)) {
                         seenToolIds.add(toolId);
                         BaseTool tool = toolManager.getTool(toolRequestMessage.getName());
                         if (tool != null) {
                             return tool.generateToolRequestResponse();
+                        } else {
+                            return String.format("[选择工具] %s", toolName);
                         }
-                        return String.format("[选择工具] %s",
-                                StrUtil.blankToDefault(toolRequestMessage.getName(), "未知工具"));
                     }
+                    // 回档策略：工具请求阶段不再流式输出参数内容，避免“逐行/逐字符抖动”影响实时体验。
                     return "";
                 }
 

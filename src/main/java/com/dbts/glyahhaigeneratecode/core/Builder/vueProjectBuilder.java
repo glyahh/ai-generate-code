@@ -1,12 +1,14 @@
 package com.dbts.glyahhaigeneratecode.core.Builder;
 
-import cn.hutool.core.util.RuntimeUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -116,30 +118,63 @@ public class vueProjectBuilder {
     private boolean executeCommand(File workingDir, String command, int timeoutSeconds) {
         try {
             log.info("在目录 {} 中执行命令: {}", workingDir.getAbsolutePath(), command);
-            Process process = RuntimeUtil.exec(
-                    null,
-                    workingDir,
-                    command.split("\\s+") // 命令分割为数组
-            );
+
+            // 通过 ProcessBuilder 读取 stdout/stderr，避免只看退出码无法定位真实失败原因
+            ProcessBuilder processBuilder = new ProcessBuilder(command.split("\\s+"));
+            processBuilder.directory(workingDir);
+            processBuilder.redirectErrorStream(true); // 合并 stdout/stderr，便于统一记录
+
+            Process process = processBuilder.start();
+
+            // 读取命令输出，限制最大长度避免日志/内存过大
+            StringBuilder output = new StringBuilder();
+            int maxOutputChars = 200_000;
+            Thread readerThread = new Thread(() -> {
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        if (output.length() < maxOutputChars) {
+                            output.append(line).append(System.lineSeparator());
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // 读取日志失败不影响主流程
+                }
+            });
+            readerThread.start();
+
             // 等待进程完成，设置超时
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 log.error("命令执行超时（{}秒），强制终止进程", timeoutSeconds);
                 process.destroyForcibly();
+                readerThread.join(2000);
+                log.error("命令输出（截断）: {}", truncate(output.toString(), 4000));
                 return false;
             }
+            readerThread.join(2000);
             int exitCode = process.exitValue();
             if (exitCode == 0) {
                 log.info("命令执行成功: {}", command);
                 return true;
             } else {
-                log.error("命令执行失败，退出码: {}", exitCode);
+                log.error("命令执行失败，退出码: {}\n命令输出（截断）:\n{}", exitCode, truncate(output.toString(), 8000));
                 return false;
             }
         } catch (Exception e) {
             log.error("执行命令失败: {}, 错误信息: {}", command, e.getMessage());
             return false;
         }
+    }
+
+    private String truncate(String input, int maxLen) {
+        if (input == null) {
+            return "";
+        }
+        if (input.length() <= maxLen) {
+            return input;
+        }
+        return input.substring(0, maxLen) + "\n...（输出已截断）";
     }
 
 }

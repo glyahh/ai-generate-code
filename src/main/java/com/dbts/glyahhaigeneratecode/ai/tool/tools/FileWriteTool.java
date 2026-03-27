@@ -53,6 +53,10 @@ public class FileWriteTool extends BaseTool {
             if (parentDir != null) {
                 Files.createDirectories(parentDir);
             }
+            // .vue 文件：移除 AI 多余输出的尾部闭合标签，避免 vite build 报 Invalid end tag
+            if (relativeFilePath.endsWith(".vue")) {
+                content = sanitizeVueContent(content);
+            }
             // 写入文件内容
             Files.write(path, content.getBytes(),
                     StandardOpenOption.CREATE,
@@ -89,5 +93,45 @@ public class FileWriteTool extends BaseTool {
             """, getDisplayName(), arguments.getStr("relativeFilePath"),
                 FileUtil.getSuffix(arguments.getStr("relativeFilePath")),
                 arguments.getStr("content"));
+    }
+
+    /**
+     * 清理 AI 在 .vue 文件末尾多余输出的闭合标签。有的煞笔模型会瞎写
+     * 例如 AI 有时会在文件末尾多输出 </template> 或 </script>，
+     * 导致 vite build 报 "Invalid end tag"。
+     * 通过比较开/闭标签数量，从末尾删除多余的闭合标签。
+     */
+    private String sanitizeVueContent(String content) {
+        if (content == null || content.isEmpty()) return content;
+
+        String result = content;
+
+        int excessTemplate = countMatches(result, "</template>") - countMatches(result, "<template");
+        for (int i = 0; i < excessTemplate; i++) {
+            int lastIdx = result.lastIndexOf("</template>");
+            if (lastIdx >= 0) {
+                result = result.substring(0, lastIdx) + result.substring(lastIdx + "</template>".length());
+            }
+        }
+
+        int excessScript = countMatches(result, "</script>") - countMatches(result, "<script");
+        for (int i = 0; i < excessScript; i++) {
+            int lastIdx = result.lastIndexOf("</script>");
+            if (lastIdx >= 0) {
+                result = result.substring(0, lastIdx) + result.substring(lastIdx + "</script>".length());
+            }
+        }
+
+        return result.stripTrailing();
+    }
+
+    private int countMatches(String text, String pattern) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(pattern, idx)) != -1) {
+            count++;
+            idx += pattern.length();
+        }
+        return count;
     }
 }

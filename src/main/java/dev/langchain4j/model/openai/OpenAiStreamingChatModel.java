@@ -136,6 +136,13 @@ public class OpenAiStreamingChatModel implements StreamingChatModel {
                         }
                     }
                     ChatResponse chatResponse = openAiResponseBuilder.build();
+                    // Debug修复：某些异常/中断场景下，SSE onClose 先于有效响应构建，build() 可能返回 null。
+                    // 若继续调用 onCompleteResponse(null)，下游会在 AiServiceStreamingResponseHandler 中触发 NPE。
+                    if (chatResponse == null) {
+                        withLoggingExceptions(() -> handler.onError(
+                                new IllegalStateException("流式响应结束时未构建出 ChatResponse（可能是上游提前关闭或返回空流）")));
+                        return;
+                    }
                     try {
                         handler.onCompleteResponse(chatResponse);
                     } catch (Exception e) {

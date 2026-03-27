@@ -1869,7 +1869,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="app-chat-page">
-    <a-modal v-model:open="filesModalOpen" title="生成文件回显" :footer="null" width="920px">
+    <a-modal v-model:open="filesModalOpen" title="生成文件回显" :footer="null" width="1180px">
       <div class="files-modal">
         <div class="files-list">
           <div class="files-list-title">文件（{{ generatedFiles.length }}）</div>
@@ -1907,7 +1907,9 @@ onBeforeUnmount(() => {
                 </a-button>
               </div>
             </div>
-            <CodeBlock :code="activeFile.content" :language="activeFile.language || 'txt'" :is-streaming="false" />
+            <div class="files-viewer-code">
+              <CodeBlock :code="activeFile.content" :language="activeFile.language || 'txt'" :is-streaming="false" />
+            </div>
           </div>
         </div>
       </div>
@@ -2372,7 +2374,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 12px;
-  min-height: 520px;
+  min-height: 640px;
 }
 
 .files-list {
@@ -2506,10 +2508,33 @@ onBeforeUnmount(() => {
 }
 
 .files-viewer-inner {
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.files-viewer-code {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.files-viewer-code :deep(.code-block-container) {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-viewer-code :deep(.code-block-container .code-block) {
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 0;
+  max-height: none !important;
 }
 
 .files-viewer-header {

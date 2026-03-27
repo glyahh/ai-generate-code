@@ -21,8 +21,8 @@ public class ReasoningChatModelConfig {
     // 推理编码模型
     private final String reasoningModelName = "qwen3-coder-next";
     private final int reasoningMaxTokens = 32768;
-    // 普通模型
-    private final String modelName = "qwen3-vl-flash-2026-01-22";
+    // 普通模型 - 使用稳定的支持工具调用的模型
+    private final String modelName = "MiniMax-M2.1";
     private final int maxTokens = 8192;
 
 

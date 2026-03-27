@@ -14,80 +14,114 @@ const props = withDefaults(defineProps<Props>(), {
 
 const codeRef = ref<HTMLElement | null>(null)
 
-/**
- * 简单的语法高亮（基于关键词匹配）
- * 如果项目安装了 highlight.js，可以替换为更强大的高亮方案
- */
-const highlightedCode = computed(() => {
-  const raw = props.code
-  const lang = props.language.toLowerCase()
-
-  // 先对代码中的 HTML 特殊字符进行转义，防止被浏览器当作真实标签渲染
-  // 这样无论是 HTML 代码还是包含 < > 的其他代码，都能安全展示
-  const escaped = raw
+function escapeHtml(text: string): string {
+  return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
 
-  // 简单的关键词高亮（适用于常见语言）
-  let highlighted = escaped
-
-  // Vue 单文件组件：按 HTML 模板 + 属性高亮，兼容 <template>/<script>/<style>
-  if (lang === 'vue') {
-    highlighted = escaped
-      // 高亮块级标签名
-      .replace(
-        /(&lt;\/?)(template|script|style)(\s*[^&]*?)(&gt;)/g,
-        '$1<span class="code-tag code-tag-block">$2</span>$3$4',
-      )
-      // 其他标签
-      .replace(
-        /(&lt;\/?)([\w-]+)(\s*[^&]*?)(&gt;)/g,
-        '$1<span class="code-tag">$2</span>$3$4',
-      )
-      // 属性与属性值
-      .replace(
-        /(\w+)(\s*=\s*)(['"])([^'"]*?)(\3)/g,
-        '<span class="code-attr">$1</span>$2$3<span class="code-value">$4</span>$5',
-      )
-      // 行内注释（例如 // 或 /* */ 出现在 <script> 中）
-      .replace(/(\/\/.*$)/gm, '<span class="code-comment">$1</span>')
-      .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="code-comment">$1</span>')
-  }
-  // CSS 关键词
-  else if (lang === 'css' || lang === 'scss' || lang === 'less') {
-    highlighted = escaped
-      .replace(/(\w+)(\s*:\s*)/g, '<span class="code-property">$1</span>$2')
-      .replace(/(:\s*)([^;]+)(;)/g, '$1<span class="code-value">$2</span>$3')
-      .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="code-comment">$1</span>')
-      .replace(/([.#])([\w-]+)/g, '$1<span class="code-selector">$2</span>')
-  }
-  // JavaScript/TypeScript：先注释和字符串，再关键词，避免嵌套导致乱码
-  else if (lang === 'javascript' || lang === 'js' || lang === 'typescript' || lang === 'ts') {
-    highlighted = escaped
-      .replace(/(\/\/.*$)/gm, '<span class="code-comment">$1</span>')
-      .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="code-comment">$1</span>')
-      .replace(/(['"`])((?:\\.|(?!\1)[^\\])*?)(\1)/g, '<span class="code-string">$1$2$3</span>')
-    const keywords = ['function', 'const', 'let', 'var', 'if', 'else', 'return', 'import', 'export', 'from', 'async', 'await', 'class', 'extends', 'new', 'this', 'true', 'false', 'null', 'undefined', 'typeof', 'instanceof', 'in', 'of', 'try', 'catch', 'finally', 'throw', 'switch', 'case', 'break', 'default', 'continue', 'for', 'while', 'do', 'get', 'set', 'static', 'constructor', 'super', '=>']
-    keywords.forEach((keyword) => {
-      const regex = new RegExp(`\\b(${keyword})\\b`, 'g')
-      highlighted = highlighted.replace(regex, '<span class="code-keyword">$1</span>')
+function withStashedTokens(
+  source: string,
+  builders: Array<{ re: RegExp; className: string }>,
+): { text: string; restore: (s: string) => string } {
+  const stash: string[] = []
+  let result = source
+  builders.forEach(({ re, className }) => {
+    result = result.replace(re, (m) => {
+      const id = stash.length
+      stash.push(`<span class="${className}">${m}</span>`)
+      return `__TOK_${id}__`
     })
+  })
+  return {
+    text: result,
+    restore: (s: string) => s.replace(/__TOK_(\d+)__/g, (_, i) => stash[Number(i)] ?? ''),
   }
-  // HTML 标签
-  else if (lang === 'html' || lang === 'xml') {
-    highlighted = escaped
-      .replace(/(&lt;\/?)([\w-]+)(\s*[^&]*?)(&gt;)/g, '$1<span class="code-tag">$2</span>$3$4')
-      .replace(/(\w+)(\s*=\s*)(['"])([^'"]*?)(\3)/g, '<span class="code-attr">$1</span>$2$3<span class="code-value">$4</span>$5')
-  }
-  // 默认：只高亮注释
-  else {
-    highlighted = escaped
-      .replace(/(\/\/.*$)/gm, '<span class="code-comment">$1</span>')
-      .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="code-comment">$1</span>')
-  }
+}
 
-  return highlighted
+function highlightJsLike(raw: string): string {
+  const escaped = escapeHtml(raw)
+  const { text, restore } = withStashedTokens(escaped, [
+    { re: /\/\*[\s\S]*?\*\//g, className: 'code-comment' },
+    { re: /\/\/[^\r\n]*/g, className: 'code-comment' },
+    { re: /(["'`])(?:\\.|(?!\1)[\s\S])*?\1/g, className: 'code-string' },
+  ])
+
+  const highlighted = text
+    .replace(
+      /\b(const|let|var|function|return|if|else|switch|case|break|default|for|while|do|continue|import|from|export|class|extends|new|this|async|await|try|catch|finally|throw|typeof|instanceof|in|of|static|get|set|super|null|undefined|true|false)\b/g,
+      '<span class="code-keyword">$1</span>',
+    )
+    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="code-number">$1</span>')
+    .replace(/([=+\-*/%<>!&|^~?:]+)/g, '<span class="code-operator">$1</span>')
+    .replace(/\b([A-Za-z_$][\w$]*)(?=\s*\()/g, '<span class="code-function">$1</span>')
+
+  return restore(highlighted)
+}
+
+function highlightCss(raw: string): string {
+  const escaped = escapeHtml(raw)
+  const { text, restore } = withStashedTokens(escaped, [
+    { re: /\/\*[\s\S]*?\*\//g, className: 'code-comment' },
+    { re: /(["'])(?:\\.|(?!\1)[\s\S])*?\1/g, className: 'code-string' },
+  ])
+
+  const highlighted = text
+    .replace(/([.#][\w-]+)/g, '<span class="code-selector">$1</span>')
+    .replace(/(@[\w-]+)/g, '<span class="code-keyword">$1</span>')
+    .replace(/([\w-]+)(\s*:)/g, '<span class="code-property">$1</span>$2')
+    .replace(/(:\s*)([^;}{\n]+)(;?)/g, '$1<span class="code-value">$2</span>$3')
+    .replace(/\b(\d+(?:\.\d+)?(?:px|em|rem|vh|vw|%|s|ms|deg)?)\b/g, '<span class="code-number">$1</span>')
+
+  return restore(highlighted)
+}
+
+function highlightHtml(raw: string): string {
+  const escaped = escapeHtml(raw)
+  return escaped
+    .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="code-comment">$&</span>')
+    .replace(/(&lt;\/?)([\w-]+)([\s\S]*?)(&gt;)/g, (_, p1, p2, p3, p4) => {
+      const attrs = String(p3).replace(
+        /([:@\w-]+)(\s*=\s*)(["'])([\s\S]*?)(\3)/g,
+        '<span class="code-attr">$1</span>$2$3<span class="code-string">$4</span>$5',
+      )
+      return `${p1}<span class="code-tag">${p2}</span>${attrs}${p4}`
+    })
+}
+
+function highlightVue(raw: string): string {
+  const blockRe = /(<script\b[^>]*>)([\s\S]*?)(<\/script>)|(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi
+  let cursor = 0
+  let out = ''
+  let m: RegExpExecArray | null
+
+  while ((m = blockRe.exec(raw)) !== null) {
+    const idx = m.index
+    if (idx > cursor) out += highlightHtml(raw.slice(cursor, idx))
+    if (m[1] != null) {
+      out += highlightHtml(m[1])
+      out += highlightJsLike(m[2] ?? '')
+      out += highlightHtml(m[3] ?? '')
+    } else if (m[4] != null) {
+      out += highlightHtml(m[4])
+      out += highlightCss(m[5] ?? '')
+      out += highlightHtml(m[6] ?? '')
+    }
+    cursor = idx + m[0].length
+  }
+  if (cursor < raw.length) out += highlightHtml(raw.slice(cursor))
+  return out
+}
+
+const highlightedCode = computed(() => {
+  const raw = props.code ?? ''
+  const lang = (props.language ?? 'text').toLowerCase()
+  if (lang === 'vue') return highlightVue(raw)
+  if (lang === 'javascript' || lang === 'js' || lang === 'typescript' || lang === 'ts') return highlightJsLike(raw)
+  if (lang === 'css' || lang === 'scss' || lang === 'less') return highlightCss(raw)
+  if (lang === 'html' || lang === 'xml') return highlightHtml(raw)
+  return highlightJsLike(raw)
 })
 
 /**
@@ -122,10 +156,7 @@ function scrollToBottom() {
         📋
       </button>
     </div>
-    <pre ref="codeRef" class="code-block">
-      <code v-html="highlightedCode"></code>
-      <span v-if="isStreaming" class="streaming-cursor">▋</span>
-    </pre>
+    <pre ref="codeRef" class="code-block"><code v-html="highlightedCode"></code><span v-if="isStreaming" class="streaming-cursor">▋</span></pre>
     <button class="scroll-button scroll-button-top" @click="scrollToTop" title="回到顶部">
       ↑
     </button>
@@ -271,32 +302,44 @@ function scrollToBottom() {
 }
 
 :deep(.code-string) {
-  color: #ce9178;
+  color: #e6b450;
 }
 
 :deep(.code-comment) {
-  color: #6a9955;
+  color: #7f8ea3;
   font-style: italic;
 }
 
 :deep(.code-property) {
-  color: #9cdcfe;
+  color: #7dcfff;
 }
 
 :deep(.code-value) {
-  color: #ce9178;
+  color: #f9a8d4;
 }
 
 :deep(.code-selector) {
-  color: #d7ba7d;
+  color: #8be9fd;
 }
 
 :deep(.code-tag) {
-  color: #569cd6;
+  color: #ff7aa2;
 }
 
 :deep(.code-attr) {
-  color: #92c5f7;
+  color: #9ccfd8;
+}
+
+:deep(.code-number) {
+  color: #c4b5fd;
+}
+
+:deep(.code-operator) {
+  color: #f38ba8;
+}
+
+:deep(.code-function) {
+  color: #7ee787;
 }
 
 .streaming-cursor {
