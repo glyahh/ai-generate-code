@@ -71,7 +71,7 @@ public interface AppService extends IService<App> {
      *
      * @param appId     应用 id
      * @param loginUser 当前登录用户
-     * @return 删除成功返回 true，未部署或无目录返回 false
+     * @return 已清理部署信息返回 true；从未部署（无 deployKey）返回 false
      */
     boolean undeployApp(Long appId, User loginUser);
 }

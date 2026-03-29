@@ -66,9 +66,25 @@ const deployModalVisible = ref(false)
 const deployUrl = ref('')
 const DEPLOY_FALLBACK_PORT = String(import.meta.env.VITE_DEPLOY_FALLBACK_PORT ?? '8124')
 
-/** 判断接口响应是否成功 */
-function isSuccess(code: number | undefined): boolean {
-  return code === 0 || code === 20000
+/**
+ * 判断接口响应是否成功。
+ * 证据：部分网关/序列化会把 code 变成字符串，严格 === 20000 会失败，导致下线后不刷新列表、已部署态残留。
+ */
+function isSuccess(code: unknown): boolean {
+  if (code === null || code === undefined) return false
+  const n = Number(code)
+  if (Number.isNaN(n)) return false
+  return n === 0 || n === 20000
+}
+
+/** 任意代码类型部署后，后端会写入 deployKey / deployedTime */
+function isAppDeployed(app: AppVO | undefined): boolean {
+  if (!app) return false
+  const key = app.deployKey
+  if (key !== undefined && key !== null && String(key).trim() !== '') return true
+  const t = app.deployedTime
+  if (t !== undefined && t !== null && String(t).trim() !== '') return true
+  return false
 }
 
 function normalizeDeployUrl(rawUrl: unknown): string {
@@ -237,6 +253,28 @@ function keywordToQuery(keyword: string): { id?: any; appName?: string } {
   return /^\d+$/.test(kw) ? { id: kw } : { appName: kw }
 }
 
+/** 去掉当前引用上的部署字段（下线后立刻反馈） */
+function clearDeployedFieldsOnApp(app: AppVO) {
+  app.deployKey = undefined
+  app.deployedTime = undefined
+}
+
+/**
+ * 在「我的应用」当前列表里按应用 id 清除部署字段（必须用 String 比 id，避免 Snowflake 精度丢失）。
+ * 证据：loadMyApps 会整体替换 records 为新对象；仅改下线前的 app 引用无效，必须在刷新后再对当前行清一次。
+ */
+function clearDeployedFieldsOnAppByStableId(id: string | number | undefined | null) {
+  if (id === undefined || id === null) return
+  const sid = String(id)
+  for (const row of myApps.value.records) {
+    if (row.id != null && String(row.id) === sid) {
+      row.deployKey = undefined
+      row.deployedTime = undefined
+      break
+    }
+  }
+}
+
 async function loadMyApps() {
   if (!isLogin.value) {
     myApps.value.records = []
@@ -315,6 +353,7 @@ async function handleDeploy(app: AppVO) {
       deployUrl.value = normalizeDeployUrl(res.data.data)
       deployModalVisible.value = true
       message.success('部署成功')
+      void loadMyApps()
     } else {
       message.error(res.data.message || '部署失败')
     }
@@ -341,8 +380,17 @@ async function handleUndeploy(app: AppVO) {
           body: { appId: app.id as any },
         })
         hide()
-        if (isSuccess(res.data.code) && res.data.data === true) {
+        const undeployData: unknown = res.data?.data
+        const undeployOk =
+          isSuccess(res.data?.code) &&
+          (undeployData === true ||
+            (typeof undeployData === 'string' && undeployData.toLowerCase() === 'true'))
+        if (undeployOk) {
+          clearDeployedFieldsOnApp(app)
           message.success('下线成功')
+          await loadMyApps()
+          // 新列表行是接口新对象；再按 id 清一次，避免替换引用后仍显示已部署
+          clearDeployedFieldsOnAppByStableId(app.id)
         } else {
           // 未成功下线时统一提示”好像还没有部署哦”
           message.error('好像还没有部署哦')
@@ -599,10 +647,18 @@ onMounted(() => {
             <ACard
               v-for="app in myApps.records"
               :key="app.id"
-              class="app-card my-app-card"
+              :class="['app-card', 'my-app-card', { 'my-app-card--deployed': isAppDeployed(app) }]"
               hoverable
               @click="goChat(app)"
             >
+              <div
+                v-if="isAppDeployed(app)"
+                class="app-deployed-mark"
+                aria-label="已部署"
+              >
+                <span class="app-deployed-mark__glow" aria-hidden="true" />
+                <span class="app-deployed-mark__text">已部署</span>
+              </div>
               <div class="app-hover-meta">
                 <div v-if="app.createTime" class="app-hover-meta-row">
                   <span class="meta-label">创建时间</span>
@@ -1060,6 +1116,64 @@ onMounted(() => {
   background: linear-gradient(135deg, #2a5dd4, #2dc968);
 }
 
+/* 已部署：墨绿主色 + 内光边，与首页蓝紫 hero 区分，避免「又一坨紫渐变」 */
+.my-app-card--deployed {
+  border-color: rgba(13, 148, 136, 0.42) !important;
+  background:
+    linear-gradient(
+      152deg,
+      rgba(236, 253, 245, 0.97) 0%,
+      rgba(255, 255, 255, 0.92) 42%,
+      rgba(240, 253, 250, 0.9) 100%
+    );
+  box-shadow:
+    0 10px 28px rgba(15, 23, 42, 0.07),
+    0 0 0 1px rgba(13, 148, 136, 0.1) inset;
+}
+
+.my-app-card--deployed:hover {
+  border-color: rgba(13, 148, 136, 0.58) !important;
+  box-shadow:
+    0 14px 34px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(13, 148, 136, 0.16) inset;
+}
+
+.app-deployed-mark {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 11px;
+  border-radius: 8px;
+  pointer-events: none;
+  color: #ecfdf5;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  background: linear-gradient(128deg, #0f766e 0%, #059669 48%, #047857 100%);
+  box-shadow:
+    0 4px 14px rgba(4, 120, 87, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.app-deployed-mark__glow {
+  position: absolute;
+  inset: -40% -20%;
+  background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.35), transparent 55%);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.app-deployed-mark__text {
+  position: relative;
+  z-index: 1;
+}
+
 .good-cover {
   background: linear-gradient(135deg, #facc15, #f97316);
 }
@@ -1144,6 +1258,7 @@ onMounted(() => {
 .my-app-card .app-hover-meta {
   position: absolute;
   inset: 0;
+  z-index: 1;
   padding: 10px 12px;
   background: linear-gradient(
     to bottom,

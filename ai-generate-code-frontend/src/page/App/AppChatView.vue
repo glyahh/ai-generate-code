@@ -855,6 +855,16 @@ function consumeLeadingNewlines(text: string, maxConsume = 2): string {
   return s
 }
 
+function inferLanguageFromFilePath(p: string): string {
+  const lower = (p || '').toLowerCase()
+  if (lower.endsWith('.vue')) return 'vue'
+  if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'typescript'
+  if (lower.endsWith('.js') || lower.endsWith('.jsx')) return 'javascript'
+  if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'css'
+  if (lower.endsWith('.html')) return 'html'
+  return 'text'
+}
+
 function flushSafeMarkdown(state: AssistantUiState, keepTail = 80) {
   if (!state.buffer) return
   if (state.buffer.length <= keepTail) return
@@ -874,16 +884,6 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
   const TOOL_EXEC_HEADER_RE_DELETE_FILE = /\[工具调用\]\s*删除文件\s+([^\r\n]+)\s*\r?\n/
   const TOOL_EXEC_HEADER_RE_READ_FILE = /\[工具调用\]\s*读取文件\s+([^\r\n]+)\s*\r?\n/
   const TOOL_EXEC_HEADER_RE_READ_DIR = /\[工具调用\]\s*读取目录结构\s+([^\r\n]+)\s*\r?\n/
-
-  const inferLanguageFromFilePath = (p: string): string => {
-    const lower = (p || '').toLowerCase()
-    if (lower.endsWith('.vue')) return 'vue'
-    if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'typescript'
-    if (lower.endsWith('.js') || lower.endsWith('.jsx')) return 'javascript'
-    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'css'
-    if (lower.endsWith('.html')) return 'html'
-    return 'text'
-  }
 
   const loopGuardMax = 2000
   let loopGuard = 0

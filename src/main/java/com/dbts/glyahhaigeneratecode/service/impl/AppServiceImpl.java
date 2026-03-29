@@ -362,7 +362,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
      *
      * @param appId     应用 id
      * @param loginUser 当前登录用户
-     * @return 删除成功返回 true，未部署或无有效目录返回 false
+     * @return 已清理部署信息（含删除目录或仅校正库内字段）返回 true；从未部署过（无 deployKey）返回 false
      */
     @Override
     public boolean undeployApp(Long appId, User loginUser) {
@@ -391,8 +391,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
         Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
         if (!Files.isDirectory(deployDir)) {
-            // 目录不存在，视为未部署
-            return false;
+            // 目录已被删除或丢失，但库内仍可能有 deployKey：清理字段，避免前端长期显示「已部署」
+            app.setDeployKey(null);
+            app.setDeployedTime(null);
+            app.setUpdateTime(LocalDateTime.now());
+            boolean cleared = this.updateById(app);
+            ThrowUtils.throwIf(!cleared, ErrorCode.OPERATION_ERROR, "取消部署信息更新失败");
+            return true;
         }
 
         // 5. 删除部署目录
