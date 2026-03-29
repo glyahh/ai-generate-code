@@ -32,8 +32,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * 应用 控制层。
@@ -112,6 +117,7 @@ public class AppController {
         } catch (Exception e) {
             log.warn("删除应用对话历史失败, appId={}", deleteRequest.getId(), e);
         }
+        removeCodeOutputDirByAppId(deleteRequest.getId());
         return ResultUtils.success(true);
     }
 
@@ -211,7 +217,44 @@ public class AppController {
         } catch (Exception e) {
             log.warn("管理员删除应用对话历史失败, appId={}", deleteRequest.getId(), e);
         }
+        removeCodeOutputDirByAppId(deleteRequest.getId());
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 按 appId 删除本地 code_output 下对应应用目录（失败不影响主流程）
+     */
+    private void removeCodeOutputDirByAppId(Long appId) {
+        Path codeOutputRootPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR);
+        if (!Files.isDirectory(codeOutputRootPath)) {
+            return;
+        }
+        String suffix = "_" + appId;
+        try (Stream<Path> stream = Files.list(codeOutputRootPath)) {
+            stream.filter(Files::isDirectory)
+                    .filter(path -> {
+                        String dirName = path.getFileName().toString();
+                        return dirName.endsWith(suffix) || dirName.endsWith("_project_" + appId);
+                    })
+                    .forEach(this::deleteDirectoryQuietly);
+        } catch (Exception e) {
+            log.warn("扫描 code_output 目录失败, appId={}", appId, e);
+        }
+    }
+
+    private void deleteDirectoryQuietly(Path dir) {
+        try (Stream<Path> pathStream = Files.walk(dir)) {
+            pathStream.sorted((a, b) -> b.getNameCount() - a.getNameCount())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            log.warn("删除目录内容失败, path={}", path, e);
+                        }
+                    });
+        } catch (Exception e) {
+            log.warn("删除应用目录失败, dir={}", dir, e);
+        }
     }
 
     /**
