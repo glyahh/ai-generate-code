@@ -10,8 +10,11 @@ import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
+import com.dbts.glyahhaigeneratecode.manage.OssManager;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
+import com.dbts.glyahhaigeneratecode.service.ScreenshotService;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import com.mybatisflex.core.update.UpdateChain;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.mapper.AppMapper;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppQueryRequest;
@@ -58,8 +61,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 //    @Resource
 //    private AppService appService;
 
-//    @Resource
-//    private ScreenshotService screenshotService;
+    @Resource
+    private ScreenshotService screenshotService;
+
+    @Resource
+    private OssManager ossManager;
 
     @Override
     public long createApp (User loginUser, AppAddRequest appAddRequest) {
@@ -336,7 +342,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 8. 复制文件到部署目录
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
 
-        // 7. 复制文件到deploy文件夹下
+        // 9. 复制文件到deploy文件夹下
         Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
         try {
             FileUtil.copyContent(sourceDir, deployDir.toFile(), true);
@@ -344,7 +350,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new MyException(ErrorCode.SYSTEM_ERROR, "部署文件复制失败: " + e.getMessage());
         }
 
-        // 8. 更新数据库
+        //10. 异步生成应用截图保存到阿里云
+        generateAppScreenshotAsync(appId, deployDirPath);
+
+        // 11. 更新数据库
         app.setDeployedTime(LocalDateTime.now());
         app.setUpdateTime(LocalDateTime.now());
         app.setDeployKey(deployKey);
@@ -353,7 +362,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new MyException(ErrorCode.OPERATION_ERROR, "部署信息更新失败");
         }
 
-        // 9. 返回 deployKey；最终 URL 由控制层按“当前请求域名+端口+context-path”拼接，避免返回错误主机。
+        // 12. 返回 deployKey；最终 URL 由控制层按“当前请求域名+端口+context-path”拼接，避免返回错误主机。
         return deployKey;
     }
 
@@ -390,32 +399,33 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
 
         Path deployDir = Paths.get(AppConstant.CODE_DEPLOY_ROOT_DIR, deployKey);
-        if (!Files.isDirectory(deployDir)) {
-            // 目录已被删除或丢失，但库内仍可能有 deployKey：清理字段，避免前端长期显示「已部署」
-            app.setDeployKey(null);
-            app.setDeployedTime(null);
-            app.setUpdateTime(LocalDateTime.now());
-            boolean cleared = this.updateById(app);
-            ThrowUtils.throwIf(!cleared, ErrorCode.OPERATION_ERROR, "取消部署信息更新失败");
-            return true;
+        // 5. 下线同时删除 OSS 中该应用截图（cover）
+        // 说明：cover 由部署时异步截图写入；下线后该截图通常已无意义，避免对象存储堆积。
+        // 备注：即使部署目录不存在（被手动删/异常丢失），也应清理 cover 与 deployKey，保证状态可回到“未部署”。
+        String cover = app.getCover();
+        if (StrUtil.isNotBlank(cover)) {
+            boolean deleted = ossManager.deleteFile(cover);
+            ThrowUtils.throwIf(!deleted, ErrorCode.OPERATION_ERROR, "删除 OSS 截图失败，请检查对象存储权限配置");
         }
 
-        // 5. 删除部署目录
-        try {
-            FileUtil.del(deployDir.toFile());
-        } catch (Exception e) {
-            throw new MyException(ErrorCode.SYSTEM_ERROR, "取消部署失败: " + e.getMessage());
+        // 6. 删除部署目录（目录不存在则忽略，仅做字段修正）
+        if (Files.isDirectory(deployDir)) {
+            try {
+                FileUtil.del(deployDir.toFile());
+            } catch (Exception e) {
+                throw new MyException(ErrorCode.SYSTEM_ERROR, "取消部署失败: " + e.getMessage());
+            }
         }
 
-        // 6. 清理应用上的部署信息
-        app.setDeployKey(null);
-        app.setDeployedTime(null);
-        app.setUpdateTime(LocalDateTime.now());
-        boolean updateResult = this.updateById(app);
-        if (!updateResult) {
-            throw new MyException(ErrorCode.OPERATION_ERROR, "取消部署信息更新失败");
-        }
-
+        // 7. 清理应用上的部署信息（强制将字段置空落库：updateById 默认可能忽略 null）
+        boolean cleared = UpdateChain.create(this.getMapper())
+                .set("deployKey", null)
+                .set("deployedTime", null)
+                .set("cover", null)
+                .set("updateTime", LocalDateTime.now())
+                .eq("id", appId)
+                .update();
+        ThrowUtils.throwIf(!cleared, ErrorCode.OPERATION_ERROR, "取消部署信息更新失败");
         return true;
     }
 
@@ -441,19 +451,19 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
      * @param appId  应用ID
      * @param appUrl 应用访问URL
      */
-//    @Override
-//    public void generateAppScreenshotAsync(Long appId, String appUrl) {
-//        // 使用虚拟线程异步执行
-//        Thread.startVirtualThread(() -> {
-//            // 调用截图服务生成截图并上传
-//            String screenshotUrl = screenshotService.generateAndUploadScreenshot(appUrl);
-//            // 更新应用封面字段
-//            App updateApp = new App();
-//            updateApp.setId(appId);
-//            updateApp.setCover(screenshotUrl);
-//            boolean updated = this.updateById(updateApp);
-//            ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "更新应用封面字段失败");
-//        });
-//    }
+    @Override
+    public void generateAppScreenshotAsync(Long appId, String appUrl) {
+        // 使用虚拟线程异步执行
+        Thread.startVirtualThread(() -> {
+            // 调用截图服务生成截图并上传
+            String screenshotUrl = screenshotService.generateAndUploadScreenshot(appUrl);
+            // 更新应用封面字段
+            App updateApp = new App();
+            updateApp.setId(appId);
+            updateApp.setCover(screenshotUrl);
+            boolean updated = this.updateById(updateApp);
+            ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "更新应用封面字段失败");
+        });
+    }
 
 }

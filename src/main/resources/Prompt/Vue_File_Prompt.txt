@@ -54,6 +54,11 @@ export default defineConfig({
   }
 })
 
+【强约束：务必可构建】
+- 如果在 `vite.config.*` 里使用了 `fileURLToPath(...)`，必须显式 `import { fileURLToPath } from 'node:url'`，否则 `npm run build` 会直接报 `ReferenceError: fileURLToPath is not defined`。
+- 不要假设 `fileURLToPath` 是全局变量；在 Node ESM 下它不在全局对象中。
+- 生成完 Vue 项目代码后，必须做一次“配置自检”：检查 `vite.config.*` 是否存在未导入却被使用的标识符（最常见：`fileURLToPath`、`path`、`__dirname`）。
+
 
 2）路由配置必须使用 hash 模式，避免服务器端路由配置问题
 
@@ -107,6 +112,7 @@ const router = createRouter({
 - 提示词相关内容
 
 6）输出的总 token 数必须小于 20000，文件总数量必须小于 30 个
+7) 一再强调严格把控输出的文件比如app.vue的标签一定要有始有终,不能多或缺少标签比如<style>,<script>这种
 
 ## 质量检验标准
 
@@ -115,6 +121,7 @@ const router = createRouter({
 2. 通过 `npm run dev` 启动开发服务器并正常运行
 3. 通过 `npm run build` 成功构建生产版本
 4. 构建后的项目能够在任意子路径下正常部署和访问
+5. 和用户的对话不用出现npm install,npm run dev这总告诉用户怎么操作的语句
 注意:单次调用工具次数严格不超过20次
 特别注意
 在生成代码后，用户可能会提出修改要求并给出要修改的元素信息。

@@ -81,10 +81,9 @@ function isSuccess(code: unknown): boolean {
 function isAppDeployed(app: AppVO | undefined): boolean {
   if (!app) return false
   const key = app.deployKey
-  if (key !== undefined && key !== null && String(key).trim() !== '') return true
-  const t = app.deployedTime
-  if (t !== undefined && t !== null && String(t).trim() !== '') return true
-  return false
+  // 注意：deployedTime 在部分后端实现里可能作为“历史部署时间”保留，或由于 null 更新策略未落库，
+  // 导致下线后刷新列表仍然带着旧的 deployedTime。为了避免首页误显示“已部署”，这里只以 deployKey 为准。
+  return key !== undefined && key !== null && String(key).trim() !== ''
 }
 
 function normalizeDeployUrl(rawUrl: unknown): string {
@@ -108,6 +107,78 @@ function normalizeDeployUrl(rawUrl: unknown): string {
       return raw
     }
   }
+}
+
+const DEFAULT_BG_OBJECT_KEY = '/default/myAppBackground/appBackground.png'
+
+function normalizeOssAssetUrl(raw: unknown, ossOrigin: string): string {
+  const input = String(raw ?? '').trim()
+  if (!input) return ''
+  if (input.startsWith('http://') || input.startsWith('https://')) return input
+  if (input.startsWith('//')) return `${window.location.protocol}${input}`
+  // 兼容旧数据：可能只存了 OSS objectKey（例如：/screenshots/xxx.jpg 或 screenshots/xxx.jpg）
+  if (ossOrigin) {
+    const key = input.startsWith('/') ? input.slice(1) : input
+    return `${ossOrigin}/${key}`
+  }
+  // 兼容：可能只存了“host/path”（例如 bucket.endpoint/objectKey），无协议
+  if (/^[^/]+\.[^/]+\/.+$/.test(input)) {
+    try {
+      return new URL(`https://${input}`).toString()
+    } catch {
+      // ignore
+    }
+  }
+  // 没拿到 ossOrigin 时，兜底返回原值（避免直接报错；但可能仍无法访问）
+  return input
+}
+
+const ossOrigin = computed(() => {
+  // 优先使用构建时注入的 env 变量，避免首屏无 cover 数据时推断失败
+  const envOrigin = (import.meta.env.VITE_OSS_ORIGIN as string | undefined)?.trim()
+  if (envOrigin) return envOrigin.replace(/\/$/, '')
+  // 备用：从已有 cover 数据中反推 origin
+  const all = [...(goodApps.value.records ?? []), ...(myApps.value.records ?? [])]
+  const cover = all.find((x) => x.cover && typeof x.cover === 'string' && String(x.cover).trim() !== '')?.cover
+  if (!cover) return ''
+  const c = String(cover).trim()
+  try {
+    if (c.startsWith('http://') || c.startsWith('https://')) return new URL(c).origin
+    if (c.startsWith('//')) return new URL(`${window.location.protocol}${c}`).origin
+    if (/^[^/]+\.[^/]+\/.+$/.test(c)) return new URL(`https://${c}`).origin
+  } catch {
+    // ignore
+  }
+  return ''
+})
+
+const defaultBgUrl = computed(() => {
+  if (!ossOrigin.value) return DEFAULT_BG_OBJECT_KEY
+  return `${ossOrigin.value}${DEFAULT_BG_OBJECT_KEY}`
+})
+
+function appCoverUrl(app: AppVO): string {
+  return normalizeOssAssetUrl(app.cover, ossOrigin.value)
+}
+
+function cardThumbUrl(app: AppVO): string {
+  // 未部署的卡片：统一走默认封面，避免空白。
+  // 已部署：优先使用 cover（若存在），否则回退默认封面。
+  if (!isAppDeployed(app)) return defaultBgUrl.value
+  return appCoverUrl(app) || defaultBgUrl.value
+}
+
+function handleCoverImgError(e: Event) {
+  const img = e.target as HTMLImageElement | null
+  if (!img) return
+  img.src = defaultBgUrl.value
+}
+
+function cardBgUrl(app: AppVO): string {
+  const coverUrl = appCoverUrl(app)
+  // 仅对“未部署”的卡片强制使用默认背景，避免出现不可访问的 cover。
+  if (!isAppDeployed(app)) return defaultBgUrl.value
+  return coverUrl || defaultBgUrl.value
 }
 
 const quickPrompts = [
@@ -588,12 +659,10 @@ onMounted(() => {
             v-for="app in goodApps.records"
             :key="app.id"
             class="app-card good-app-card"
+            :style="{ '--card-bg-image': `url(${cardBgUrl(app)})` }"
             hoverable
             @click="goChat(app)"
           >
-            <div class="app-cover good-cover">
-              <span>{{ app.appName?.[0] ?? 'A' }}</span>
-            </div>
             <div class="app-info">
               <div class="app-name-line">
                 <span class="app-name">{{ app.appName || '未命名应用' }}</span>
@@ -651,6 +720,16 @@ onMounted(() => {
               hoverable
               @click="goChat(app)"
             >
+              <!-- 背景图层：占满卡片，低不透明度，不阻挡交互 -->
+              <div class="my-card-bg-layer" aria-hidden="true">
+                <img
+                  class="my-card-bg-img"
+                  :src="cardBgUrl(app)"
+                  alt=""
+                  loading="lazy"
+                  @error="(e) => ((e.target as HTMLImageElement).src = defaultBgUrl)"
+                />
+              </div>
               <div
                 v-if="isAppDeployed(app)"
                 class="app-deployed-mark"
@@ -668,9 +747,6 @@ onMounted(() => {
                   <span class="meta-label">修改时间</span>
                   <span class="meta-value">{{ formatDateTime(app.updateTime) }}</span>
                 </div>
-              </div>
-              <div class="app-cover">
-                <span>{{ app.appName?.[0] ?? 'A' }}</span>
               </div>
               <div class="app-info">
                 <div class="app-name-line">
@@ -1077,17 +1153,66 @@ onMounted(() => {
   min-height: 260px;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
   border-radius: 16px;
   border: 1px solid transparent !important;
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
   backdrop-filter: blur(14px) saturate(130%);
   -webkit-backdrop-filter: blur(14px) saturate(130%);
-  padding-top: 32px;
+  padding-top: 100px;
   transition:
     border-color 0.16s ease-out,
     box-shadow 0.16s ease-out,
     transform 0.16s ease-out;
+}
+
+.app-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--card-bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.18;
+  filter: blur(0.6px) saturate(1.02) contrast(1.04);
+  transform: scale(1.03);
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* my-app-card 改用 img 背景层，禁用继承自 .app-card 的 ::before 伪元素背景 */
+.my-app-card::before {
+  content: none;
+}
+
+/* 背景图层：绝对定位占满卡片，低 opacity + 轻 blur，z-index 低于内容 */
+.my-card-bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.my-card-bg-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.28;
+  filter: blur(0.9px) saturate(1.08) contrast(1.06);
+  transform: scale(1.04);
+  display: block;
+  pointer-events: none;
+}
+
+.app-cover,
+.app-info {
+  position: relative;
+  z-index: 2;
 }
 
 .app-card:hover {
@@ -1100,20 +1225,31 @@ onMounted(() => {
 .app-cover {
   width: 56px;
   height: 56px;
-  border-radius: 50%;
   margin: 0 auto 10px;
-  background: linear-gradient(135deg, #1d4ed8, #22c55e);
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #e5e7eb;
-  font-size: 22px;
-  font-weight: 600;
+  pointer-events: none;
 }
 
-/* 我的应用 hover 时封面仅极轻微变淡，几乎看不出 */
-.my-app-card:hover .app-cover {
-  background: linear-gradient(135deg, #2a5dd4, #2dc968);
+.app-cover__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.32;
+  filter: saturate(0.95) contrast(0.95) brightness(1.1);
+  transform: scale(1.04);
+  pointer-events: none;
+}
+
+.my-app-card:hover .app-cover__img {
+  opacity: 0.32;
 }
 
 /* 已部署：墨绿主色 + 内光边，与首页蓝紫 hero 区分，避免「又一坨紫渐变」 */
@@ -1174,12 +1310,10 @@ onMounted(() => {
   z-index: 1;
 }
 
-.good-cover {
-  background: linear-gradient(135deg, #facc15, #f97316);
-}
-
 .app-info {
   flex: 1;
+  position: relative;
+  z-index: 2;
 }
 
 .good-app-card .app-info {
@@ -1253,6 +1387,8 @@ onMounted(() => {
   gap: 4px;
   margin-top: 16px;
   padding-bottom: 4px;
+  position: relative;
+  z-index: 2;
 }
 
 .my-app-card .app-hover-meta {

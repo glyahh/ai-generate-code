@@ -53,9 +53,9 @@ public class FileWriteTool extends BaseTool {
             if (parentDir != null) {
                 Files.createDirectories(parentDir);
             }
-            // .vue 文件：移除 AI 多余输出的尾部闭合标签，避免 vite build 报 Invalid end tag
+            // .vue 文件：先做 SFC 结构兜底，再移除多余闭合标签，避免 vite build 因标签不平衡失败
             if (relativeFilePath.endsWith(".vue")) {
-                content = sanitizeVueContent(content);
+                content = repairVueSfcContent(content);
             }
             // 写入文件内容
             Files.write(path, content.getBytes(),
@@ -123,6 +123,38 @@ public class FileWriteTool extends BaseTool {
         }
 
         return result.stripTrailing();
+    }
+
+    /**
+     * 修复 .vue SFC 顶层块的开闭标签不平衡问题（最小兜底）。
+     * 影响范围：仅在 writeFile 写入 .vue 文件时生效，不改动其他类型文件。
+     */
+    private String repairVueSfcContent(String content) {
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
+        String result = sanitizeVueContent(content);
+        result = appendMissingClosingTag(result, "<template", "</template>");
+        result = appendMissingClosingTag(result, "<script", "</script>");
+        result = appendMissingClosingTag(result, "<style", "</style>");
+        return result.stripTrailing() + System.lineSeparator();
+    }
+
+    /**
+     * 若 opening tag 数量大于 closing tag 数量，则在文件尾部补齐缺失的 closing tag。
+     */
+    private String appendMissingClosingTag(String text, String openingTagPrefix, String closingTag) {
+        int openingCount = countMatches(text, openingTagPrefix);
+        int closingCount = countMatches(text, closingTag);
+        int missingCount = openingCount - closingCount;
+        if (missingCount <= 0) {
+            return text;
+        }
+        StringBuilder sb = new StringBuilder(text);
+        for (int i = 0; i < missingCount; i++) {
+            sb.append(System.lineSeparator()).append(closingTag);
+        }
+        return sb.toString();
     }
 
     private int countMatches(String text, String pattern) {

@@ -21,6 +21,9 @@ import java.io.File;
 import java.time.Duration;
 import java.util.UUID;
 
+/**
+ *
+ */
 @Slf4j
 public class WebScreenShotUtil {
 
@@ -35,7 +38,7 @@ public class WebScreenShotUtil {
      */
     static {
         int DEFAULT_WITH = 1600;
-        int DEFAULT_HEIGHT = 900;
+        int DEFAULT_HEIGHT = 1080;
         webDriver = initWebDriver(DEFAULT_WITH, DEFAULT_HEIGHT);
     }
 
@@ -52,6 +55,7 @@ public class WebScreenShotUtil {
             return null;
         }
         try {
+            String targetUrl = resolveToIndexHtmlUrl(webUrl);
             // 创建临时目录  eg: temp\screenshots\12345678
             String rootPath = System.getProperty("user.dir") + File.separator + "temp" + File.separator + "screenshots"
                     + File.separator + UUID.randomUUID().toString().substring(0, 8);
@@ -61,7 +65,11 @@ public class WebScreenShotUtil {
             // 原始截图文件路径
             String imageSavePath = rootPath + File.separator + RandomUtil.randomNumbers(5) + IMAGE_SUFFIX;
             // 访问网页 自带
-            webDriver.get(webUrl);
+            // 若传入的是本地部署目录，则自动进入对应 index.html，避免截到目录/空白页
+            if (!targetUrl.equals(webUrl)) {
+                log.info("本地路径解析为截图入口：{} -> {}", webUrl, targetUrl);
+            }
+            webDriver.get(targetUrl);
             // 等待页面加载完成
             waitForPageLoad(webDriver);
             // 截图 自带
@@ -83,6 +91,28 @@ public class WebScreenShotUtil {
             log.error("网页截图失败: {}", webUrl, e);
             return null;
         }
+    }
+
+    /**
+     * 将“本地目录路径”自动解析为 “file:///.../index.html”。
+     * 若传入的是 http(s)/file URL，则原样返回。
+     */
+    private static String resolveToIndexHtmlUrl(String webUrl) {
+        String trimmed = webUrl.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("file://")) {
+            return trimmed;
+        }
+
+        File local = new File(trimmed);
+        if (local.isDirectory()) {
+            local = new File(local, "index.html");
+        }
+        if (!local.exists() || !local.isFile()) {
+            log.warn("本地截图入口不存在：{}（将尝试直接访问原始参数）", local.getAbsolutePath());
+            return trimmed;
+        }
+        // toURI 自动生成 file:///D:/xxx 这种可被 Chrome 正确解析的地址
+        return local.toURI().toString();
     }
 
 
@@ -117,6 +147,12 @@ public class WebScreenShotUtil {
             options.addArguments("--no-sandbox");
             // 禁用开发者shm使用
             options.addArguments("--disable-dev-shm-usage");
+            // 允许 file:// 下的模块/资源加载（否则常见表现是：页面保持空白）
+            options.addArguments("--allow-file-access-from-files");
+            options.addArguments("--disable-web-security");
+            options.addArguments("--remote-allow-origins=*");
+            // 避免站点隔离导致 file:// 相关请求被限制
+            options.addArguments("--disable-site-isolation-trials");
             // 设置窗口大小
             options.addArguments(String.format("--window-size=%d,%d", width, height));
             // 禁用扩展
@@ -182,8 +218,25 @@ public class WebScreenShotUtil {
                             .executeScript("return document.readyState")
                             .equals("complete")
             );
-            // 额外等待一段时间，确保动态内容加载完成
-            Thread.sleep(1500);
+            // 先等待 #app 出现明显内容；若失败则兜底等待后截图，保证不会因为条件不满足而中断。
+            try {
+                WebDriverWait renderedWait = new WebDriverWait(driver, Duration.ofSeconds(12));
+                renderedWait.until(webDriver -> {
+                    Object ok = ((JavascriptExecutor) webDriver).executeScript(
+                            "(() => {" +
+                                    " const el=document.querySelector('#app');" +
+                                    " if(!el) return false;" +
+                                    " const text=(el.innerText||'').trim();" +
+                                    " const html=(el.innerHTML||'').trim();" +
+                                    " return (text.length>40) || (html.length>400);" +
+                                    "})()"
+                    );
+                    return ok instanceof Boolean && (Boolean) ok;
+                });
+            } catch (Exception ignore) {
+                // 条件不满足不阻塞截图
+            }
+            Thread.sleep(3000);
             log.info("页面加载完成");
         } catch (Exception e) {
             log.error("等待页面加载时出现异常，继续执行截图", e);

@@ -74,4 +74,12 @@ public interface AppService extends IService<App> {
      * @return 已清理部署信息返回 true；从未部署（无 deployKey）返回 false
      */
     boolean undeployApp(Long appId, User loginUser);
+
+    /**
+     * 异步生成应用截图并更新封面
+     *
+     * @param appId  应用ID
+     * @param appUrl 应用访问URL
+     */
+    public void generateAppScreenshotAsync(Long appId, String appUrl);
 }

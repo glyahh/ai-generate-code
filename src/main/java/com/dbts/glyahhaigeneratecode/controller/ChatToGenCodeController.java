@@ -1,7 +1,6 @@
 package com.dbts.glyahhaigeneratecode.controller;
 
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
@@ -15,8 +14,6 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.util.Map;
 
 
 /**
@@ -60,20 +57,15 @@ public class ChatToGenCodeController {
         // HttpMessageNotWritableException: No converter ... for 'text/event-stream'（二次报错）。
         Flux<String> safeContentFlux = contentFlux.onErrorResume(e -> {
             log.error("SSE 流式生成失败，将以错误文本+done 事件收尾。", e);
-            String msg = e.getMessage();
-            String safeMsg = (msg == null || msg.isBlank()) ? "未知错误" : msg;
-            return Flux.just("[生成失败] " + safeMsg);
+            // 不向前端透传底层 JSON 解析细节，避免暴露内部异常并减少用户困惑。
+            return Flux.just("[生成失败] 代码生成流异常中断，请重试");
         });
 
         // 转换为 ServerSentEvent 格式
         return safeContentFlux
-                .map(chunk -> {
-                    Map<String, String> wrapper = Map.of("d", chunk);
-                    String jsonData = JSONUtil.toJsonStr(wrapper);
-                    return ServerSentEvent.<String>builder()
-                            .data(jsonData)
-                            .build();
-                })
+                .map(chunk -> ServerSentEvent.<String>builder()
+                        .data(chunk)
+                        .build())
                 .concatWith(Mono.just(
                         ServerSentEvent.<String>builder()
                                 .event("done")

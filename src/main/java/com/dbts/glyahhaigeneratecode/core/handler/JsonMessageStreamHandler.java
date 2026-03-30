@@ -91,8 +91,15 @@ public class JsonMessageStreamHandler {
     private String handleJsonMessageChunk(String chunk,
                                           StringBuilder chatHistoryStringBuilder,
                                           Set<String> seenToolIds) {
-        // 解析 JSON
-        StreamMessage streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
+        // 容错说明：流式场景下个别 chunk 可能是截断/脏 JSON，不能让单个坏块中断整条 SSE。
+        // 证据：前端出现 "A JSONObject text must end with '}'" 时，根因是这里直接解析失败并向上抛出。
+        StreamMessage streamMessage;
+        try {
+            streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
+        } catch (Exception e) {
+            log.warn("忽略无法解析的流式 JSON chunk，避免中断整条会话。chunk={}", truncate(chunk, 240));
+            return "";
+        }
         StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
         if (typeEnum != null) {
             switch (typeEnum) {
@@ -125,7 +132,8 @@ public class JsonMessageStreamHandler {
 
                 case TOOL_EXECUTED -> {
                     ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
-                    JSONObject jsonObject = JSONUtil.parseObj(toolExecutedMessage.getArguments());
+                    // 容错说明：部分模型会产出非严格 JSON 的 arguments，这里降级为 raw 字段而非抛异常。
+                    JSONObject jsonObject = safeParseArguments(toolExecutedMessage.getArguments());
                     BaseTool tool = toolManager.getTool(toolExecutedMessage.getName());
                     String result;
                     if (tool != null) {
@@ -145,6 +153,33 @@ public class JsonMessageStreamHandler {
             }
         }
         throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的消息类型");
+    }
+
+    /**
+     * 安全解析工具参数，避免 parseObj 异常打断 SSE。
+     */
+    private JSONObject safeParseArguments(String arguments) {
+        if (StrUtil.isBlank(arguments)) {
+            return new JSONObject();
+        }
+        try {
+            return JSONUtil.parseObj(arguments);
+        } catch (Exception e) {
+            JSONObject fallback = new JSONObject();
+            fallback.set("_rawArguments", arguments);
+            log.warn("工具参数非严格 JSON，已降级为原始字符串。arguments={}", truncate(arguments, 240));
+            return fallback;
+        }
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
     }
 
     /**

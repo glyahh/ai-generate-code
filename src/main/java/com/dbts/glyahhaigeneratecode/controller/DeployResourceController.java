@@ -1,7 +1,9 @@
 package com.dbts.glyahhaigeneratecode.controller;
 
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -20,7 +22,10 @@ import java.io.File;
  */
 @RestController
 @RequestMapping("/deploy")
+@RequiredArgsConstructor
 public class DeployResourceController {
+
+    private AppService appService;
 
     @GetMapping("/{deployKey}/**")
     public ResponseEntity<Resource> serveDeployResource(@PathVariable String deployKey, HttpServletRequest request) {

@@ -261,6 +261,35 @@ const selectedElementTextPreview = computed(() => {
 let visualEditorDetach: null | (() => void) = null
 let visualEditAutoRefreshTimer: number | null = null
 
+/**
+ * 防御性清理可视化编辑残留层。
+ * 证据：若父页透明 shield 偶发残留，会拦截 iframe 的滚轮/点击，表现为“非编辑模式无法滚动，编辑模式反而可滚动”。
+ */
+function cleanupVisualEditorArtifacts() {
+  try {
+    const staleLayers = document.querySelectorAll(
+      '[data-glyahh-visual-editor-parent-shield="true"], [data-glyahh-visual-editor-parent="true"]',
+    )
+    staleLayers.forEach((el) => {
+      try {
+        el.remove()
+      } catch {
+        // ignore
+      }
+    })
+  } catch {
+    // ignore
+  }
+  try {
+    const iframe = previewIframeRef.value
+    if (iframe) {
+      iframe.style.pointerEvents = 'auto'
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function clearSelectedElement() {
   selectedElement.value = null
 }
@@ -280,6 +309,7 @@ function exitVisualEditMode() {
     }
     visualEditorDetach = null
   }
+  cleanupVisualEditorArtifacts()
 }
 
 function tryAttachVisualEditor() {
@@ -361,6 +391,9 @@ function handlePreviewIframeLoad() {
     nextTick(() => {
       tryAttachVisualEditor()
     })
+  } else {
+    // 非编辑模式下确保不存在残留覆盖层，避免滚轮被拦截。
+    cleanupVisualEditorArtifacts()
   }
 }
 
@@ -1615,47 +1648,25 @@ async function sendMessage(text?: string) {
         return
       }
 
-      // 解析 JSON 格式的数据：{"d":"实际内容"}
-      try {
-        const jsonData = JSON.parse(data)
-        if (jsonData && typeof jsonData.d === 'string') {
-          const chunk = jsonData.d
-
-          const trimmed = (chunk ?? '').trim()
-          if (trimmed === '[DONE]' || trimmed === '__END__') {
-            stopStream()
-            hasGenerated.value = true
-            void refreshPreviewWithRetry()
-            void fetchRoundCount()
-            return
-          }
-
-          maybeInjectToolSelectHint(chunk)
-
-          const parsed = parseToolWriteFileBlock(chunk)
-          if (parsed) {
-            recordGeneratedFile(parsed.filePath, parsed.lang, parsed.content)
-          }
-          appendAssistantMessageChunk(chunk)
-          // 自动滚动到底部
-          nextTick(() => {
-            scrollToBottom()
-          })
-        }
-      } catch (e) {
-        // 如果不是 JSON 格式，尝试直接使用（向后兼容）
-        if (data === '[DONE]' || data === '__END__') {
-          stopStream()
-          hasGenerated.value = true
-          void refreshPreviewWithRetry()
-          void fetchRoundCount()
-          return
-        }
-        appendAssistantMessageChunk(data)
-        nextTick(() => {
-          scrollToBottom()
-        })
+      const trimmed = (data ?? '').trim()
+      if (trimmed === '[DONE]' || trimmed === '__END__') {
+        stopStream()
+        hasGenerated.value = true
+        void refreshPreviewWithRetry()
+        void fetchRoundCount()
+        return
       }
+
+      maybeInjectToolSelectHint(data)
+
+      const parsed = parseToolWriteFileBlock(data)
+      if (parsed) {
+        recordGeneratedFile(parsed.filePath, parsed.lang, parsed.content)
+      }
+      appendAssistantMessageChunk(data)
+      nextTick(() => {
+        scrollToBottom()
+      })
     }
 
     // 监听自定义事件类型 "done"
@@ -1853,6 +1864,8 @@ function goEdit() {
 
 onMounted(() => {
   void loadAppInfo()
+  // 首次进入页面先做一次清理，避免历史会话遗留覆盖层影响当前预览滚动。
+  cleanupVisualEditorArtifacts()
   if (chatMessagesRef.value) {
     chatMessagesRef.value.addEventListener('scroll', handleChatScroll)
   }

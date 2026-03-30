@@ -80,14 +80,14 @@ logging:
 
 
 
-# 添加 COS 对象存储配置（需要从腾讯云获取）
-#cos:
-#  client:
-#    host: your-custom-domain.com
-#    secretId: your-secret-id
-#    secretKey: your-secret-key
-#    region: ap-shanghai
-#    bucket: your-bucket-name
+# 添加 COS 对象存储配置
+aliyun:
+  oss:
+    endpoint: ${aliyun.oss.endpoint}
+    accessKeyId: ${aliyun.oss.accessKeyId}
+    accessKeySecret: ${aliyun.oss.accessKeySecret}
+    bucketName: ${aliyun.oss.bucketName}
+    region: ${aliyun.oss.region}
 
 
 
