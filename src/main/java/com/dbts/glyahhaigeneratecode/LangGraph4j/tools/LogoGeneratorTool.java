@@ -262,7 +262,13 @@ public class LogoGeneratorTool {
             return false;
         }
         try {
-            FileUtil.move(new File(screenshotPath), new File(targetLocalPath), true);
+            // 确保目标目录存在
+            File targetFile = new File(targetLocalPath);
+            File parentDir = targetFile.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                FileUtil.mkdir(parentDir);
+            }
+            FileUtil.move(new File(screenshotPath), targetFile, true);
             return true;
         } catch (Exception e) {
             log.warn("截图文件迁移失败: {}, from={}, to={}", e.getMessage(), screenshotPath, targetLocalPath);
@@ -271,17 +277,10 @@ public class LogoGeneratorTool {
     }
 
     /**
-     * 生成可读的 Logo 主体特征目录名（示例：tech_brand_logo）
+     * 生成 Logo 文件夹名称，使用 UUID 避免路径过长和中文问题
      */
     private String buildLogoSubjectFolder(String description) {
-        String normalized = StrUtil.blankToDefault(description, "brand_logo")
-                .toLowerCase()
-                .replaceAll("[^a-z0-9\\u4e00-\\u9fa5]+", "_")
-                .replaceAll("_+", "_")
-                .replaceAll("^_|_$", "");
-        if (StrUtil.isBlank(normalized)) {
-            return "brand_logo";
-        }
-        return StrUtil.maxLength(normalized, 24);
+        // 使用 UUID 前 8 位，避免路径过长和中文字符问题
+        return UUID.randomUUID().toString().substring(0, 8);
     }
 }

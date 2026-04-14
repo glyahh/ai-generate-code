@@ -28,7 +28,7 @@ public class ImageSearchTool {
     @Tool("搜索内容相关的图片，用于网站内容展示")
     public List<ImageResource> searchContentImages (@P("搜索关键词") String query) {
         List<ImageResource> imageList = new ArrayList<>();
-        int searchCount = 12;
+        int searchCount = 12; // 从 Pexels 搜索，不消耗 AI tokens
         // 调用 API，注意释放资源
         try (HttpResponse response = HttpRequest.get(PEXELS_API_URL)
                 .header("Authorization", pexelsApiKey)

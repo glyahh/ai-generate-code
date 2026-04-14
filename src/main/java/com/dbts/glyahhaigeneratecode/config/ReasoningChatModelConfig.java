@@ -22,7 +22,7 @@ public class ReasoningChatModelConfig {
     private final String reasoningModelName = "qwen3-coder-next";
     private final int reasoningMaxTokens = 32768;
     // 普通模型 - 使用稳定的支持工具调用的模型
-    private final String modelName = "MiniMax-M2.1";
+    private final String modelName = "kimi-k2.5";
     private final int maxTokens = 8192;
 
 

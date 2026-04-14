@@ -30,7 +30,7 @@ public class UndrawIllustrationTool {
     @Tool("搜索插画图片，用于网站美化和装饰")
     public List<ImageResource> searchIllustrations(@P("搜索关键词") String query) {
         List<ImageResource> imageList = new ArrayList<>();
-        int searchCount = 12;
+        int searchCount = 12; // 从 unDraw 搜索，不消耗 AI tokens
         if (StrUtil.isBlank(query)) {
             return imageList;
         }

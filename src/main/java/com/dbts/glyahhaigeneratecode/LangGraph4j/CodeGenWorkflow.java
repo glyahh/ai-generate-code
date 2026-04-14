@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static org.bsc.langgraph4j.GraphDefinition.END;
 import static org.bsc.langgraph4j.GraphDefinition.START;
+import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 
 
 /**
@@ -37,13 +38,21 @@ public class CodeGenWorkflow {
                     .addNode("router", RouterNode.create())
                     .addNode("code_generator", CodeGeneratorNode.create())
                     .addNode("project_builder", ProjectBuilderNode.create())
+                    .addNode("code_quality_check", CodeQualityCheckNode.create())
 
                     // 添加边
                     .addEdge(START, "image_collector")
                     .addEdge("image_collector", "prompt_enhancer")
                     .addEdge("prompt_enhancer", "router")
                     .addEdge("router", "code_generator")
-                    .addEdge("code_generator", "project_builder")
+                    .addEdge("code_generator", "code_quality_check")
+                    .addConditionalEdges("code_quality_check",
+                            edge_async(this::routeAfterCodeGenerator),
+                            Map.of(
+                                    "retry", "code_generator",
+                                    "vue", "project_builder",
+                                    "skip", END
+                            ))
                     .addEdge("project_builder", END)
 
                     // 编译工作流
@@ -51,6 +60,35 @@ public class CodeGenWorkflow {
         } catch (GraphStateException e) {
             throw new MyException(ErrorCode.OPERATION_ERROR, "工作流创建失败");
         }
+    }
+
+    /**
+     * {@code code_quality_check} 之后的条件边，返回值需与映射键一致：{@code retry} / {@code vue} / {@code skip}。
+     * <ul>
+     *   <li>{@code retry}：质检未通过（{@code QualityResult#isValid} 为 {@code false}）→ 回到 {@code code_generator}</li>
+     *   <li>{@code vue}：质检通过且为 Vue 项目 → {@code project_builder}</li>
+     *   <li>{@code skip}：质检通过且非 Vue → 直接结束</li>
+     * </ul>
+     */
+    private String routeAfterCodeGenerator(MessagesState<String> state) throws Exception {
+        WorkflowContext ctx = WorkflowContext.getContext(state);
+        if (ctx == null) {
+            log.warn("routeAfterCodeGenerator: WorkflowContext 为空，走 skip 结束");
+            return "skip";
+        }
+
+        if (ctx.getQualityResult() != null && Boolean.FALSE.equals(ctx.getQualityResult().getIsValid())) {
+            log.info("代码质检未通过，重新执行 code_generator");
+            return "retry";
+        }
+
+        if (ctx.getGenerationType() == CodeGenTypeEnum.VUE) {
+            log.info("质检通过且为 Vue 项目，执行 project_builder");
+            return "vue";
+        }
+
+        log.info("质检通过且非 Vue 项目，结束工作流");
+        return "skip";
     }
 
     /**
@@ -63,6 +101,7 @@ public class CodeGenWorkflow {
         WorkflowContext initialContext = WorkflowContext.builder()
                 .originalPrompt(originalPrompt)
                 .generationType(codeGenTypeEnum)
+                .appId(System.currentTimeMillis())
                 .currentStep("初始化")
                 .build();
 
@@ -72,10 +111,14 @@ public class CodeGenWorkflow {
 
         WorkflowContext finalContext = null;
         int stepCounter = 1;
+
+        // 传入一个初始的 map，然后遍历取出每一次经过的节点产出的数据
         for (NodeOutput<MessagesState<String>> step : workflow.stream(
+                // 初始参数
                 Map.of(WorkflowContext.WORKFLOW_CONTEXT_KEY, initialContext))) {
+
             log.info("--- 第 {} 步完成 ---", stepCounter);
-            // 显示当前状态
+            // 根据WorkflowContext.WORKFLOW_CONTEXT_KEY, 显示当前状态
             WorkflowContext currentContext = WorkflowContext.getContext(step.state());
             if (currentContext != null) {
                 finalContext = currentContext;

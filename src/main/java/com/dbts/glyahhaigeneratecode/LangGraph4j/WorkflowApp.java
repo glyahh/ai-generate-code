@@ -27,13 +27,16 @@ public class WorkflowApp {
                 .addNode("router", RouterNode.create())
                 .addNode("code_generator", CodeGeneratorNode.create())
                 .addNode("project_builder", ProjectBuilderNode.create())
+                .addNode("code_quality_check", CodeQualityCheckNode.create())
+
                 // 添加边
                 .addEdge(START, "image_collector")
                 .addEdge("image_collector", "prompt_enhancer")
                 .addEdge("prompt_enhancer", "router")
                 .addEdge("router", "code_generator")
                 .addEdge("code_generator", "project_builder")
-                .addEdge("project_builder", END)
+                .addEdge("project_builder", "code_quality_check")
+                .addEdge("code_quality_check", END)
                 // 编译工作流
                 .compile();
 

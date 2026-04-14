@@ -12,6 +12,9 @@ import java.util.List;
 
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
+/**
+ * 把图片内容拼接到本来的普通提示词中去一起更好的生成网站
+ */
 @Slf4j
 public class PromptEnhancerNode {
 

@@ -61,6 +61,11 @@ public class WorkflowContext implements Serializable {
     private CodeGenTypeEnum generationType;
 
     /**
+     * 本次工作流对应的 appId（用于隔离 AI 会话记忆与产物目录）
+     */
+    private Long appId;
+
+    /**
      * 生成的代码目录
      */
     private String generatedCodeDir;
@@ -74,6 +79,11 @@ public class WorkflowContext implements Serializable {
      * 错误信息
      */
     private String errorMessage;
+
+    /**
+     * 代码质量检查结果
+     */
+    private QualityResult qualityResult;
 
     @Serial
     private static final long serialVersionUID = 1L;
