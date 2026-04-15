@@ -11,9 +11,9 @@ import org.springframework.context.annotation.Scope;
 import java.time.Duration;
 
 @Configuration
-@ConfigurationProperties(prefix = "langchain4j.open-ai.reasoning-streaming-chat-model")
+@ConfigurationProperties(prefix = "langchain4j.open-ai.streaming-chat-model")
 @Data
-public class ReasoningChatModelConfig {
+public class StreamChatModelConfig {
 
     private String apiKey;
 
@@ -32,7 +32,7 @@ public class ReasoningChatModelConfig {
     @Bean
     // 返回多例的Bean
     @Scope("prototype")
-    public StreamingChatModel prototypeReasoningChatModel() {
+    public StreamingChatModel prototypeStreamingChatModel() {
         return OpenAiStreamingChatModel.builder()
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)

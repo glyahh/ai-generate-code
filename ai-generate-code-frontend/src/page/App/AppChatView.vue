@@ -72,6 +72,11 @@ type ChatMessage = {
   content: string
   createTime?: string
   uiState?: AssistantUiState
+  /**
+   * 用于将 SSE 流与具体 assistant 气泡绑定。
+   * 多并发流时，禁止再用“最后一条 assistant 消息”作为流式落点。
+   */
+  streamId?: string
 }
 
 type UiMarkdownSegment = { kind: 'markdown'; content: string }
@@ -143,14 +148,21 @@ const loadingMoreHistory = ref(false)
 const hasMoreHistory = ref(true)
 const inputMessage = ref('')
 const sending = ref(false)
-const streaming = ref(false)
 // 首次生成时用于提示“分析代码 ing~”，避免用户干等
 const analyzingHintCloser = ref<null | (() => void)>(null)
 
 // 仅用于把用户在首页选择的“代码类型”追加到发送给 AI 的 prompt 末尾（不回显到前端对话气泡）
 const codeTypePromptChoiceOnce = ref<string | null>(null)
 
-let eventSource: EventSource | null = null
+/**
+ * 多并发 SSE：每次 sendMessage 会创建一个独立的 EventSource。
+ * 用 streamId 作为 key，保证后发请求不会 close 掉先发请求。
+ */
+const eventSourceMap = new Map<string, EventSource>()
+const activeStreamOrder = ref<string[]>([])
+const activeStreamMeta = ref<Record<string, { assistantMessageId: number }>>({})
+
+const streaming = computed(() => Object.keys(activeStreamMeta.value).length > 0)
 let nextMessageId = 1
 
 const hasGenerated = ref(false)
@@ -1542,12 +1554,39 @@ async function copyToClipboard(text: string) {
   }
 }
 
-function stopStream() {
-  if (eventSource) {
-    eventSource.close()
-    eventSource = null
+function stopStream(streamId?: string) {
+  // stop a single stream
+  if (streamId) {
+    const es = eventSourceMap.get(streamId)
+    if (es) {
+      try {
+        es.close()
+      } catch {
+        // ignore
+      }
+      eventSourceMap.delete(streamId)
+    }
+    if (activeStreamMeta.value[streamId]) {
+      const nextMeta = { ...activeStreamMeta.value }
+      delete nextMeta[streamId]
+      activeStreamMeta.value = nextMeta
+    }
+    if (activeStreamOrder.value.length > 0) {
+      activeStreamOrder.value = activeStreamOrder.value.filter((id) => id !== streamId)
+    }
+  } else {
+    // stop all streams
+    for (const [, es] of eventSourceMap.entries()) {
+      try {
+        es.close()
+      } catch {
+        // ignore
+      }
+    }
+    eventSourceMap.clear()
+    activeStreamOrder.value = []
+    activeStreamMeta.value = {}
   }
-  streaming.value = false
   // 结束流式时关闭“分析代码 ing~”提示
   if (analyzingHintCloser.value) {
     try {
@@ -1557,6 +1596,31 @@ function stopStream() {
     }
     analyzingHintCloser.value = null
   }
+}
+
+function createStreamId(): string {
+  // 足够区分同一毫秒内的多次发送；无需引入依赖
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function isStreamActiveForMessage(m: ChatMessage): boolean {
+  const sid = m.streamId
+  if (!sid) return false
+  return !!activeStreamMeta.value[sid]
+}
+
+function appendAssistantChunkToStream(streamId: string, chunk: string) {
+  const meta = activeStreamMeta.value[streamId]
+  if (!meta) return
+  const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
+  if (!msg || msg.role !== 'assistant') return
+
+  msg.content += chunk
+  if (!msg.uiState) msg.uiState = createAssistantUiState()
+  processAssistantChunkIntoUiState(msg.uiState, chunk)
+  nextTick(() => {
+    if (shouldAutoScroll.value) scrollToBottom()
+  })
 }
 
 async function sendMessage(text?: string) {
@@ -1608,20 +1672,25 @@ async function sendMessage(text?: string) {
     exitVisualEditMode()
   }
 
-  stopStream()
-
   // 对话区展示用户输入 + 选中元素信息；模型专用引导句仅在 prompt 中，展示时由 getMessageUiSegments 剥离
   appendUserMessage(visibleUserContent)
+  const streamId = createStreamId()
+  const assistantMessageId = nextMessageId++
   sessionMessages.value.push({
-    id: nextMessageId++,
+    id: assistantMessageId,
     role: 'assistant',
     content: '',
     uiState: createAssistantUiState(),
+    streamId,
   })
+  activeStreamMeta.value = {
+    ...activeStreamMeta.value,
+    [streamId]: { assistantMessageId },
+  }
+  activeStreamOrder.value = [...activeStreamOrder.value, streamId]
 
   inputMessage.value = ''
   sending.value = true
-  streaming.value = true
 
    // 首次生成时给出“分析代码 ing~”提示，告诉用户正在分析并决定生成格式
   if (!hasGenerated.value && !appInfo.value?.hasGeneratedCode && !analyzingHintCloser.value) {
@@ -1640,9 +1709,10 @@ async function sendMessage(text?: string) {
     const apiBase = API_BASE_URL.replace(/\/$/, '')
     const url = `${apiBase}/chat/gen/code?${query.toString()}`
 
-    eventSource = new EventSource(url, { withCredentials: true })
+    const es = new EventSource(url, { withCredentials: true })
+    eventSourceMap.set(streamId, es)
 
-    eventSource.onmessage = (event) => {
+    es.onmessage = (event) => {
       const data = event.data
       if (!data || data === 'null') {
         return
@@ -1650,7 +1720,7 @@ async function sendMessage(text?: string) {
 
       const trimmed = (data ?? '').trim()
       if (trimmed === '[DONE]' || trimmed === '__END__') {
-        stopStream()
+        stopStream(streamId)
         hasGenerated.value = true
         void refreshPreviewWithRetry()
         void fetchRoundCount()
@@ -1663,27 +1733,24 @@ async function sendMessage(text?: string) {
       if (parsed) {
         recordGeneratedFile(parsed.filePath, parsed.lang, parsed.content)
       }
-      appendAssistantMessageChunk(data)
-      nextTick(() => {
-        scrollToBottom()
-      })
+      appendAssistantChunkToStream(streamId, data)
     }
 
     // 监听自定义事件类型 "done"
-    eventSource.addEventListener('done', () => {
-      stopStream()
+    es.addEventListener('done', () => {
+      stopStream(streamId)
       hasGenerated.value = true
       void refreshPreviewWithRetry()
       void fetchRoundCount()
     })
 
-    eventSource.onerror = () => {
-      stopStream()
+    es.onerror = () => {
+      stopStream(streamId)
       message.error('生成过程中出现错误，已结束本次对话')
     }
   } catch (e) {
     console.error(e)
-    stopStream()
+    stopStream(streamId)
     message.error('无法建立对话连接，请稍后重试')
   } finally {
     sending.value = false
@@ -1697,7 +1764,9 @@ function handleManualSend() {
 
 function handleStop() {
   if (isReadOnly.value || !streaming.value) return
-  stopStream()
+  const lastId = activeStreamOrder.value.length > 0 ? activeStreamOrder.value[activeStreamOrder.value.length - 1] : null
+  if (!lastId) return
+  stopStream(lastId)
 }
 
 function scrollToBottom(options: { smooth?: boolean } = {}) {
@@ -1874,6 +1943,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopPreviewProbing()
   exitVisualEditMode()
+  // 页面卸载时关闭所有 SSE，避免后台连接泄露
+  stopStream()
   if (chatMessagesRef.value) {
     chatMessagesRef.value.removeEventListener('scroll', handleChatScroll)
   }
@@ -2021,7 +2092,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="bubble-content">
                     <template
-                      v-if="m.role === 'assistant' && streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !m.content">
+                      v-if="m.role === 'assistant' && isStreamActiveForMessage(m) && !m.content">
                       <div class="typing-indicator">
                         <span class="typing-dot" />
                         <span class="typing-dot" />
@@ -2053,7 +2124,7 @@ onBeforeUnmount(() => {
                         <CodeBlock
                           :code="segment.content"
                           :language="segment.language"
-                          :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !segment.done"
+                          :is-streaming="isStreamActiveForMessage(m) && !segment.done"
                         />
                       </div>
 
@@ -2083,7 +2154,7 @@ onBeforeUnmount(() => {
                           <CodeBlock
                             :code="segment.beforeContent"
                             :language="segment.language"
-                            :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !segment.beforeDone"
+                            :is-streaming="isStreamActiveForMessage(m) && !segment.beforeDone"
                           />
 
                           <div class="tool-call-title" style="font-size: 12px; font-weight: 600; color: #111827">
@@ -2092,7 +2163,7 @@ onBeforeUnmount(() => {
                           <CodeBlock
                             :code="segment.afterContent"
                             :language="segment.language"
-                            :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id && !segment.afterDone"
+                            :is-streaming="isStreamActiveForMessage(m) && !segment.afterDone"
                           />
                         </div>
                       </div>
@@ -2126,7 +2197,7 @@ onBeforeUnmount(() => {
                             v-if="mdSeg.type === 'code'"
                             :code="mdSeg.content"
                             :language="mdSeg.language"
-                            :is-streaming="streaming && m.id === sessionMessages[sessionMessages.length - 1]?.id"
+                            :is-streaming="isStreamActiveForMessage(m)"
                           />
                           <!-- 证据：隐藏流式 markdown 会导致“生成计划/生成完毕”等说明文本在生成时不可见。
                                修复：流式阶段也展示文本片段，保证与历史回显一致。 -->

@@ -5,6 +5,7 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineService;
+import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineServiceFactory;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
@@ -55,8 +56,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private vueProjectBuilder vueProjectBuilder;
 
+//    @Resource
+//    private aiCodeGeneratorRoutineService aiCodeGeneratorRoutine;
+
     @Resource
-    private aiCodeGeneratorRoutineService aiCodeGeneratorRoutine;
+    private aiCodeGeneratorRoutineServiceFactory aiCodeGeneratorRoutineServiceFactory;
 
 //    @Resource
 //    private AppService appService;
@@ -77,7 +81,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 如前端传入 vue_project（但后端 value 约定为 vue），CodeGenTypeEnum#getEnumByValue 会做兼容映射。
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(appAddRequest.getCodeGenType());
         if (codeGenTypeEnum == null) {
-            codeGenTypeEnum = aiCodeGeneratorRoutine.aiCodeGeneratorRoutine(app.getInitPrompt());
+            aiCodeGeneratorRoutineService aiCodeGeneratorRoutineService = aiCodeGeneratorRoutineServiceFactory.createAiCodeGeneratorRoutineService();
+            codeGenTypeEnum = aiCodeGeneratorRoutineService.aiCodeGeneratorRoutine(app.getInitPrompt());
         }
         if (codeGenTypeEnum == null) {
             // 显式 if：便于静态分析准确收窄空值分支

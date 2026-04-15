@@ -12,10 +12,10 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -29,11 +29,15 @@ import java.time.Duration;
 @Slf4j
 public class aiCodeGeneratorServiceFactory {
 
-    @Resource
+    // 这里的 AI 模型不是用于rounting的,所以注入openai的Bean
+    @Resource(name = "openAiChatModel")
     private ChatModel chatModel;
 
-    @Resource
-    private OpenAiStreamingChatModel openAiStreamingChatModel;
+//    @Resource
+//    private OpenAiStreamingChatModel openAiStreamingChatModel;
+//
+//    @Resource
+//    private StreamingChatModel reasoningChatModel;
 
     @Resource
     private ChatMemoryStore chatMemoryStore;
@@ -42,10 +46,10 @@ public class aiCodeGeneratorServiceFactory {
     private ChatHistoryService chatHistoryService;
 
     @Resource
-    private StreamingChatModel reasoningChatModel;
+    private ToolManager toolManager;
 
     @Resource
-    private ToolManager toolManager;
+    private ApplicationContext applicationContext;
 
     /**
      * AI 服务实例缓存
@@ -77,13 +81,14 @@ public class aiCodeGeneratorServiceFactory {
      * 获取 ai 代码生成器服务（支持首轮工具白名单控制）
      */
     public aiCodeGeneratorService getAiCodeGeneratorService(Long appId, CodeGenTypeEnum codeGenTypeEnum, boolean firstRound) {
-        // 首轮且 VUE：只暴露 writeFile，避免把“受限工具集”实例缓存到后续轮次
+        // 首轮且 VUE：只暴露 writeFile，避免把“受限工具集”实例缓存到后续轮次, 并且直接创建Service
         if (firstRound && codeGenTypeEnum == CodeGenTypeEnum.VUE) {
             log.info("首轮 VUE 对话，创建 writeFile-only AI 服务，appId={}", appId);
             return createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum, true);
         }
         // 从缓存中获取 aiCodeGeneratorService
-        aiCodeGeneratorService service = serviceCache.getIfPresent(appId.toString() + "_" + codeGenTypeEnum);
+        String cacheKey = buildServiceCacheKey(appId, codeGenTypeEnum);
+        aiCodeGeneratorService service = serviceCache.getIfPresent(cacheKey);
         if (service != null) {
             // Redis 可能已过期（TTL）而 Caffeine 未过期，导致内存里拿到的 service 其 ChatMemory 从 Redis 读不到任何消息
             // 此时需失效缓存并重新创建，以便 turnHistoryToMemory 从 MySQL 重新加载历史到 Redis
@@ -91,7 +96,7 @@ public class aiCodeGeneratorServiceFactory {
                 if (isRedisMemoryEmpty(appId)) {
                     log.warn("Redis 对话记忆已空（可能过期），将重建 AI 服务并从 MySQL 重新加载历史，appId={}", appId);
                     // 失效缓存并重新创建,废除这个键
-                    serviceCache.invalidate(appId.toString() + "_" + codeGenTypeEnum);
+                    serviceCache.invalidate(cacheKey);
                     service = null;
                 }
             }
@@ -106,7 +111,7 @@ public class aiCodeGeneratorServiceFactory {
         // 否则，创建一个新的 aiCodeGeneratorService
         service = createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum, false);
         log.info("创建一个新的 AI 服务实例，appId: {}, service: {}", appId, service);
-        serviceCache.put(appId.toString() + "_" + codeGenTypeEnum, service);
+        serviceCache.put(cacheKey, service);
 
         return service;
     }
@@ -150,9 +155,12 @@ public class aiCodeGeneratorServiceFactory {
 
         // 根据用户创作的不同类型的代码生成不同的Service
         return switch (codeGenTypeEnum) {
-            case VUE -> AiServices.builder(aiCodeGeneratorService.class)
+            case VUE -> {
+                StreamingChatModel prototypeReasoningChatModel = applicationContext.getBean("prototypeReasoningChatModel", StreamingChatModel.class);
+
+                yield AiServices.builder(aiCodeGeneratorService.class)
                     .chatModel(chatModel)
-                    .streamingChatModel(reasoningChatModel)
+                    .streamingChatModel(prototypeReasoningChatModel)
                     // 将memoryId一同作为ai需要记忆的内容
                     // 将本来的ai默认记忆的Id转化为build类型的 以appId作为唯一标识的chatMemory
                     .chatMemoryProvider(memoryId -> build)
@@ -164,11 +172,16 @@ public class aiCodeGeneratorServiceFactory {
                             ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())
                     )
                     .build();
-            case HTML, MULTI_FILE -> AiServices.builder(aiCodeGeneratorService.class)
+            }
+            case HTML, MULTI_FILE -> {
+                // 使用多例模式的 streamingModel 解决并发问题
+                StreamingChatModel prototypeStreamingChatModel = applicationContext.getBean("prototypeStreamingChatModel", StreamingChatModel.class);
+                yield AiServices.builder(aiCodeGeneratorService.class)
                     .chatModel(chatModel)
-                    .streamingChatModel(openAiStreamingChatModel)
+                    .streamingChatModel(prototypeStreamingChatModel)
                     .chatMemory(build)
                     .build();
+            }
             default -> throw new MyException(114514, "不支持的代码生成类型");
         };
     }
@@ -204,7 +217,8 @@ public class aiCodeGeneratorServiceFactory {
      */
     public aiCodeGeneratorService getAiCodeGeneratorService(Long appId) {
         // 从缓存中获取 aiCodeGeneratorService
-        aiCodeGeneratorService service = serviceCache.getIfPresent(appId.toString() + "_" + CodeGenTypeEnum.MULTI_FILE);
+        String cacheKey = buildServiceCacheKey(appId, CodeGenTypeEnum.MULTI_FILE);
+        aiCodeGeneratorService service = serviceCache.getIfPresent(cacheKey);
         if (service != null) {
             // Redis 可能已过期（TTL）而 Caffeine 未过期，导致内存里拿到的 service 其 ChatMemory 从 Redis 读不到任何消息
             // 此时需失效缓存并重新创建，以便 turnHistoryToMemory 从 MySQL 重新加载历史到 Redis
@@ -212,7 +226,7 @@ public class aiCodeGeneratorServiceFactory {
                 if (isRedisMemoryEmpty(appId)) {
                     log.warn("Redis 对话记忆已空（可能过期），将重建 AI 服务并从 MySQL 重新加载历史，appId={}", appId);
                     // 失效缓存并重新创建
-                    serviceCache.invalidate(appId.toString() + "_" + CodeGenTypeEnum.MULTI_FILE);
+                    serviceCache.invalidate(cacheKey);
                     service = null;
                 }
             }
@@ -225,9 +239,16 @@ public class aiCodeGeneratorServiceFactory {
         // 否则，创建一个新的 aiCodeGeneratorService
         service = createAiCodeGeneratorServiceForEachApp(appId, CodeGenTypeEnum.MULTI_FILE, false);
         log.info("创建一个新的 AI 服务实例，appId: {}, service: {}", appId, service);
-        serviceCache.put(appId.toString() + "_" + CodeGenTypeEnum.MULTI_FILE, service);
+        serviceCache.put(cacheKey, service);
 
         return service;
+    }
+
+    /**
+     * 构建 AI 服务缓存 key，统一使用枚举 value（如 vue / multi_file），避免依赖 toString 导致类型拼接不一致
+     */
+    private String buildServiceCacheKey(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+        return appId + "_" + codeGenTypeEnum.getValue();
     }
 
 }

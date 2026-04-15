@@ -1,23 +1,21 @@
 package com.dbts.glyahhaigeneratecode.config;
 
-import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 
-import java.time.Duration;
-
 @Configuration
-@ConfigurationProperties(prefix = "langchain4j.open-ai.reasoning-streaming-chat-model")
+@ConfigurationProperties(prefix = "langchain4j.open-ai.routing-chat-model")
 @Data
-public class ReasoningChatModelConfig {
-
-    private String apiKey;
+public class RoutingAiModelConfig {
 
     private String baseUrl;
+
+    private String apiKey;
 
     private String modelName;
 
@@ -25,23 +23,24 @@ public class ReasoningChatModelConfig {
 
     private Double temperature;
 
-    private String logRequests;
+    private Boolean logRequests = false;
 
-    private String logResponses;
+    private Boolean logResponses = false;
 
+    /**
+     * 创建用于路由判断的ChatModel
+     */
     @Bean
-    // 返回多例的Bean
     @Scope("prototype")
-    public StreamingChatModel prototypeReasoningChatModel() {
-        return OpenAiStreamingChatModel.builder()
+    public ChatModel routingChatModelPrototype() {
+        return OpenAiChatModel.builder()
                 .apiKey(apiKey)
-                .baseUrl(baseUrl)
                 .modelName(modelName)
+                .baseUrl(baseUrl)
                 .maxTokens(maxTokens)
                 .temperature(temperature)
-                .timeout(Duration.ofMinutes(5))
-                .logRequests(true)
-                .logResponses(true)
+                .logRequests(logRequests)
+                .logResponses(logResponses)
                 .build();
     }
 }

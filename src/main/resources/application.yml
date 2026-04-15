@@ -38,6 +38,7 @@ server:
 
 langchain4j:
   open-ai:
+    # 最普通的模型
     chat-model:
       # 使用的模型名称，例如 qwen3.5-plus
       model-name: ${langchain4j.open-ai.chat-model.model-name}
@@ -55,7 +56,8 @@ langchain4j:
 #      strict-json-schema: true
 #      response-format: json_object
 
-    Streaming-chat-model:       # 使用的模型名称，例如 qwen3.5-plus
+    # 普通流式输出模型
+    streaming-chat-model:       # 使用的模型名称，例如 qwen3.5-plus
       model-name: ${langchain4j.open-ai.chat-model.model-name}
       # Qwen3.5-Plus 的兼容模式地址，以阿里云百炼为例
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -67,6 +69,27 @@ langchain4j:
       max-tokens: 8192
       # 最大重试次数
       max-retries: 2
+
+
+    # 推理 AI 模型配置（用于复杂的推理任务）
+    reasoning-streaming-chat-model:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${langchain4j.open-ai.chat-model.api-key}
+      model-name: ${langchain4j.open-ai.chat-model.model-name}
+      max-tokens: 32768
+      temperature: 0.1 # 让AI 回答越稳定、保守、重复、确定性高
+      log-requests: true
+      log-responses: true
+
+    # 智能路由 AI 模型配置（用于简单的分类任务）
+    routing-chat-model:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${langchain4j.open-ai.chat-model.api-key}
+      model-name: ${langchain4j.open-ai.chat-model.model-name}
+      log-requests: true
+      log-responses: true
+
+
 
 
 # 阿里云 DashScope 配置
