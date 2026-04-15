@@ -1,6 +1,5 @@
 package com.dbts.glyahhaigeneratecode.controller;
 
-import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineService;
 import com.dbts.glyahhaigeneratecode.annotation.MyRole;
@@ -30,6 +29,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -174,6 +174,11 @@ public class AppController {
      * @return 精选应用列表
      */
     @PostMapping("/good/list/page/vo")
+    @Cacheable(
+            value = "good_app_page",
+            key = "T(com.dbts.glyahhaigeneratecode.utils.CacheKeyUtils).generateKey(#appQueryRequest)",
+            condition = "#appQueryRequest.pageNum <= 10"
+    )
     public BaseResponse<Page<AppVO>> listGoodAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {
         ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
         // 限制每页最多 20 个
