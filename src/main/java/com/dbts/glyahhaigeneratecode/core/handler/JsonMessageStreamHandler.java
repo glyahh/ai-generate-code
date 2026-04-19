@@ -6,8 +6,6 @@ import cn.hutool.json.JSONUtil;
 import com.dbts.glyahhaigeneratecode.ai.model.message.*;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
-import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
@@ -18,8 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -30,9 +26,6 @@ import java.util.Set;
 @Slf4j
 @Component
 public class JsonMessageStreamHandler {
-
-    @Resource
-    private vueProjectBuilder vueProjectBuilder;
 
     @Resource
     private ToolManager toolManager;
@@ -69,12 +62,6 @@ public class JsonMessageStreamHandler {
                     // 流式响应完成后，添加 AI 消息到对话历史, 保存到MySQL中
                     String aiResponse = chatHistoryStringBuilder.toString();
                     chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
-
-                    String projectDirName = "vue_project_" + appId;
-                    Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName);
-                    String path = projectRoot.toString();
-                    // 使用虚拟线程异步调用构建项目
-                    vueProjectBuilder.BuildVirtualThreadForBuildVue(path);
                 })
 
                 .doOnError(error -> {

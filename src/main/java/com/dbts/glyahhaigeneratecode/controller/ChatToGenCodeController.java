@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-
 /**
  * 应用对话生成代码 控制层。
  * 提供基于应用的流式代码生成接口。
