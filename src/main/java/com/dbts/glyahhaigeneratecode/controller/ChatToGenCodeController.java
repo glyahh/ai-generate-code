@@ -4,6 +4,8 @@ import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.rateLimiter.annotation.RateLimit;
+import com.dbts.glyahhaigeneratecode.rateLimiter.enums.RateLimitType;
 import com.dbts.glyahhaigeneratecode.service.ChatToGenCode;
 import com.dbts.glyahhaigeneratecode.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,6 +41,7 @@ public class ChatToGenCodeController {
      * @return SseEmitter，按片段推送生成的代码内容
      */
     @GetMapping(value = "/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "你先别急")
     //这个接口专门生成 text/event-stream 类型的响应内容, 浏览器会按照 SSE 协议来解析和处理这个响应，实现服务器向客户端的单向实时推送
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                                        @RequestParam String message,
@@ -63,6 +66,7 @@ public class ChatToGenCodeController {
         // 转换为 ServerSentEvent 格式
         return safeContentFlux
                 .map(chunk -> ServerSentEvent.<String>builder()
+                        // 这里event模型为"message"了
                         .data(chunk)
                         .build())
                 .concatWith(Mono.just(

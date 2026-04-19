@@ -1744,6 +1744,33 @@ async function sendMessage(text?: string) {
       void fetchRoundCount()
     })
 
+    // 监听后端业务错误（如限流、参数校验等）并以 SSE 方式结束
+    es.addEventListener('business-error', (event: MessageEvent) => {
+      const meta = activeStreamMeta.value[streamId]
+      const msg = meta ? sessionMessages.value.find((x) => x.id === meta.assistantMessageId) : undefined
+      try {
+        const data = JSON.parse(event.data || '{}') as { message?: string }
+        const errorText = (data?.message || '生成过程中出现错误').trim()
+        if (msg && msg.role === 'assistant') {
+          msg.content += msg.content ? `\n\n❌ ${errorText}` : `❌ ${errorText}`
+          if (!msg.uiState) msg.uiState = createAssistantUiState()
+          processAssistantChunkIntoUiState(msg.uiState, `\n\n❌ ${errorText}`)
+        }
+        message.error(errorText)
+      } catch (e) {
+        console.error('解析 business-error 事件失败:', e, '原始数据:', event.data)
+        const fallback = '生成过程中出现错误'
+        if (msg && msg.role === 'assistant') {
+          msg.content += msg.content ? `\n\n❌ ${fallback}` : `❌ ${fallback}`
+          if (!msg.uiState) msg.uiState = createAssistantUiState()
+          processAssistantChunkIntoUiState(msg.uiState, `\n\n❌ ${fallback}`)
+        }
+        message.error(fallback)
+      } finally {
+        stopStream(streamId)
+      }
+    })
+
     es.onerror = () => {
       stopStream(streamId)
       message.error('生成过程中出现错误，已结束本次对话')
