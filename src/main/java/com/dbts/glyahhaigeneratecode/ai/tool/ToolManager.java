@@ -1,5 +1,7 @@
 package com.dbts.glyahhaigeneratecode.ai.tool;
 
+import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
+import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +33,7 @@ public class ToolManager {
      * 初始化工具映射
      */
     @PostConstruct
+    // 在 Bean 初始化完成后、依赖注入完成后，自动执行一次 标注的方法
     public void initTools() {
         for (BaseTool tool : tools) {
             toolMap.put(tool.getToolName(), tool);
@@ -64,8 +67,8 @@ public class ToolManager {
     public BaseTool[] getWriteFileOnlyTools() {
         BaseTool writeFileTool = toolMap.get("writeFile");
         if (writeFileTool == null) {
-            log.warn("writeFile 工具未注册，降级返回全部工具");
-            return tools;
+            log.warn("writeFile 工具未注册");
+            ThrowUtils.throwIf(true,  ErrorCode.OPERATION_ERROR, "writeFile 工具未注册");
         }
         return new BaseTool[]{writeFileTool};
     }

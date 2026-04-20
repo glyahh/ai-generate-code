@@ -173,12 +173,13 @@ public class aiCodeGeneratorServiceFactory {
                     .tools(
                             firstRound ? toolManager.getWriteFileOnlyTools() : toolManager.getAllTools()
                     )
+                    .maxSequentialToolsInvocations(20)
                     // 当ai调用了本来没有的tool时
                     .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
                             ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())
                     )
                     .inputGuardrails(new PromptSafetyInputGuardrail())
-                    .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries()))
+                    // .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries())) 为了能够流式输出,先注释
                     .build();
             }
             case HTML, MULTI_FILE -> {
@@ -189,7 +190,7 @@ public class aiCodeGeneratorServiceFactory {
                     .streamingChatModel(prototypeStreamingChatModel)
                     .chatMemory(build)
                     .inputGuardrails(new PromptSafetyInputGuardrail())
-                    .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries()))
+                    // .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries())) 为了能够流式输出,先注释
                     .build();
             }
             default -> throw new MyException(114514, "不支持的代码生成类型");
