@@ -160,7 +160,7 @@ def main() -> None:
     else:
         print("[OK] 本地 temp 清理完成。")
 
-
+# 非脚本入口
 if __name__ == "__main__":
     main()
 

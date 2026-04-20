@@ -27,6 +27,7 @@ from script._common import add_apply_args, add_db_args, add_temp_args, get_db_co
 from script._common import connect_mysql
 from script._common import chunked, to_int_list
 from script._common import delete_path, parse_app_id_from_code_output_dirname
+from script._common import delete_app_fk_children
 
 
 def step_01_delete_apps_from_db(db_cfg, *, apply: bool) -> list[int]:
@@ -55,11 +56,17 @@ def step_01_delete_apps_from_db(db_cfg, *, apply: bool) -> list[int]:
             )
 
         if not apply:
-            print("[STEP01][DRY-RUN] 未传入 --apply，本步骤不会真正删除（将删除：chat_history + app）。")
+            print("[STEP01][DRY-RUN] 未传入 --apply，本步骤不会真正删除（将删除：user_app_apply + chat_history + app）。")
             conn.rollback()
             return app_ids
 
         with conn.cursor() as cur:
+            # 先删除所有外键子表（动态扫描 information_schema），否则 app 会因为外键约束无法删除
+            fk_deleted = delete_app_fk_children(conn, schema=db_cfg.database, app_ids=app_ids)
+            if fk_deleted:
+                for k, v in fk_deleted.items():
+                    print(f"[STEP01] 已删除 FK child 记录数：{k}={v}")
+
             # 先删除 chat_history，避免留下孤儿历史记录
             total_deleted = 0
             for part in chunked(app_ids, 500):
@@ -165,7 +172,7 @@ def main() -> None:
     if apply:
         print("[OK] 一键清理完成。")
 
-
+# 非脚本入口
 if __name__ == "__main__":
     main()
 

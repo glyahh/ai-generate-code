@@ -195,6 +195,71 @@ def connect_mysql(cfg: DbConfig) -> pymysql.connections.Connection:
     )
 
 
+_SAFE_SQL_IDENT = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def find_app_fk_children(conn: pymysql.connections.Connection, schema: str) -> list[tuple[str, str]]:
+    """
+    查询所有引用 app(id) 的外键子表，返回 [(tableName, columnName), ...]。
+
+    说明：
+    - 你遇到的 1451 报错就是典型的“子表外键未清理导致父表无法删除”
+    - 这里用 information_schema 动态发现依赖，避免未来新增表后脚本失效
+    """
+
+    sql = """
+        SELECT TABLE_NAME, COLUMN_NAME
+        FROM information_schema.KEY_COLUMN_USAGE
+        WHERE REFERENCED_TABLE_SCHEMA = %s
+          AND REFERENCED_TABLE_NAME = 'app'
+          AND REFERENCED_COLUMN_NAME = 'id'
+          AND TABLE_NAME IS NOT NULL
+          AND COLUMN_NAME IS NOT NULL
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(sql, (schema,))
+        rows = cur.fetchall()
+
+    children: list[tuple[str, str]] = []
+    for r in rows:
+        table = str(r["TABLE_NAME"])
+        col = str(r["COLUMN_NAME"])
+        # 额外做一次白名单校验，避免 SQL 标识符注入
+        if not _SAFE_SQL_IDENT.match(table) or not _SAFE_SQL_IDENT.match(col):
+            continue
+        children.append((table, col))
+    return children
+
+
+def delete_app_fk_children(
+    conn: pymysql.connections.Connection,
+    *,
+    schema: str,
+    app_ids: Sequence[int],
+    chunk_size: int = 500,
+) -> dict[str, int]:
+    """
+    删除所有外键子表中引用 appIds 的记录。
+    返回：{ "table.column": deletedCount }
+    """
+
+    children = find_app_fk_children(conn, schema)
+    if not children:
+        return {}
+
+    result: dict[str, int] = {}
+    with conn.cursor() as cur:
+        for table, col in children:
+            deleted = 0
+            for part in chunked(list(app_ids), chunk_size):
+                placeholders = ",".join(["%s"] * len(part))
+                cur.execute(f"DELETE FROM `{table}` WHERE `{col}` IN ({placeholders})", list(part))
+                deleted += cur.rowcount
+            result[f"{table}.{col}"] = deleted
+    return result
+
+
 def add_apply_args(parser: argparse.ArgumentParser) -> None:
     """
     添加通用执行开关：

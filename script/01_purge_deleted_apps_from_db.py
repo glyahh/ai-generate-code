@@ -7,7 +7,8 @@
   你现在的需求是“清库”，所以脚本会执行真实 DELETE。
 - 为避免误删，脚本默认是 dry-run（只打印将删除的内容，不执行）。
   需要传入 --apply 才会真正删除。
-- 为避免留下孤儿数据：只要真正执行（--apply），本脚本会同时删除 chat_history 里对应 appId 的记录。
+- 为避免留下孤儿数据：只要真正执行（--apply），本脚本会按顺序删除：
+  user_app_apply（外键子表）→ chat_history → app。
 
 运行方式（Windows PowerShell 示例）：
 1) 安装依赖：
@@ -34,6 +35,7 @@ from script._common import (
     add_db_args,
     chunked,
     connect_mysql,
+    delete_app_fk_children,
     get_db_config_from_args,
     to_int_list,
 )
@@ -69,12 +71,18 @@ def main() -> None:
             )
 
         if not apply:
-            print("[DRY-RUN] 未传入 --apply，本次不会真正删除（将删除：chat_history + app）。")
+            print("[DRY-RUN] 未传入 --apply，本次不会真正删除（将删除：user_app_apply + chat_history + app）。")
             conn.rollback()
             return
 
         # 真正执行删除（使用事务保证一致性）
         with conn.cursor() as cur:
+            # 先删除所有外键子表（动态扫描 information_schema），否则 app 会因为外键约束无法删除
+            fk_deleted = delete_app_fk_children(conn, schema=db_cfg.database, app_ids=app_ids)
+            if fk_deleted:
+                for k, v in fk_deleted.items():
+                    print(f"[OK] 已删除 FK child 记录数：{k}={v}")
+
             # 先删除 chat_history，避免留下孤儿历史记录
             # 分块删除，避免 IN (...) 参数过长
             total_deleted = 0
@@ -99,7 +107,7 @@ def main() -> None:
     finally:
         conn.close()
 
-
+# 非脚本入口
 if __name__ == "__main__":
     main()
 
