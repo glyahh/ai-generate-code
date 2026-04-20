@@ -32,6 +32,19 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     boolean addChatMessage(Long appId, String message, String messageType, Long userId);
 
     /**
+     * 添加一条带审查字段的对话消息
+     *
+     * @param appId        应用 id
+     * @param message      消息内容
+     * @param messageType  消息类型（user/ai/error）
+     * @param userId       用户 id
+     * @param auditAction  审查动作（ALLOW / REJECT / SKIP）
+     * @param auditHitRule 命中的规则编码（如 NONE / SENSITIVE_WORD）
+     * @return 是否保存成功
+     */
+    boolean addChatMessage(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule);
+
+    /**
      * 分页查询某个应用的对话历史（基于时间游标，向前加载）
      *
      * @param appId          应用 id

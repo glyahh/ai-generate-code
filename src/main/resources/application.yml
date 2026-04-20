@@ -53,6 +53,8 @@ langchain4j:
       max-tokens: 8192
       # 最大重试次数
       max-retries: 2
+      output-guardrails-config:
+        max-retries: 2
       # 结构化输出
 #      strict-json-schema: true
 #      response-format: json_object

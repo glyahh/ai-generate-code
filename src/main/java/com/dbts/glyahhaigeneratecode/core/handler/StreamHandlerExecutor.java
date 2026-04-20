@@ -34,10 +34,11 @@ public class StreamHandlerExecutor {
      */
     public Flux<String> doExecute(Flux<String> originFlux,
                                   ChatHistoryService chatHistoryService,
-                                  long appId, User loginUser, CodeGenTypeEnum codeGenType) {
+                                  long appId, User loginUser, CodeGenTypeEnum codeGenType,
+                                  boolean firstRound, String userMessage) {
         return switch (codeGenType) {
             case VUE -> // 使用注入的组件实例
-                    jsonMessageStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
+                    jsonMessageStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser, firstRound, userMessage);
             case HTML, MULTI_FILE -> // 简单文本处理器不需要依赖注入
                     new SimpleTextStreamHandler().handle(originFlux, chatHistoryService, appId, loginUser);
         };

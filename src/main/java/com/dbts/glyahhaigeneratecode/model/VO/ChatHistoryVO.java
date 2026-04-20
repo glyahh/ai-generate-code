@@ -37,6 +37,16 @@ public class ChatHistoryVO implements Serializable {
     private Long userId;
 
     /**
+     * 审查动作：ALLOW / REJECT / SKIP
+     */
+    private String auditAction;
+
+    /**
+     * 命中的审查规则编码，未命中时为 NONE
+     */
+    private String auditHitRule;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

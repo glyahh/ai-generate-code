@@ -4,6 +4,8 @@ import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.core.AiCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.core.handler.StreamHandlerExecutor;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
+import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyAuditEvaluator;
+import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyAuditResult;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
@@ -69,8 +71,19 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
         boolean firstRound = roundsBefore == 0;
 
-        // 5. 保存用户消息到对话历史(Mysql)
-        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), user.getId());
+        // 5. 保存用户消息到对话历史(Mysql), 入链路前进行最小审查，并写入审查日志 + 会话扩展字段
+        PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
+        log.info("prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
+                appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
+        chatHistoryService.addChatMessage(
+                appId,
+                message,
+                ChatHistoryMessageTypeEnum.USER.getValue(),
+                user.getId(),
+                auditResult.getAction(),
+                auditResult.getHitRule()
+        );
+        ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
 
         // 5.5. 生成前触发「旧轮次总结压缩」，降低上下文长度与 token 消耗
         // 说明：该压缩仅作用于 Redis 管理的上下文（不修改 DB），对后续生成请求生效。
@@ -80,7 +93,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
 
         // 7. 添加 AI 回复到对话历史,转换格式并返回给前端
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum);
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, firstRound, message);
     }
 
     /**

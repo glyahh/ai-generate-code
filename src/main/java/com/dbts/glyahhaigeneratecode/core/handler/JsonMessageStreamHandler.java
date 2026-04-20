@@ -8,6 +8,7 @@ import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
+import com.dbts.glyahhaigeneratecode.guardrail.RetryOutputGuardrail;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -15,9 +16,11 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JSON 消息流处理器
@@ -29,6 +32,8 @@ public class JsonMessageStreamHandler {
 
     @Resource
     private ToolManager toolManager;
+
+    private final RetryOutputGuardrail retryOutputGuardrail = new RetryOutputGuardrail();
 
     /**
      * 处理 TokenStream（VUE_PROJECT）
@@ -42,18 +47,29 @@ public class JsonMessageStreamHandler {
      */
     public Flux<String> handle(Flux<String> originFlux,
                                ChatHistoryService chatHistoryService,
-                               long appId, User loginUser) {
+                               long appId, User loginUser,
+                               boolean firstRound, String userMessage) {
 
         // 收集数据用于生成后端记忆格式
         StringBuilder chatHistoryStringBuilder = new StringBuilder();
         // 用于跟踪已经见过的工具ID，判断是否是第一次调用
         Set<String> seenToolIds = new HashSet<>();
+        AtomicBoolean hasToolCall = new AtomicBoolean(false);
+        AtomicBoolean firstRoundToolViolationNotified = new AtomicBoolean(false);
+        boolean editModeIntent = isEditModeIntent(userMessage);
 
-        return originFlux
+        Flux<String> mainFlux = originFlux
 
                 .map(chunk -> {
                     // 解析每个 JSON 消息块,见下方函数
-                    return handleJsonMessageChunk(chunk, chatHistoryStringBuilder, seenToolIds);
+                    return handleJsonMessageChunk(
+                            chunk,
+                            chatHistoryStringBuilder,
+                            seenToolIds,
+                            firstRound,
+                            hasToolCall,
+                            firstRoundToolViolationNotified
+                    );
                 })
 
                 .filter(StrUtil::isNotEmpty) // 过滤空字串
@@ -69,6 +85,15 @@ public class JsonMessageStreamHandler {
                     String errorMessage = "AI回复失败: " + error.getMessage();
                     chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
                 });
+
+        return mainFlux.concatWith(Mono.defer(() -> {
+            if (retryOutputGuardrail.shouldWarnEditModeWithoutToolCall(editModeIntent, hasToolCall.get())) {
+                String warning = "【工具调用异常】检测到你在编辑模式修改代码，但本轮未发生工具调用，代码可能生成异常。";
+                chatHistoryStringBuilder.append(warning);
+                return Mono.just(warning);
+            }
+            return Mono.empty();
+        }));
     }
 
     /**
@@ -77,7 +102,10 @@ public class JsonMessageStreamHandler {
      */
     private String handleJsonMessageChunk(String chunk,
                                           StringBuilder chatHistoryStringBuilder,
-                                          Set<String> seenToolIds) {
+                                          Set<String> seenToolIds,
+                                          boolean firstRound,
+                                          AtomicBoolean hasToolCall,
+                                          AtomicBoolean firstRoundToolViolationNotified) {
         // 容错说明：流式场景下个别 chunk 可能是截断/脏 JSON，不能让单个坏块中断整条 SSE。
         // 证据：前端出现 "A JSONObject text must end with '}'" 时，根因是这里直接解析失败并向上抛出。
         StreamMessage streamMessage;
@@ -103,6 +131,15 @@ public class JsonMessageStreamHandler {
                     ToolRequestMessage toolRequestMessage = JSONUtil.toBean(chunk, ToolRequestMessage.class);
                     String toolId = toolRequestMessage.getId();
                     String toolName = StrUtil.blankToDefault(toolRequestMessage.getName(), "未知工具");
+                    hasToolCall.set(true);
+                    if (!retryOutputGuardrail.isFirstRoundToolAllowed(firstRound, toolName)) {
+                        String warning = "【工具调用异常】首轮仅允许调用 writeFile，检测到非法工具 " + toolName + "，代码可能生成异常。";
+                        if (firstRoundToolViolationNotified.compareAndSet(false, true)) {
+                            chatHistoryStringBuilder.append(warning);
+                            return warning;
+                        }
+                        return "";
+                    }
                     // 检查是否是第一次看到这个工具 ID
                     if (toolId != null && !seenToolIds.contains(toolId)) {
                         seenToolIds.add(toolId);
@@ -140,6 +177,20 @@ public class JsonMessageStreamHandler {
             }
         }
         throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的消息类型");
+    }
+
+    private boolean isEditModeIntent(String userMessage) {
+        if (StrUtil.isBlank(userMessage)) {
+            return false;
+        }
+        String lower = userMessage.toLowerCase();
+        String[] keywords = {"修改", "重构", "优化", "修复", "改一下", "edit", "refactor", "modify", "fix"};
+        for (String keyword : keywords) {
+            if (lower.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

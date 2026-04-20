@@ -88,6 +88,8 @@ create table chat_history
     messageType varchar(32)                        not null comment '消息类型：user/ai/error',
     appId       bigint                             not null comment '应用id',
     userId      bigint                             not null comment '创建用户id',
+    auditAction varchar(16) default 'SKIP'         not null comment '审查动作：ALLOW/REJECT/SKIP',
+    auditHitRule varchar(64) default 'NONE'        not null comment '命中审查规则编码',
     createTime  datetime default CURRENT_TIMESTAMP not null comment '创建时间',
     updateTime  datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
     isDelete    tinyint  default 0                 not null comment '是否删除',
@@ -95,4 +97,7 @@ create table chat_history
     INDEX idx_createTime (createTime),             -- 提升基于时间的查询性能
     INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
 ) comment '对话历史' collate = utf8mb4_unicode_ci;
+
+alter table chat_history add column if not exists auditAction varchar(16) default 'SKIP' not null comment '审查动作：ALLOW/REJECT/SKIP' after userId;
+alter table chat_history add column if not exists auditHitRule varchar(64) default 'NONE' not null comment '命中审查规则编码' after auditAction;
 

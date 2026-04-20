@@ -60,6 +60,18 @@ public class ChatHistory implements Serializable {
     private Long userId;
 
     /**
+     * 审查动作：ALLOW / REJECT / SKIP
+     */
+    @Column("auditAction")
+    private String auditAction;
+
+    /**
+     * 命中的审查规则编码，未命中时为 NONE
+     */
+    @Column("auditHitRule")
+    private String auditHitRule;
+
+    /**
      * 创建时间
      */
     @Column("createTime")

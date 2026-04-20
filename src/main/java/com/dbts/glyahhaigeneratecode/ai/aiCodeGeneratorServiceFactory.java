@@ -1,7 +1,10 @@
 package com.dbts.glyahhaigeneratecode.ai;
 
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
+import com.dbts.glyahhaigeneratecode.config.OpenAiOutputGuardrailsConfig;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
+import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyInputGuardrail;
+import com.dbts.glyahhaigeneratecode.guardrail.RetryOutputGuardrail;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -50,6 +53,9 @@ public class aiCodeGeneratorServiceFactory {
 
     @Resource
     private ApplicationContext applicationContext;
+
+    @Resource
+    private OpenAiOutputGuardrailsConfig outputGuardrailsConfig;
 
     /**
      * AI 服务实例缓存
@@ -171,6 +177,8 @@ public class aiCodeGeneratorServiceFactory {
                     .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
                             ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())
                     )
+                    .inputGuardrails(new PromptSafetyInputGuardrail())
+                    .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries()))
                     .build();
             }
             case HTML, MULTI_FILE -> {
@@ -180,6 +188,8 @@ public class aiCodeGeneratorServiceFactory {
                     .chatModel(chatModel)
                     .streamingChatModel(prototypeStreamingChatModel)
                     .chatMemory(build)
+                    .inputGuardrails(new PromptSafetyInputGuardrail())
+                    .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries()))
                     .build();
             }
             default -> throw new MyException(114514, "不支持的代码生成类型");
