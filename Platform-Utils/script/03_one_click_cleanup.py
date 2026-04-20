@@ -21,7 +21,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+# 兼容“从任意工作目录直接运行脚本”场景，确保可导入 script 包
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from script._common import add_apply_args, add_db_args, add_temp_args, get_db_config_from_args
 from script._common import connect_mysql

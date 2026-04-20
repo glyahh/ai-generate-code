@@ -23,7 +23,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple
 
-import pymysql
+try:
+    import pymysql
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "缺少依赖 `pymysql`。请先安装：\n"
+        "  python -m pip install -r script/requirements.txt\n"
+        "若使用虚拟环境，请确保使用该虚拟环境对应的 python 执行上述命令。"
+    ) from exc
 
 
 @dataclass(frozen=True)

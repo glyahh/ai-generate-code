@@ -9,8 +9,8 @@ target/
 application-local.yml
 
 ### Local script secrets (DO NOT COMMIT) ###
-script/.env
-script/.env.local
+Platform-Utils/script/.env
+Platform-Utils/script/.env.local
 
 ### STS ###
 .apt_generated
