@@ -37,3 +37,11 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# Workspace temp noise
+temp/
+tmp/
+*.tmp
+*.temp
+*.bak
+*~

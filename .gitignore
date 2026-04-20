@@ -8,6 +8,10 @@ target/
 ### Local ###
 application-local.yml
 
+### Local script secrets (DO NOT COMMIT) ###
+script/.env
+script/.env.local
+
 ### STS ###
 .apt_generated
 .classpath
@@ -35,3 +39,17 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Workspace Noise ###
+temp/**
+*.tmp
+*.temp
+*.bak
+*~
+
+### Local Tooling State ###
+.cursor/settings.json
+.windsurf/
+
+### Shared Cursor Assets (keep tracked) ###
+!.cursor/skills/**
