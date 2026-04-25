@@ -30,6 +30,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.core.io.ClassPathResource;
 
@@ -67,6 +68,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Resource
     private ChatMemoryStore chatMemoryStore;
 
+    @Resource
+    private JdbcTemplate jdbcTemplate;
+
     private static final int MEMORY_AI_MESSAGE_MAX_LENGTH = 2400;
     private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 900;
     private static final int MEMORY_AI_CODE_SUMMARY_MAX_LENGTH = 500;
@@ -98,7 +102,28 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 .auditAction(auditAction)
                 .auditHitRule(auditHitRule)
                 .build();
+        ensureAuditColumnsIfMissing(appId);
         return this.save(chatHistory);
+    }
+
+    private void ensureAuditColumnsIfMissing(Long appId) {
+        boolean actionExists = isColumnExists("auditAction");
+        boolean hitRuleExists = isColumnExists("auditHitRule");
+        if (!actionExists) {
+            jdbcTemplate.execute("ALTER TABLE chat_history ADD COLUMN auditAction varchar(16) NOT NULL DEFAULT 'SKIP' COMMENT '审查动作：ALLOW/REJECT/SKIP' AFTER userId");
+        }
+        if (!hitRuleExists) {
+            jdbcTemplate.execute("ALTER TABLE chat_history ADD COLUMN auditHitRule varchar(64) NOT NULL DEFAULT 'NONE' COMMENT '命中审查规则编码' AFTER auditAction");
+        }
+    }
+
+    private boolean isColumnExists(String columnName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = ?",
+                Integer.class,
+                columnName
+        );
+        return count != null && count > 0;
     }
 
     @Override

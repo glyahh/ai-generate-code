@@ -17,52 +17,41 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 
 /**
- * 文件写入工具
- * 支持 AI 通过工具调用的方式写入文件
- *
- * 整体逻辑:
- * 1. 先解析并拼接出文件的绝对路径
- * 2. 确保父级目录已创建（不存在则自动创建）
- * 3. 以覆盖写入的方式写入新内容
- * 4. 返回相对路径给 AI，避免泄露本地绝对路径
+ * 文件写入工具。
+ * 支持 AI 通过工具调用的方式将生成内容落盘到项目目录。
  */
 @Slf4j
 @Component
 public class FileWriteTool extends BaseTool {
 
-    //告诉ai这个方法的作用
     @Tool("写入文件到指定路径")
     public String writeFile(
-            @P("文件的相对路径") // 告诉ai参数的作用
+            @P("文件的相对路径")
             String relativeFilePath,
-            @P("要写入文件的内容")
+            @P("要写入文件的原始文件内容。请直接传源码文本，不要额外包一层引号，不要手工做二次转义；工具调用本身会处理 JSON 层转义。")
             String content,
-            @ToolMemoryId Long appId // ai自动保存记忆的参数
+            @ToolMemoryId Long appId
     ) {
         try {
-            // 生成绝对路径,包含Vue文件
             Path path = Paths.get(relativeFilePath);
             if (!path.isAbsolute()) {
-                // 相对路径处理，创建基于 appId 的项目目录
                 String projectDirName = "vue_project_" + appId;
                 Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName);
                 path = projectRoot.resolve(relativeFilePath);
             }
-            // 创建父目录（如果不存在）
+
             Path parentDir = path.getParent();
             if (parentDir != null) {
                 Files.createDirectories(parentDir);
             }
-            // .vue 文件：先做 SFC 结构兜底，再移除多余闭合标签，避免 vite build 因标签不平衡失败
+
             if (relativeFilePath.endsWith(".vue")) {
                 content = repairVueSfcContent(content);
             }
-            // 写入文件内容
+
             Files.write(path, content.getBytes(),
                     StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING);
-            //log.info("成功写入文件: {}", path.toAbsolutePath());
-            // 注意要返回相对路径，不能让 AI 把文件绝对路径返回给用户
             return "文件写入成功: " + relativeFilePath;
         } catch (IOException e) {
             String errorMessage = "文件写入失败: " + relativeFilePath + ", 错误: " + e.getMessage();
@@ -81,7 +70,6 @@ public class FileWriteTool extends BaseTool {
         return "写入文件";
     }
 
-    // JSONObject 为 AI 调用工具时序列化后的参数 JSON，按 key 取值
     @Override
     public String generateToolExecutedResult(JSONObject arguments) {
         return String.format("""
@@ -95,14 +83,10 @@ public class FileWriteTool extends BaseTool {
                 arguments.getStr("content"));
     }
 
-    /**
-     * 清理 AI 在 .vue 文件末尾多余输出的闭合标签。有的煞笔模型会瞎写
-     * 例如 AI 有时会在文件末尾多输出 </template> 或 </script>，
-     * 导致 vite build 报 "Invalid end tag"。
-     * 通过比较开/闭标签数量，从末尾删除多余的闭合标签。
-     */
     private String sanitizeVueContent(String content) {
-        if (content == null || content.isEmpty()) return content;
+        if (content == null || content.isEmpty()) {
+            return content;
+        }
 
         String result = content;
 
@@ -126,8 +110,7 @@ public class FileWriteTool extends BaseTool {
     }
 
     /**
-     * 修复 .vue SFC 顶层块的开闭标签不平衡问题（最小兜底）。
-     * 影响范围：仅在 writeFile 写入 .vue 文件时生效，不改动其他类型文件。
+     * 针对 .vue 文件做最小兜底，避免顶层 SFC 标签不平衡导致构建失败。
      */
     private String repairVueSfcContent(String content) {
         if (content == null || content.isEmpty()) {
@@ -140,9 +123,6 @@ public class FileWriteTool extends BaseTool {
         return result.stripTrailing() + System.lineSeparator();
     }
 
-    /**
-     * 若 opening tag 数量大于 closing tag 数量，则在文件尾部补齐缺失的 closing tag。
-     */
     private String appendMissingClosingTag(String text, String openingTagPrefix, String closingTag) {
         int openingCount = countMatches(text, openingTagPrefix);
         int closingCount = countMatches(text, closingTag);
