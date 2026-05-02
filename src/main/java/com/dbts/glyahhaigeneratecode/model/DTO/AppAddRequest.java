@@ -30,6 +30,11 @@ public class AppAddRequest implements Serializable {
      */
     private String codeGenType;
 
+    /**
+     * 是否 beta 应用：0-否，1-是（workflow beta）
+     */
+    private Integer isBeta;
+
     private static final long serialVersionUID = 1L;
 }
 

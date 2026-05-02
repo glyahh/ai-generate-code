@@ -66,6 +66,11 @@ public class WorkflowContext implements Serializable {
     private Long appId;
 
     /**
+     * 是否首轮对话（用于复用既有工具权限约束）
+     */
+    private Boolean firstRound;
+
+    /**
      * 生成的代码目录
      */
     private String generatedCodeDir;
@@ -84,6 +89,11 @@ public class WorkflowContext implements Serializable {
      * 代码质量检查结果
      */
     private QualityResult qualityResult;
+
+    /**
+     * 是否出现 Mermaid 构造错误（仅用于前端提示，不影响流程）
+     */
+    private Boolean mermaidError;
 
     @Serial
     private static final long serialVersionUID = 1L;

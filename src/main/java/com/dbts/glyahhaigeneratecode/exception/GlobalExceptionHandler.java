@@ -65,7 +65,11 @@ public class GlobalExceptionHandler {
         String accept = request.getHeader("Accept");
         String uri = request.getRequestURI();
         if ((accept != null && accept.contains("text/event-stream")) ||
-                uri.contains("/chat/gen/code")) {
+                uri.contains("/chat/gen/code") ||
+                uri.contains("/chat/gen/workflow")) {
+            if (response == null) {
+                return false;
+            }
             try {
                 // 设置SSE响应头
                 response.setContentType("text/event-stream");

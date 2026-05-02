@@ -76,6 +76,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         App app = new App();
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
+        if (app.getIsBeta() == null) {
+            app.setIsBeta(0);
+        }
 
         // 优先使用前端显式选择的 codeGenType，避免 LLM 路由器覆盖用户意图。
         // 如前端传入 vue_project（但后端 value 约定为 vue），CodeGenTypeEnum#getEnumByValue 会做兼容映射。

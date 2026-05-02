@@ -46,14 +46,28 @@ public class ChatToGenCodeController {
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                                        @RequestParam String message,
                                                        HttpServletRequest request) {
-        // 参数校验
+        return toSseEvent(chatToGenCodeService.chatToGenCode(appId, message, getLoginUserWithValidation(appId, message, request)));
+    }
+
+    /**
+     * 【用户】通过 workflow 编排流式生成代码（SSE）
+     */
+    @GetMapping(value = "/gen/workflow", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "你先别急")
+    public Flux<ServerSentEvent<String>> chatToGenCodeByWorkflow(@RequestParam Long appId,
+                                                                 @RequestParam String message,
+                                                                 HttpServletRequest request) {
+        return toSseEvent(chatToGenCodeService.chatToGenCodeByWorkflow(appId, message, getLoginUserWithValidation(appId, message, request)));
+    }
+
+    private User getLoginUserWithValidation(Long appId, String message, HttpServletRequest request) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID无效");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "用户消息不能为空");
         // 获取当前登录用户
-        User loginUser = userService.getUserInSession(request);
-        // 调用服务生成代码（流式）
-        Flux<String> contentFlux = chatToGenCodeService.chatToGenCode(appId, message, loginUser);
+        return userService.getUserInSession(request);
+    }
 
+    private Flux<ServerSentEvent<String>> toSseEvent(Flux<String> contentFlux) {
         // SSE 场景：必须保证异常时仍然以 text/event-stream 可写的方式结束；
         // 否则异常会被全局异常处理器捕获，尝试写普通 BaseResponse，导致
         // HttpMessageNotWritableException: No converter ... for 'text/event-stream'（二次报错）。
@@ -75,6 +89,5 @@ public class ChatToGenCodeController {
                                 .data("")
                                 .build()
                 ));
-
     }
 }

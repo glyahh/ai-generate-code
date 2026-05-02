@@ -6,6 +6,7 @@ export type AppAddRequest = {
   cover?: string;
   initPrompt?: string;
   codeGenType?: string;
+  isBeta?: number;
 };
 
 export type AppAddUsingPostResponses = {

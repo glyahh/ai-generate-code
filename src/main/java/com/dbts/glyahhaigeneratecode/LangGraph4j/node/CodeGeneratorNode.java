@@ -33,7 +33,8 @@ public class CodeGeneratorNode {
                 appId = System.currentTimeMillis();
                 context.setAppId(appId);
             }
-            boolean firstRound = generationType == CodeGenTypeEnum.VUE && context.getGeneratedCodeDir() == null;
+            // 与旧逻辑保持一致：仅“首轮且尚未产出目录”时限制工具权限。
+            boolean firstRound = Boolean.TRUE.equals(context.getFirstRound()) && context.getGeneratedCodeDir() == null;
             // 调用流式代码生成
             Flux<String> codeStream = codeGeneratorFacade.generateAndSaveCodeStream(userMessage, generationType, appId, firstRound);
             // 同步等待流式输出完成

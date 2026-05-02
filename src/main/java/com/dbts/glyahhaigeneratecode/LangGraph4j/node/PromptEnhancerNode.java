@@ -35,7 +35,25 @@ public class PromptEnhancerNode {
                 enhancedPromptBuilder.append("请在生成网站使用以下图片资源，将这些图片合理地嵌入到网站的相应位置中。\n");
                 // 两种拼接逻辑
                 if (CollUtil.isNotEmpty(imageList)) {
+                    // 防止提示词过长触发输入护栏（当前护栏要求 < 1000 字）。
+                    // 这里采用“边拼接边限长”的策略：优先保留原始提示词，其次保留少量高价值素材条目。
+                    int maxChars = 900;
+                    int maxItems = 8;
+                    int appended = 0;
                     for (ImageResource image : imageList) {
+                        if (appended >= maxItems) {
+                            break;
+                        }
+                        String line = "- "
+                                + image.getCategory().getText()
+                                + "："
+                                + image.getDescription()
+                                + "（"
+                                + image.getUrl()
+                                + "）\n";
+                        if (enhancedPromptBuilder.length() + line.length() > maxChars) {
+                            break;
+                        }
                         enhancedPromptBuilder.append("- ")
                                 .append(image.getCategory().getText())
                                 .append("：")
@@ -43,9 +61,13 @@ public class PromptEnhancerNode {
                                 .append("（")
                                 .append(image.getUrl())
                                 .append("）\n");
+                        appended++;
                     }
                 } else {
-                    enhancedPromptBuilder.append(imageListStr);
+                    int maxChars = 900;
+                    if (enhancedPromptBuilder.length() + imageListStr.length() <= maxChars) {
+                        enhancedPromptBuilder.append(imageListStr);
+                    }
                 }
             }
             String enhancedPrompt = enhancedPromptBuilder.toString();

@@ -53,9 +53,10 @@ public class CodeQualityCheckNode {
     private static final int MAX_FILE_BYTES = 512 * 1024;
 
     /**
-     * 拼接后提交给 AI 的最大字符数，超出则截断并附说明
+     * 拼接后提交给 AI 的最大字符数，超出则截断并附说明。
+     * 过大上下文会显著拉长质检 HTTP（尤其与大参数量模型组合时），故低于历史 300k 上限。
      */
-    private static final int MAX_PROMPT_CHARS = 300_000;
+    private static final int MAX_PROMPT_CHARS = 160_000;
 
     private static Set<String> buildIgnoreSegments() {
         Set<String> set = new HashSet<>();

@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -46,6 +47,13 @@ public class CodeQualityCheckService {
         }
         if (qualityResult.getSuggestions() == null) {
             qualityResult.setSuggestions(Collections.emptyList());
+        }
+        // 模型偶发 isValid=true 仍附带非阻断项到 errors；统一并入 suggestions，避免下游误判
+        if (Boolean.TRUE.equals(qualityResult.getIsValid()) && !qualityResult.getErrors().isEmpty()) {
+            List<String> merged = new ArrayList<>(qualityResult.getSuggestions());
+            merged.addAll(qualityResult.getErrors());
+            qualityResult.setSuggestions(merged);
+            qualityResult.setErrors(Collections.emptyList());
         }
         return qualityResult;
     }

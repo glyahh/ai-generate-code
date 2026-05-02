@@ -69,7 +69,7 @@ function buildCssSelector(el: Element): string | undefined {
   try {
     // 优先使用 id（唯一性通常最好）
     const id = (el as HTMLElement).id
-    if (id && /^[A-Za-z][\w\-\:\.]*$/.test(id)) return `#${id}`
+    if (id && /^[A-Za-z][\w\-:.]*$/.test(id)) return `#${id}`
 
     const parts: string[] = []
     let cur: Element | null = el
@@ -80,7 +80,7 @@ function buildCssSelector(el: Element): string | undefined {
 
       let part = tag
       const cid = (cur as HTMLElement).id
-      if (cid && /^[A-Za-z][\w\-\:\.]*$/.test(cid)) {
+      if (cid && /^[A-Za-z][\w\-:.]*$/.test(cid)) {
         part += `#${cid}`
         parts.unshift(part)
         break
@@ -88,7 +88,7 @@ function buildCssSelector(el: Element): string | undefined {
 
       const classList = Array.from((cur as HTMLElement).classList || []).filter(Boolean).slice(0, 2)
       if (classList.length) {
-        part += classList.map((c) => (c && /^[A-Za-z_][\w\-]*$/.test(c) ? `.${c}` : '')).join('')
+        part += classList.map((c) => (c && /^[A-Za-z_][\w-]*$/.test(c) ? `.${c}` : '')).join('')
       }
 
       // 若同级同 tag 重复，附加 nth-of-type

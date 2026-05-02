@@ -14,8 +14,8 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class CodeExamServiceFactory {
 
-    @Resource(name = "openAiChatModel")
-    private ChatModel chatModel;
+    @Resource(name = "codeExamChatModel")
+    private ChatModel codeExamChatModel;
 
     /**
      * 创建代码质量检查 AI 服务（依据 Prompt/code_exam.txt，无工具调用）
@@ -23,7 +23,7 @@ public class CodeExamServiceFactory {
     @Bean
     public CodeExamService createCodeExamService() {
         return AiServices.builder(CodeExamService.class)
-                .chatModel(chatModel)
+                .chatModel(codeExamChatModel)
                 .build();
     }
 }

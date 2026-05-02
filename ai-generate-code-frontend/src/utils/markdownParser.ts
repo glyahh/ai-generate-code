@@ -10,6 +10,17 @@ export interface TextSegment {
   type: 'text' | 'code'
   content: string
   language?: string // 代码块的语言类型（如 'css', 'javascript', 'html' 等）
+  /** 工作流等多文件场景：`### 文件名` 独占区时并入代码块展示，不单独当正文 */
+  fileLabel?: string
+}
+
+/** `### path` 且整段 textBefore 仅含该行与空白时，解析为下一代码块的展示文件名 */
+const ONLY_FILE_HEADING_RE = /^[\s\r\n]*###\s+(\S+)\s*[\s\r\n]*$/
+
+function fileLabelFromTextBeforeFence(textBefore: string): string | undefined {
+  if (!textBefore || !textBefore.trim()) return undefined
+  const m = textBefore.match(ONLY_FILE_HEADING_RE)
+  return m?.[1]
 }
 
 /** 行首可选 0–3 空格 + ``` + info，整行以换行结束 */
@@ -103,9 +114,13 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
     const info = (m[3] ?? '').trim()
     const language = (info.split(/\s+/)[0] || 'text').toLowerCase()
 
+    let fileLabel: string | undefined
     if (absOpenMatchStart > cursor) {
       const textBefore = text.slice(cursor, absOpenMatchStart)
-      if (textBefore.trim()) {
+      const headingOnly = fileLabelFromTextBeforeFence(textBefore)
+      if (headingOnly) {
+        fileLabel = headingOnly
+      } else if (textBefore.trim()) {
         segments.push({ type: 'text', content: textBefore })
       }
     }
@@ -120,6 +135,7 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
         type: 'code',
         content: afterOpen,
         language: language,
+        ...(fileLabel ? { fileLabel } : {}),
       })
       break
     }
@@ -131,6 +147,7 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
       type: 'code',
       content: codeContent,
       language: language,
+      ...(fileLabel ? { fileLabel } : {}),
     })
 
     cursor = close.consumeEnd

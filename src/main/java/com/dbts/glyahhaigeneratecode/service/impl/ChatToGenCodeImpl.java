@@ -2,8 +2,10 @@ package com.dbts.glyahhaigeneratecode.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.core.AiCodeGeneratorFacade;
+import com.dbts.glyahhaigeneratecode.core.WorkflowCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.core.handler.StreamHandlerExecutor;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
+import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyAuditEvaluator;
 import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyAuditResult;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
@@ -32,6 +34,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     private final AppService appService;
 
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
+    private final WorkflowCodeGeneratorFacade workflowCodeGeneratorFacade;
 
     private final ChatHistoryService chatHistoryService;
 
@@ -51,20 +54,16 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         // 2. 查询应用信息
         App app = appService.getById(appId);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        if (app == null) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
 
         // 3. 权限校验：只有创建人可以使用该应用生成代码
         ThrowUtils.throwIf(!user.getId().equals(app.getUserId()),
                 ErrorCode.NO_AUTH_ERROR, "只能使用自己的应用生成代码");
 
         // 4. 组装最终提示词，调用 AI 代码生成门面（流式）
-        String codeGenType = app.getCodeGenType();
-        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
-        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
-            try {
-                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
-            } catch (IllegalArgumentException ignored) { }
-        }
+        CodeGenTypeEnum codeGenTypeEnum = resolveCodeGenType(app.getCodeGenType());
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
 
         // 4.5 首轮判定：在写入本轮 user 消息前统计，round=0 代表首轮
@@ -96,6 +95,56 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, firstRound, message);
     }
 
+    @Override
+    public Flux<String> chatToGenCodeByWorkflow(Long appId, String message, User user) {
+        validateParams(appId, message, user);
+
+        App app = appService.getById(appId);
+        if (app == null) {
+            throw new MyException(ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        }
+        ThrowUtils.throwIf(!user.getId().equals(app.getUserId()),
+                ErrorCode.NO_AUTH_ERROR, "只能使用自己的应用生成代码");
+
+        CodeGenTypeEnum codeGenTypeEnum = resolveCodeGenType(app.getCodeGenType());
+        ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
+
+        int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
+        boolean firstRound = roundsBefore == 0;
+
+        PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
+        log.info("workflow prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
+                appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
+        chatHistoryService.addChatMessage(
+                appId,
+                message,
+                ChatHistoryMessageTypeEnum.USER.getValue(),
+                user.getId(),
+                auditResult.getAction(),
+                auditResult.getHitRule()
+        );
+        ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
+
+        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId());
+
+        Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
+                message, codeGenTypeEnum, appId, firstRound);
+
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, firstRound, message);
+    }
+
+    private CodeGenTypeEnum resolveCodeGenType(String codeGenType) {
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
+            try {
+                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
+            } catch (IllegalArgumentException ignored) {
+                // 保持和原链路一致：无法识别时交给上层统一抛错
+            }
+        }
+        return codeGenTypeEnum;
+    }
+
     /**
      * 基础参数校验：校验 appId、用户输入和用户对象
      *
@@ -116,6 +165,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
      * @param message 用户输入内容
      * @return 最终发送给 AI 的提示词
      */
+    @SuppressWarnings("unused")
     private String buildUserMessage(App app, String message) {
         String initPrompt = app.getInitPrompt();
         if (StrUtil.isBlank(initPrompt)) {

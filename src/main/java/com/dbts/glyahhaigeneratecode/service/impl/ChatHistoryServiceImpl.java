@@ -72,7 +72,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     private JdbcTemplate jdbcTemplate;
 
     private static final int MEMORY_AI_MESSAGE_MAX_LENGTH = 2400;
-    private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 900;
+    /** 超过此长度才触发摘要；略提高以减少工作流重试轮次上的额外模型调用与上下文失真 */
+    private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 2200;
     private static final int MEMORY_AI_CODE_SUMMARY_MAX_LENGTH = 500;
     private static final Pattern HTML_BLOCK_PATTERN = Pattern.compile("```html\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
     private static final Pattern CSS_BLOCK_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);

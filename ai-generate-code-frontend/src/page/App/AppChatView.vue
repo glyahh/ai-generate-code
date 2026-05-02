@@ -23,6 +23,16 @@ import {
   parseMarkdownWithCode,
   findLineAlignedClosingFenceInBuffer,
 } from '@/utils/markdownParser'
+import type { WorkflowStepRow } from '@/utils/workflowChatFilters'
+import {
+  filterAssistantSseChunkForUi,
+  flushAssistantSseCarry,
+  mergeWorkflowSteps,
+  normalizeWorkflowStepsForUi,
+  parseWorkflowStepsFromText,
+  resetSseLineAccumulator,
+  stripAssistantNoiseLines,
+} from '@/utils/workflowChatFilters'
 import {
   extractToolModifyFileNewContentBlocksFromText,
   extractToolWriteFileBlocksFromText,
@@ -34,6 +44,7 @@ import {
   formatSelectedElementForPrompt,
   type VisualSelectedElementInfo,
 } from '@/utils/visualWebsiteEditor'
+import { buildDeployUrlFromKey } from '@/utils/deployUrl'
 
 // 与全局请求保持一致：默认走当前页面 origin 下的 `/api`
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
@@ -43,12 +54,30 @@ const PREVIEW_BASE_URL =
 const route = useRoute()
 const router = useRouter()
 const userLoginStore = UserLoginStore()
+const genMode = ref<'legacy' | 'workflow'>('legacy')
 
 // 保持 id 为字符串，避免雪花算法生成的 Long ID 精度丢失
 const appId = computed(() => {
   const idStr = String(route.params.id ?? '')
   return idStr ? idStr : null
 })
+
+function syncGenMode() {
+  const queryMode = String(route.query.genMode ?? '').toLowerCase()
+  if (queryMode === 'workflow') {
+    genMode.value = 'workflow'
+  } else if (queryMode === 'legacy') {
+    genMode.value = 'legacy'
+  } else if (appId.value) {
+    const cached = window.sessionStorage.getItem(`genMode:${appId.value}`)
+    if (cached === 'workflow' || cached === 'legacy') {
+      genMode.value = cached
+    }
+  }
+  if (appId.value) {
+    window.sessionStorage.setItem(`genMode:${appId.value}`, genMode.value)
+  }
+}
 
 const appInfo = ref<AppVO | null>(null)
 const loadingApp = ref(false)
@@ -72,11 +101,20 @@ type ChatMessage = {
   content: string
   createTime?: string
   uiState?: AssistantUiState
+  /** 工作流 SSE：步骤卡片（流式中累加；历史从 content 回溯解析） */
+  workflowSteps?: WorkflowStepRow[]
+  /** 本条消息是否收到 Mermaid 失败提示标记 */
+  mermaidErrorNotice?: boolean
   /**
    * 用于将 SSE 流与具体 assistant 气泡绑定。
    * 多并发流时，禁止再用“最后一条 assistant 消息”作为流式落点。
    */
   streamId?: string
+}
+
+type ActiveStreamMeta = {
+  assistantMessageId: number
+  sseCarry: { carry: string }
 }
 
 type UiMarkdownSegment = { kind: 'markdown'; content: string }
@@ -160,7 +198,7 @@ const codeTypePromptChoiceOnce = ref<string | null>(null)
  */
 const eventSourceMap = new Map<string, EventSource>()
 const activeStreamOrder = ref<string[]>([])
-const activeStreamMeta = ref<Record<string, { assistantMessageId: number }>>({})
+const activeStreamMeta = ref<Record<string, ActiveStreamMeta>>({})
 
 const streaming = computed(() => Object.keys(activeStreamMeta.value).length > 0)
 let nextMessageId = 1
@@ -248,6 +286,7 @@ const shouldAutoScroll = ref(true)
 const showScrollToBottom = computed(() => !shouldAutoScroll.value && displayMessages.value.length > 0)
 
 const previewIframeRef = ref<HTMLIFrameElement | null>(null)
+const workflowCollapsedMap = ref<Record<string, boolean>>({})
 const visualEditMode = ref(false)
 const selectedElement = ref<VisualSelectedElementInfo | null>(null)
 const selectedElementDisplay = computed(() => {
@@ -651,6 +690,16 @@ const previewUrl = computed(() => {
   return `${base}/${codeGenType}_${appId.value}${entryPart}?v=${iframeKey.value}`
 })
 
+const isAppDeployed = computed(() => {
+  const key = appInfo.value?.deployKey
+  return key !== undefined && key !== null && String(key).trim() !== ''
+})
+
+const deployedAccessUrl = computed(() => {
+  if (!isAppDeployed.value || !appInfo.value?.deployKey) return ''
+  return buildDeployUrlFromKey(appInfo.value.deployKey, API_BASE_URL)
+})
+
 function normalizeCodeGenType(raw: unknown): string {
   const rawType = String(raw ?? '').trim()
   const lower = rawType.toLowerCase()
@@ -917,6 +966,32 @@ function flushSafeMarkdown(state: AssistantUiState, keepTail = 80) {
   const part = state.buffer.slice(0, flushLen)
   state.buffer = state.buffer.slice(flushLen)
   appendMarkdown(state, part)
+}
+
+/**
+ * 流式结束（DONE / 业务错误 / 用户停止）时把残留 buffer 落盘到对应 active 段，
+ * 让 m.uiState 与 buildUiSegmentsFromFullText 历史回放保持一致。
+ *
+ * 工具流式阶段必须把尾巴落到 active tool 段；其余情况合并进 markdown segment。
+ */
+function drainBufferToSegments(state: AssistantUiState) {
+  if (!state.buffer) return
+  if (state.stage === 'tool_exec_stream') {
+    const tool = getActiveToolExecutedSegment(state)
+    if (tool) tool.content += state.buffer
+    else appendMarkdown(state, state.buffer)
+  } else if (state.stage === 'tool_exec_modify_stream_before') {
+    const seg = getActiveToolExecutedModifyFileSegment(state)
+    if (seg) seg.beforeContent += state.buffer
+    else appendMarkdown(state, state.buffer)
+  } else if (state.stage === 'tool_exec_modify_stream_after') {
+    const seg = getActiveToolExecutedModifyFileSegment(state)
+    if (seg) seg.afterContent += state.buffer
+    else appendMarkdown(state, state.buffer)
+  } else {
+    appendMarkdown(state, state.buffer)
+  }
+  state.buffer = ''
 }
 
 function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string) {
@@ -1494,6 +1569,40 @@ function stripVisualEditModelOnlyHint(text: string): string {
   return t
 }
 
+function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
+  if (m.role !== 'assistant') return []
+  const raw = m.workflowSteps && m.workflowSteps.length > 0 ? m.workflowSteps : parseWorkflowStepsFromText(m.content ?? '')
+  return normalizeWorkflowStepsForUi(raw, {
+    historyMode: isHistoryMessage(m),
+    streaming: isStreamActiveForMessage(m),
+  })
+}
+
+function workflowMessageKey(m: ChatMessage): string {
+  return `${m.createTime ? 'h' : 's'}:${m.id}:${m.createTime ?? ''}`
+}
+
+function isHistoryMessage(m: ChatMessage): boolean {
+  return !!m.createTime && !isStreamActiveForMessage(m)
+}
+
+function isWorkflowCollapsed(m: ChatMessage): boolean {
+  if (!isHistoryMessage(m)) return false
+  const key = workflowMessageKey(m)
+  return workflowCollapsedMap.value[key] ?? true
+}
+
+function toggleWorkflowCollapsed(m: ChatMessage) {
+  const key = workflowMessageKey(m)
+  const current = workflowCollapsedMap.value[key] ?? true
+  workflowCollapsedMap.value = { ...workflowCollapsedMap.value, [key]: !current }
+}
+
+function hasMermaidNoticeForMessage(m: ChatMessage): boolean {
+  if (m.mermaidErrorNotice) return true
+  return (m.content ?? '').includes('[workflow_notice] mermaid_error')
+}
+
 function getMessageUiSegments(m: ChatMessage): UiSegment[] {
   if (m.role === 'user') {
     return [{ kind: 'markdown', content: stripVisualEditModelOnlyHint(m.content ?? '') }]
@@ -1502,14 +1611,45 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
     return [{ kind: 'markdown', content: m.content ?? '' }]
   }
   if (m.uiState) {
-    // 对流式消息：把残留 buffer 也当作 markdown（只做展示，不清空 buffer，避免影响后续解析）
+    // 流式 buffer 必须与最后一个 markdown segment 合并展示，否则
+    // `flushSafeMarkdown` 在字符位置切分时会把开围栏 ```html``` 留在 segment[0]、
+    // 把代码尾巴留在 buffer 这个独立 segment 中，导致 `parseMarkdownWithCode`
+    // 对 buffer 那一段看不到开围栏，把代码当成普通文本渲染（白底溢出）。
     const segs = m.uiState.segments.slice()
-    if (m.uiState.buffer && m.uiState.buffer.trim()) {
-      segs.push({ kind: 'markdown', content: m.uiState.buffer })
+    const buf = m.uiState.buffer ?? ''
+    if (buf) {
+      // 工具流式阶段：buffer 是正在持续 flush 进 active tool 段的代码尾巴，
+      // 不能再把它在 tool 卡片之外作为 markdown 展示，否则会形成卡片外的小尾巴泄漏
+      const stage = m.uiState.stage
+      const inToolStreamStage =
+        stage === 'tool_exec_stream' ||
+        stage === 'tool_exec_modify_stream_before' ||
+        stage === 'tool_exec_modify_stream_after'
+
+      if (!inToolStreamStage) {
+        const last = segs[segs.length - 1]
+        if (last && last.kind === 'markdown') {
+          // 浅拷贝替换，避免污染 m.uiState.segments 内的对象引用
+          segs[segs.length - 1] = { kind: 'markdown', content: last.content + buf }
+        } else if (buf.trim()) {
+          segs.push({ kind: 'markdown', content: buf })
+        }
+      }
     }
     return segs
   }
-  return buildUiSegmentsFromFullText(m.content ?? '')
+  return buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
+}
+
+function assistantHasRenderableOutput(m: ChatMessage): boolean {
+  if (m.role !== 'assistant') return true
+  if (getWorkflowStepsForMessage(m).length > 0) return true
+  const segs = getMessageUiSegments(m)
+  for (const s of segs) {
+    if (s.kind !== 'markdown') return true
+    if ((s.content ?? '').trim().length > 0) return true
+  }
+  return false
 }
 
 function rebuildGeneratedFilesFromHistory() {
@@ -1554,9 +1694,48 @@ async function copyToClipboard(text: string) {
   }
 }
 
+function handleCopyDeployUrl() {
+  const url = deployedAccessUrl.value
+  if (!url) {
+    message.warning('当前应用尚未部署')
+    return
+  }
+  void copyToClipboard(url)
+}
+
+function handleVisitDeployUrl() {
+  const url = deployedAccessUrl.value
+  if (!url) return
+  if (!/^https?:\/\//i.test(url)) {
+    message.error('部署地址格式异常，请复制地址后手动检查')
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 function stopStream(streamId?: string) {
   // stop a single stream
   if (streamId) {
+    // 关闭连接前先把该流对应消息的残留 buffer 排空到 active 段，
+    // 保证 [DONE]/business-error/用户停止 三种结束路径都落盘一致。
+    const meta = activeStreamMeta.value[streamId]
+    if (meta) {
+      const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
+      if (msg?.uiState && meta.sseCarry) {
+        const { uiText, newSteps, mermaidErrorNotice } = flushAssistantSseCarry(meta.sseCarry)
+        if (newSteps.length) {
+          msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, newSteps)
+        }
+        if (mermaidErrorNotice) {
+          msg.mermaidErrorNotice = true
+        }
+        if (uiText) {
+          processAssistantChunkIntoUiState(msg.uiState, uiText)
+        }
+        resetSseLineAccumulator(meta.sseCarry)
+      }
+      if (msg?.uiState) drainBufferToSegments(msg.uiState)
+    }
     const es = eventSourceMap.get(streamId)
     if (es) {
       try {
@@ -1575,7 +1754,27 @@ function stopStream(streamId?: string) {
       activeStreamOrder.value = activeStreamOrder.value.filter((id) => id !== streamId)
     }
   } else {
-    // stop all streams
+    // stop all streams：对每条 active 流都先 drain buffer 再关闭 EventSource
+    for (const sid of Object.keys(activeStreamMeta.value)) {
+      const meta = activeStreamMeta.value[sid]
+      if (meta) {
+        const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
+        if (msg?.uiState && meta.sseCarry) {
+          const { uiText, newSteps, mermaidErrorNotice } = flushAssistantSseCarry(meta.sseCarry)
+          if (newSteps.length) {
+            msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, newSteps)
+          }
+          if (mermaidErrorNotice) {
+            msg.mermaidErrorNotice = true
+          }
+          if (uiText) {
+            processAssistantChunkIntoUiState(msg.uiState, uiText)
+          }
+          resetSseLineAccumulator(meta.sseCarry)
+        }
+        if (msg?.uiState) drainBufferToSegments(msg.uiState)
+      }
+    }
     for (const [, es] of eventSourceMap.entries()) {
       try {
         es.close()
@@ -1615,9 +1814,22 @@ function appendAssistantChunkToStream(streamId: string, chunk: string) {
   const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
   if (!msg || msg.role !== 'assistant') return
 
+  if (!meta.sseCarry) {
+    meta.sseCarry = { carry: '' }
+  }
+  const { uiText, newSteps, mermaidErrorNotice } = filterAssistantSseChunkForUi(meta.sseCarry, chunk)
+  if (newSteps.length) {
+    msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, newSteps)
+  }
+  if (mermaidErrorNotice) {
+    msg.mermaidErrorNotice = true
+  }
+
   msg.content += chunk
   if (!msg.uiState) msg.uiState = createAssistantUiState()
-  processAssistantChunkIntoUiState(msg.uiState, chunk)
+  if (uiText) {
+    processAssistantChunkIntoUiState(msg.uiState, uiText)
+  }
   nextTick(() => {
     if (shouldAutoScroll.value) scrollToBottom()
   })
@@ -1682,10 +1894,12 @@ async function sendMessage(text?: string) {
     content: '',
     uiState: createAssistantUiState(),
     streamId,
+    // workflow 模式下先放入“初始化”占位步骤，避免首个工作流卡片延迟到首条 [workflow] SSE 后才出现。
+    workflowSteps: genMode.value === 'workflow' ? [{ step: 1, label: '初始化' }] : [],
   })
   activeStreamMeta.value = {
     ...activeStreamMeta.value,
-    [streamId]: { assistantMessageId },
+    [streamId]: { assistantMessageId, sseCarry: { carry: '' } },
   }
   activeStreamOrder.value = [...activeStreamOrder.value, streamId]
 
@@ -1707,7 +1921,8 @@ async function sendMessage(text?: string) {
       message: prompt,
     })
     const apiBase = API_BASE_URL.replace(/\/$/, '')
-    const url = `${apiBase}/chat/gen/code?${query.toString()}`
+    const endpoint = genMode.value === 'workflow' ? '/chat/gen/workflow' : '/chat/gen/code'
+    const url = `${apiBase}${endpoint}?${query.toString()}`
 
     const es = new EventSource(url, { withCredentials: true })
     eventSourceMap.set(streamId, es)
@@ -1757,8 +1972,7 @@ async function sendMessage(text?: string) {
           processAssistantChunkIntoUiState(msg.uiState, `\n\n❌ ${errorText}`)
         }
         message.error(errorText)
-      } catch (e) {
-        console.error('解析 business-error 事件失败:', e, '原始数据:', event.data)
+      } catch {
         const fallback = '生成过程中出现错误'
         if (msg && msg.role === 'assistant') {
           msg.content += msg.content ? `\n\n❌ ${fallback}` : `❌ ${fallback}`
@@ -1775,8 +1989,7 @@ async function sendMessage(text?: string) {
       stopStream(streamId)
       message.error('生成过程中出现错误，已结束本次对话')
     }
-  } catch (e) {
-    console.error(e)
+  } catch {
     stopStream(streamId)
     message.error('无法建立对话连接，请稍后重试')
   } finally {
@@ -1854,8 +2067,7 @@ async function loadChatHistory(lastCreateTime?: string) {
       const loaded = loadedHistoryRecords.value.length
       hasMoreHistory.value = loaded < totalRow
     }
-  } catch (e) {
-    console.error(e)
+  } catch {
     if (!isLoadMore) {
       message.error('加载对话历史失败')
     } else {
@@ -1945,8 +2157,7 @@ async function loadAppInfo() {
     } else {
       message.error(res.data.message || '获取应用信息失败')
     }
-  } catch (e) {
-    console.error(e)
+  } catch {
     message.error('获取应用信息失败，请稍后重试')
   } finally {
     loadingApp.value = false
@@ -1959,6 +2170,7 @@ function goEdit() {
 }
 
 onMounted(() => {
+  syncGenMode()
   void loadAppInfo()
   // 首次进入页面先做一次清理，避免历史会话遗留覆盖层影响当前预览滚动。
   cleanupVisualEditorArtifacts()
@@ -2119,7 +2331,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="bubble-content">
                     <template
-                      v-if="m.role === 'assistant' && isStreamActiveForMessage(m) && !m.content">
+                      v-if="m.role === 'assistant' && isStreamActiveForMessage(m) && !assistantHasRenderableOutput(m)">
                       <div class="typing-indicator">
                         <span class="typing-dot" />
                         <span class="typing-dot" />
@@ -2127,7 +2339,46 @@ onBeforeUnmount(() => {
                         <span class="typing-text">应用助手思考中…</span>
                       </div>
                     </template>
-                    <template v-else v-for="(segment, idx) in getMessageUiSegments(m)" :key="idx">
+                    <template v-else>
+                      <div
+                        v-if="m.role === 'assistant' && getWorkflowStepsForMessage(m).length > 0"
+                        class="workflow-steps-shell"
+                        :class="{ 'workflow-steps-shell--collapsed': isWorkflowCollapsed(m) }"
+                      >
+                        <button
+                          v-if="isHistoryMessage(m)"
+                          type="button"
+                          class="workflow-toggle-btn"
+                          @click="toggleWorkflowCollapsed(m)"
+                          :title="isWorkflowCollapsed(m) ? '展开工作流' : '收起工作流'"
+                        >
+                          {{ isWorkflowCollapsed(m) ? '>' : '<' }}
+                        </button>
+                        <div class="workflow-steps-card">
+                          <div class="workflow-steps-title-row">
+                            <div class="workflow-steps-title">工作流进度</div>
+                            <div v-if="hasMermaidNoticeForMessage(m)" class="workflow-mermaid-notice">
+                              Mermaid构造异常（不影响生成）
+                            </div>
+                          </div>
+                          <div class="workflow-steps-list">
+                          <div
+                            v-for="row in getWorkflowStepsForMessage(m)"
+                            :key="row.step"
+                            class="workflow-step-card"
+                            :class="{
+                              'workflow-step-card--latest':
+                                row.step === getWorkflowStepsForMessage(m)[getWorkflowStepsForMessage(m).length - 1]?.step &&
+                                isStreamActiveForMessage(m),
+                            }"
+                          >
+                            <span class="workflow-step-badge">{{ row.step }}</span>
+                            <span class="workflow-step-label">{{ row.label }}</span>
+                          </div>
+                          </div>
+                        </div>
+                      </div>
+                      <template v-for="(segment, idx) in getMessageUiSegments(m)" :key="idx">
                       <!-- TOOL_REQUEST：选择工具卡片（一次性） -->
                       <div v-if="segment.kind === 'tool_request'" class="tool-hint-pill">
                         <span class="tool-hint-label">选择工具</span>
@@ -2224,6 +2475,7 @@ onBeforeUnmount(() => {
                             v-if="mdSeg.type === 'code'"
                             :code="mdSeg.content"
                             :language="mdSeg.language"
+                            :file-label="mdSeg.fileLabel"
                             :is-streaming="isStreamActiveForMessage(m)"
                           />
                           <!-- 证据：隐藏流式 markdown 会导致“生成计划/生成完毕”等说明文本在生成时不可见。
@@ -2232,6 +2484,7 @@ onBeforeUnmount(() => {
                             {{ mdSeg.content }}
                           </span>
                         </template>
+                      </template>
                       </template>
                     </template>
                   </div>
@@ -2304,6 +2557,24 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="preview-header-right">
+            <div v-if="isAppDeployed" class="deploy-url-pill">
+              <span class="deploy-url-label">部署的访问网址</span>
+              <ATooltip :title="deployedAccessUrl">
+                <AInput
+                  readonly
+                  size="small"
+                  class="deploy-url-input"
+                  :value="deployedAccessUrl"
+                />
+              </ATooltip>
+              <a-button size="small" class="ghost-btn" @click="handleCopyDeployUrl">
+                复制
+              </a-button>
+              <a-button size="small" class="ghost-btn" type="primary" @click="handleVisitDeployUrl">
+                访问
+              </a-button>
+            </div>
+
             <ATooltip
               v-if="shouldShowWebsite"
               :title="refreshAppCtaVisible ? refreshAppCtaHint : '强制重新加载预览 iframe，避免浏览器缓存导致仍显示旧页面'"
@@ -2757,6 +3028,125 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
+.workflow-steps-shell {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.workflow-toggle-btn {
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  border-radius: 10px;
+  width: 24px;
+  min-width: 24px;
+  background: #f0f9ff;
+  color: #0c4a6e;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.workflow-steps-card {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  background:
+    radial-gradient(circle at 0 0, rgba(224, 242, 254, 0.9), transparent 55%),
+    #f8fafc;
+}
+
+.workflow-steps-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.workflow-steps-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0c4a6e;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workflow-mermaid-notice {
+  font-size: 11px;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.workflow-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workflow-step-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.45;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.workflow-step-card--latest .workflow-step-label {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.workflow-step-card--latest .workflow-step-badge {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #f8fafc;
+  animation: workflowPulse 1.2s ease-in-out infinite;
+}
+
+.workflow-steps-shell--collapsed .workflow-steps-card {
+  max-height: 54px;
+  overflow: hidden;
+}
+
+.workflow-step-badge {
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.workflow-step-label {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes workflowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0);
+  }
+}
+
 .typing-indicator {
   display: inline-flex;
   align-items: center;
@@ -2906,8 +3296,44 @@ onBeforeUnmount(() => {
 }
 
 .preview-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   padding-top: 2px;
+}
+
+.deploy-url-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 0 0, rgba(34, 197, 94, 0.18), transparent 55%),
+    rgba(255, 255, 255, 0.85);
+  box-shadow:
+    inset 0 0 0 1px rgba(13, 148, 136, 0.32),
+    0 4px 10px rgba(15, 23, 42, 0.06);
+}
+
+.deploy-url-label {
+  font-size: 11px;
+  color: #0f172a;
+  opacity: 0.72;
+  white-space: nowrap;
+}
+
+.deploy-url-input {
+  width: 220px;
+  max-width: 28vw;
+}
+
+.deploy-url-input :deep(.ant-input) {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .preview-title {
@@ -3119,6 +3545,11 @@ onBeforeUnmount(() => {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .deploy-url-input {
+    width: 160px;
+    max-width: 40vw;
   }
 }
 </style>

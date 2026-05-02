@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class MermaidDiagramTool {
 
+    public static final String MERMAID_ERROR_MARKER = "__MERMAID_ERROR__";
+
     @Resource
     private OssManager ossManager;
     
@@ -55,8 +57,24 @@ public class MermaidDiagramTool {
             log.warn("Mermaid SVG 已生成但 OSS 上传未返回 URL: keyName={}", keyName);
         } catch (Exception e) {
             log.error("生成架构图失败: {}", e.getMessage(), e);
+            return Collections.singletonList(buildMermaidErrorMarker(description));
         }
         return new ArrayList<>();
+    }
+
+    public static boolean isMermaidErrorMarker(ImageResource image) {
+        if (image == null) {
+            return false;
+        }
+        return MERMAID_ERROR_MARKER.equals(image.getDescription());
+    }
+
+    private ImageResource buildMermaidErrorMarker(String description) {
+        return ImageResource.builder()
+                .category(ImageCategoryEnum.ARCHITECTURE)
+                .description(MERMAID_ERROR_MARKER)
+                .url(description == null ? "" : description)
+                .build();
     }
 
     /**

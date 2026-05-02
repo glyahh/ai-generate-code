@@ -5,6 +5,8 @@ interface Props {
   code: string
   language?: string
   isStreaming?: boolean // 是否正在流式输出中
+  /** 多文件工作流：对应后端 `### 文件名` 的展示名 */
+  fileLabel?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -40,6 +42,21 @@ function withStashedTokens(
   }
 }
 
+function withStashedHighlightedSpans(
+  source: string,
+): { text: string; restore: (s: string) => string } {
+  const stash: string[] = []
+  const text = source.replace(/<span class="code-[^"]+">[\s\S]*?<\/span>/g, (m) => {
+    const id = stash.length
+    stash.push(m)
+    return `__SPAN_${id}__`
+  })
+  return {
+    text,
+    restore: (s: string) => s.replace(/__SPAN_(\d+)__/g, (_, i) => stash[Number(i)] ?? ''),
+  }
+}
+
 function highlightJsLike(raw: string): string {
   const escaped = escapeHtml(raw)
   const { text, restore } = withStashedTokens(escaped, [
@@ -48,16 +65,21 @@ function highlightJsLike(raw: string): string {
     { re: /(["'`])(?:\\.|(?!\1)[\s\S])*?\1/g, className: 'code-string' },
   ])
 
-  const highlighted = text
+  const highlightedPrimary = text
     .replace(
       /\b(const|let|var|function|return|if|else|switch|case|break|default|for|while|do|continue|import|from|export|class|extends|new|this|async|await|try|catch|finally|throw|typeof|instanceof|in|of|static|get|set|super|null|undefined|true|false)\b/g,
       '<span class="code-keyword">$1</span>',
     )
     .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="code-number">$1</span>')
+
+  // 先保护已插入的高亮 span，再做后续替换，避免把 <span ...> 标签本身二次改写。
+  const { text: safeText, restore: restoreSpans } = withStashedHighlightedSpans(highlightedPrimary)
+
+  const highlightedFinal = safeText
     .replace(/([=+\-*/%<>!&|^~?:]+)/g, '<span class="code-operator">$1</span>')
     .replace(/\b([A-Za-z_$][\w$]*)(?=\s*\()/g, '<span class="code-function">$1</span>')
 
-  return restore(highlighted)
+  return restore(restoreSpans(highlightedFinal))
 }
 
 function highlightCss(raw: string): string {
@@ -130,10 +152,8 @@ const highlightedCode = computed(() => {
 async function copyCode() {
   try {
     await navigator.clipboard.writeText(props.code)
-    // 可以添加一个提示消息
-    console.log('代码已复制到剪贴板')
-  } catch (err) {
-    console.error('复制失败:', err)
+  } catch {
+    // 剪贴板权限等由调用方处理
   }
 }
 
@@ -151,7 +171,10 @@ function scrollToBottom() {
 <template>
   <div class="code-block-container">
     <div class="code-block-header">
-      <span class="code-language">{{ language || 'text' }}</span>
+      <div class="code-block-header-left">
+        <span v-if="fileLabel" class="code-file-label">{{ fileLabel }}</span>
+        <span class="code-language">{{ language || 'text' }}</span>
+      </div>
       <button class="copy-button" @click="copyCode" title="复制代码">
         📋
       </button>
@@ -189,6 +212,24 @@ function scrollToBottom() {
   padding: 8px 12px;
   background: #2d2d2d;
   border-bottom: 1px solid #3e3e3e;
+}
+
+.code-block-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.code-file-label {
+  font-size: 12px;
+  color: #c8c8c8;
+  font-weight: 600;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42vw;
 }
 
 .code-language {

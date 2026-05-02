@@ -14,6 +14,7 @@ import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.bsc.langgraph4j.prebuilt.MessagesStateGraph;
 
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.bsc.langgraph4j.GraphDefinition.END;
 import static org.bsc.langgraph4j.GraphDefinition.START;
@@ -79,6 +80,9 @@ public class CodeGenWorkflow {
 
         if (ctx.getQualityResult() != null && Boolean.FALSE.equals(ctx.getQualityResult().getIsValid())) {
             log.info("代码质检未通过，重新执行 code_generator");
+            // retry 场景：下一轮 code_generator 不应再按“首轮”限制工具集（writeFile-only）。
+            // 直接修改 state 中的 ctx（可变引用）即可被后续节点读取。
+            ctx.setFirstRound(false);
             return "retry";
         }
 
@@ -95,13 +99,39 @@ public class CodeGenWorkflow {
      * 执行工作流
      */
     public WorkflowContext executeWorkflow (String originalPrompt, CodeGenTypeEnum codeGenTypeEnum) {
+        // 兼容旧调用语义：历史上 Vue 首次进入 code_generator 时走 firstRound=true。
+        return executeWorkflow(originalPrompt, codeGenTypeEnum, null, codeGenTypeEnum == CodeGenTypeEnum.VUE, null);
+    }
+
+    /**
+     * 执行工作流（支持透传 appId 与首轮标记，便于复用现有生成链路）
+     */
+    public WorkflowContext executeWorkflow(String originalPrompt,
+                                           CodeGenTypeEnum codeGenTypeEnum,
+                                           Long appId,
+                                           boolean firstRound) {
+        return executeWorkflow(originalPrompt, codeGenTypeEnum, appId, firstRound, null);
+    }
+
+    /**
+     * 执行工作流，并在每步完成后可选推送一行进度文本（供 workflow SSE 使用）。
+     *
+     * @param progressConsumer 非空时推送 {@code [workflow] 第 n 步完成：…}，其中标签取自 {@link WorkflowContext#getCurrentStep()}
+     */
+    public WorkflowContext executeWorkflow(String originalPrompt,
+                                           CodeGenTypeEnum codeGenTypeEnum,
+                                           Long appId,
+                                           boolean firstRound,
+                                           Consumer<String> progressConsumer) {
         CompiledGraph<MessagesState<String>> workflow = createWorkflow();
 
         // 初始化 WorkflowContext
+        Long effectiveAppId = (appId == null || appId <= 0) ? System.currentTimeMillis() : appId;
         WorkflowContext initialContext = WorkflowContext.builder()
                 .originalPrompt(originalPrompt)
                 .generationType(codeGenTypeEnum)
-                .appId(System.currentTimeMillis())
+                .appId(effectiveAppId)
+                .firstRound(firstRound)
                 .currentStep("初始化")
                 .build();
 
@@ -123,6 +153,16 @@ public class CodeGenWorkflow {
             if (currentContext != null) {
                 finalContext = currentContext;
                 log.info("当前步骤上下文: {}", currentContext);
+                if (progressConsumer != null) {
+                    String label = currentContext.getCurrentStep() != null
+                            ? currentContext.getCurrentStep()
+                            : "—";
+                    try {
+                        progressConsumer.accept("[workflow] 第 " + stepCounter + " 步完成：" + label);
+                    } catch (Exception e) {
+                        log.debug("workflow 进度回调异常（可忽略）: {}", e.getMessage());
+                    }
+                }
             }
             stepCounter++;
         }

@@ -27,6 +27,7 @@ public class ImageCollectorNode {
             WorkflowContext context = WorkflowContext.getContext(state);
             String originalPrompt = context.getOriginalPrompt();
             List<ImageResource> collectedImages = new ArrayList<>();
+            boolean mermaidError = false;
 
             try {
                 // 第一步：获取图片收集计划
@@ -84,6 +85,10 @@ public class ImageCollectorNode {
                     List<ImageResource> images = future.get();
                     if (images != null) {
                         for (ImageResource image : images) {
+                            if (MermaidDiagramTool.isMermaidErrorMarker(image)) {
+                                mermaidError = true;
+                                continue;
+                            }
                             if (collectedImages.size() >= maxImages) {
                                 break;
                             }
@@ -98,6 +103,9 @@ public class ImageCollectorNode {
             // 更新状态
             context.setCurrentStep("图片收集");
             context.setImageList(collectedImages);
+            if (mermaidError) {
+                context.setMermaidError(Boolean.TRUE);
+            }
             return WorkflowContext.saveContext(context);
         });
     }

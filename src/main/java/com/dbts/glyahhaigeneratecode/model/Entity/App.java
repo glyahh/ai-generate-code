@@ -106,4 +106,10 @@ public class App implements Serializable {
     @Column(value = "isDelete", isLogicDelete = true)
     private Integer isDelete;
 
+    /**
+     * 是否 beta 应用：0-否，1-是（workflow beta）
+     */
+    @Column("is_beta")
+    private Integer isBeta;
+
 }

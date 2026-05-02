@@ -22,6 +22,7 @@ import {
 } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
+import { normalizeDeployUrl } from '@/utils/deployUrl'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -31,6 +32,9 @@ const creating = ref(false)
 
 const codeTypePickerOpen = ref(false)
 const selectedCodeType = ref<string>(CodeGenTypeEnum.MULTI_FILE)
+const workflowBetaEnabled = ref(false)
+const workflowBetaTooltip = '该功能处于测试状态，可能不稳定'
+const workflowAdvantageTips = ['逻辑更严谨', '图片更贴切', '代码质量检测']
 
 const CODE_TYPE_CHOICES: Array<{
   label: string
@@ -64,7 +68,6 @@ const selectedCodeTypeLabel = computed(
 
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
-const DEPLOY_FALLBACK_PORT = String(import.meta.env.VITE_DEPLOY_FALLBACK_PORT ?? '8124')
 
 /**
  * 判断接口响应是否成功。
@@ -84,29 +87,6 @@ function isAppDeployed(app: AppVO | undefined): boolean {
   // 注意：deployedTime 在部分后端实现里可能作为“历史部署时间”保留，或由于 null 更新策略未落库，
   // 导致下线后刷新列表仍然带着旧的 deployedTime。为了避免首页误显示“已部署”，这里只以 deployKey 为准。
   return key !== undefined && key !== null && String(key).trim() !== ''
-}
-
-function normalizeDeployUrl(rawUrl: unknown): string {
-  // debug 证据：后端返回的 deploy url 在本地开发场景可能缺少协议或端口，直接 window.open 会失败。
-  const raw = String(rawUrl ?? '').trim()
-  if (!raw) return ''
-  try {
-    // 允许后端返回完整 URL；同时统一补齐 localhost 缺省端口，避免命中 :80 导致打不开。
-    const abs = raw.startsWith('http://') || raw.startsWith('https://')
-      ? new URL(raw)
-      : new URL(raw.startsWith('//') ? `${window.location.protocol}${raw}` : `http://${raw}`)
-    if (abs.hostname === 'localhost' && !abs.port) {
-      abs.port = DEPLOY_FALLBACK_PORT
-    }
-    return abs.toString()
-  } catch {
-    // 若返回的是相对路径（例如 /xxx/），按当前站点补全，至少保证“一键访问”是可打开的 URL。
-    try {
-      return new URL(raw, window.location.origin).toString()
-    } catch {
-      return raw
-    }
-  }
 }
 
 const DEFAULT_BG_OBJECT_KEY = '/default/myAppBackground/appBackground.png'
@@ -274,6 +254,7 @@ async function handleCreateApp() {
         appName: buildAppNameFromPrompt(content),
         initPrompt: content,
         codeGenType: selectedCodeType.value,
+        isBeta: workflowBetaEnabled.value ? 1 : 0,
       },
     })
     if (isSuccess(res.data.code) && res.data.data) {
@@ -285,6 +266,7 @@ async function handleCreateApp() {
         params: { id: appId },
         query: {
           autoSend: 'true',
+          genMode: workflowBetaEnabled.value ? 'workflow' : 'legacy',
           // 兼容参数：当前约束由后端按 app.codeGenType 控制
           codeTypeChoice: selectedCodeTypeLabel.value,
         },
@@ -585,6 +567,38 @@ onMounted(() => {
                 支持自然语言描述，越具体效果越好
               </div>
               <div class="prompt-actions">
+                <ATooltip placement="top">
+                  <template #title>
+                    <div class="workflow-help-tooltip">
+                      <div
+                        v-for="tip in workflowAdvantageTips"
+                        :key="tip"
+                        class="workflow-help-tooltip-item"
+                      >
+                        {{ tip }}
+                      </div>
+                    </div>
+                  </template>
+                  <button
+                    type="button"
+                    class="workflow-help-btn"
+                    aria-label="工作流生成优势说明"
+                  >
+                    ?
+                  </button>
+                </ATooltip>
+                <ATooltip :title="workflowBetaTooltip" placement="top">
+                  <button
+                    type="button"
+                    class="workflow-beta-btn"
+                    :class="{ 'workflow-beta-btn--active': workflowBetaEnabled }"
+                    @click="workflowBetaEnabled = !workflowBetaEnabled"
+                  >
+                    <span class="workflow-beta-btn-icon" aria-hidden="true" />
+                    <span class="workflow-beta-btn-text">工作流生成</span>
+                    <span class="workflow-beta-btn-badge">beta</span>
+                  </button>
+                </ATooltip>
                 <div class="code-type-picker-wrap">
                   <button
                     type="button"
@@ -937,6 +951,124 @@ onMounted(() => {
 .prompt-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.workflow-help-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(15, 23, 42, 0.72);
+  cursor: help;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    transform 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    border-color 0.16s ease-out;
+}
+
+.workflow-help-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+}
+
+.workflow-help-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workflow-help-tooltip-item::before {
+  content: '• ';
+}
+
+.workflow-beta-btn {
+  height: 36px;
+  border-radius: 999px;
+  padding: 0 10px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.68);
+  color: #0f172a;
+  cursor: pointer;
+  transition:
+    transform 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    border-color 0.16s ease-out,
+    background 0.16s ease-out;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.workflow-beta-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+}
+
+.workflow-beta-btn-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  position: relative;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.58), rgba(100, 116, 139, 0.46));
+  flex: 0 0 18px;
+}
+
+.workflow-beta-btn-icon::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid rgba(255, 255, 255, 0.94);
+}
+
+.workflow-beta-btn-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workflow-beta-btn-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #475569;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.workflow-beta-btn--active {
+  border-color: rgba(59, 130, 246, 0.48);
+  background:
+    radial-gradient(circle at 0 0, rgba(129, 140, 248, 0.28), transparent 55%),
+    linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(45, 212, 191, 0.2), rgba(129, 140, 248, 0.18)),
+    rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 16px 34px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(59, 130, 246, 0.22);
+}
+
+.workflow-beta-btn--active .workflow-beta-btn-icon {
+  background: linear-gradient(135deg, #38bdf8, #818cf8, #2dd4bf);
+}
+
+.workflow-beta-btn--active .workflow-beta-btn-badge {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.2);
 }
 
 .code-type-picker-wrap {

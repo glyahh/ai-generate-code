@@ -61,9 +61,9 @@ langchain4j:
 
     # 普通流式输出模型
     streaming-chat-model:       # 使用的模型名称，例如 qwen3.5-plus
-      model-name: ${langchain4j.open-ai.chat-model.model-name}
+      model-name: qwen3-coder-next
       # Qwen3.5-Plus 的兼容模式地址，以阿里云百炼为例
-      base-url: kimi-k2.5
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       # 你的 Qwen API Key
       api-key: ${langchain4j.open-ai.chat-model.api-key}
       # 开启详细的请求和回答日志记录
@@ -89,6 +89,16 @@ langchain4j:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${langchain4j.open-ai.chat-model.api-key}
       model-name: qwen3.6-flash-2026-04-16
+      log-requests: true
+      log-responses: true
+
+    # 工作流代码质检（结构化 JSON、短输出；与主 chat-model 分离以降低延迟与费用）
+    code-exam-chat-model:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${langchain4j.open-ai.chat-model.api-key}
+      model-name: qwen3.5-flash
+      max-tokens: 2048
+      temperature: 0.1
       log-requests: true
       log-responses: true
 
