@@ -11,6 +11,7 @@ import org.bsc.langgraph4j.prebuilt.MessagesState;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.function.Consumer;
 
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
@@ -18,6 +19,10 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 public class CodeGeneratorNode {
 
     public static AsyncNodeAction<MessagesState<String>> create() {
+        return create(null);
+    }
+
+    public static AsyncNodeAction<MessagesState<String>> create(Consumer<String> streamChunkConsumer) {
         return node_async(state -> {
             WorkflowContext context = WorkflowContext.getContext(state);
             log.info("执行节点: 代码生成");
@@ -28,18 +33,30 @@ public class CodeGeneratorNode {
             // 获取 AI 代码生成外观服务
             AiCodeGeneratorFacade codeGeneratorFacade = SpringContextUtil.getBean(AiCodeGeneratorFacade.class);
             log.info("开始生成代码，类型: {} ({})", generationType.getValue(), generationType.getText());
+
             Long appId = context.getAppId();
             if (appId == null || appId <= 0) {
                 appId = System.currentTimeMillis();
                 context.setAppId(appId);
             }
-            // 与旧逻辑保持一致：仅“首轮且尚未产出目录”时限制工具权限。
+
+            // Keep legacy behavior: only first round without generated dir is writeFile-only.
             boolean firstRound = Boolean.TRUE.equals(context.getFirstRound()) && context.getGeneratedCodeDir() == null;
             // 调用流式代码生成
             Flux<String> codeStream = codeGeneratorFacade.generateAndSaveCodeStream(userMessage, generationType, appId, firstRound);
-            // 同步等待流式输出完成
-            codeStream.blockLast(Duration.ofMinutes(10)); // 最多等待 10 分钟
-            // 根据类型设置生成目录
+
+            if (generationType == CodeGenTypeEnum.VUE && streamChunkConsumer != null) {
+                codeStream = codeStream.doOnNext(chunk -> {
+                    try {
+                        streamChunkConsumer.accept(chunk);
+                    } catch (Exception e) {
+                        log.debug("workflow code stream callback failed: {}", e.getMessage());
+                    }
+                });
+            }
+
+            codeStream.blockLast(Duration.ofMinutes(10));
+
             String generatedCodeDir = generationType == CodeGenTypeEnum.VUE
                     ? String.format("%s/%s_project_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, generationType.getValue(), appId)
                     : String.format("%s/%s_%s", AppConstant.CODE_OUTPUT_ROOT_DIR, generationType.getValue(), appId);

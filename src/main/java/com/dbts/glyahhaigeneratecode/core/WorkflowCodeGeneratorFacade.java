@@ -1,18 +1,33 @@
 package com.dbts.glyahhaigeneratecode.core;
 
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.CodeGenWorkflow;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.state.WorkflowContext;
+import com.dbts.glyahhaigeneratecode.ai.model.message.AiResponseMessage;
+import com.dbts.glyahhaigeneratecode.ai.model.message.StreamMessage;
+import com.dbts.glyahhaigeneratecode.ai.model.message.StreamMessageTypeEnum;
+import com.dbts.glyahhaigeneratecode.ai.model.message.ToolExecutedMessage;
+import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
+import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
+import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * Workflow 代码生成门面。
@@ -21,6 +36,15 @@ import java.util.function.Consumer;
 @Service
 @Slf4j
 public class WorkflowCodeGeneratorFacade {
+
+    private static final Set<String> VUE_ECHO_IGNORED_DIR_NAMES = Set.of(
+            "node_modules", "dist", "build", ".git", ".idea", ".vscode", "coverage", "target", ".mvn"
+    );
+
+    private static final long VUE_ECHO_MAX_FILE_BYTES = 512L * 1024L;
+
+    @Resource
+    private ToolManager toolManager;
 
     public Flux<String> generateAndSaveCodeStream(String userMessage,
                                                   CodeGenTypeEnum codeGenTypeEnum,
@@ -36,11 +60,28 @@ public class WorkflowCodeGeneratorFacade {
                             String normalized = normalizeWorkflowLine(msg);
                             sink.next(normalized);
                         } catch (Exception ignored) {
-                            // 下游已取消等场景：不再向外推
+                            // downstream closed
                         }
                     };
+                    Consumer<String> codeStreamChunkConsumer = rawChunk -> {
+                        try {
+                            String adapted = adaptWorkflowCodeChunk(rawChunk);
+                            if (adapted != null && !adapted.isEmpty()) {
+                                sink.next(adapted);
+                            }
+                        } catch (Exception e) {
+                            log.debug("workflow realtime chunk adapter failed: {}", e.getMessage());
+                        }
+                    };
+
                     WorkflowContext finalContext = workflow.executeWorkflow(
-                            userMessage, codeGenTypeEnum, appId, firstRound, progress);
+                            userMessage,
+                            codeGenTypeEnum,
+                            appId,
+                            firstRound,
+                            progress,
+                            codeStreamChunkConsumer);
+
                     if (finalContext == null) {
                         sink.next("[workflow] 未获取到有效结果，请重试。\n");
                         sink.complete();
@@ -52,8 +93,7 @@ public class WorkflowCodeGeneratorFacade {
                         // 对非 Vue 的 HTML / multi_file 场景，workflow 内部会把文件落到 generatedCodeDir。
                         // 为了贴近原 AI 流式体验（以及让 StreamHandlerExecutor 能把“代码内容”写入会话记忆），这里读取落盘文件并回显到 SSE。
                         String generatedDir = finalContext.getGeneratedCodeDir();
-                        if (generatedDir != null && !generatedDir.isBlank()
-                                && (codeGenTypeEnum == CodeGenTypeEnum.HTML || codeGenTypeEnum == CodeGenTypeEnum.MULTI_FILE)) {
+                        if (generatedDir != null && !generatedDir.isBlank()) {
                             emitGeneratedCodeIfPresent(sink, codeGenTypeEnum, generatedDir);
                         }
                         if (Boolean.TRUE.equals(finalContext.getMermaidError())) {
@@ -83,6 +123,76 @@ public class WorkflowCodeGeneratorFacade {
         return msg.endsWith("\n") ? msg : msg + "\n";
     }
 
+    private String adaptWorkflowCodeChunk(String rawChunk) {
+        if (rawChunk == null || rawChunk.isBlank()) {
+            return "";
+        }
+
+        StreamMessage streamMessage;
+        try {
+            streamMessage = JSONUtil.toBean(rawChunk, StreamMessage.class);
+        } catch (Exception e) {
+            // Non-JSON chunk fallback.
+            return rawChunk;
+        }
+
+        StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
+        if (typeEnum == null) {
+            return rawChunk;
+        }
+
+        return switch (typeEnum) {
+            case AI_RESPONSE -> {
+                AiResponseMessage aiMessage = JSONUtil.toBean(rawChunk, AiResponseMessage.class);
+                yield aiMessage.getData() == null ? "" : aiMessage.getData();
+            }
+            case TOOL_REQUEST -> {
+                ToolRequestMessage toolRequest = JSONUtil.toBean(rawChunk, ToolRequestMessage.class);
+                String toolName = toolRequest.getName();
+                BaseTool tool = toolManager.getTool(toolName);
+                if (tool != null) {
+                    yield tool.generateToolRequestResponse();
+                }
+                String label = (toolName == null || toolName.isBlank()) ? "未知工具" : toolName;
+                yield String.format("\n\n[选择工具] %s\n", label);
+            }
+            case TOOL_EXECUTED -> {
+                ToolExecutedMessage executed = JSONUtil.toBean(rawChunk, ToolExecutedMessage.class);
+                JSONObject arguments = safeParseArguments(executed.getArguments());
+                BaseTool tool = toolManager.getTool(executed.getName());
+                if (tool != null) {
+                    yield tool.generateToolExecutedResult(arguments);
+                }
+                yield fallbackToolExecutedFormatting(executed.getName(), arguments);
+            }
+        };
+    }
+
+    private JSONObject safeParseArguments(String arguments) {
+        if (arguments == null || arguments.isBlank()) {
+            return new JSONObject();
+        }
+        try {
+            return JSONUtil.parseObj(arguments);
+        } catch (Exception e) {
+            JSONObject fallback = new JSONObject();
+            fallback.set("_rawArguments", arguments);
+            return fallback;
+        }
+    }
+
+    private String fallbackToolExecutedFormatting(String toolName, JSONObject arguments) {
+        String safeToolName = (toolName == null || toolName.isBlank()) ? "工具" : toolName;
+        String path = arguments.getStr("relativeFilePath");
+        if (path == null || path.isBlank()) {
+            path = arguments.getStr("relativeDirPath");
+        }
+        if (path == null || path.isBlank()) {
+            path = "-";
+        }
+        return String.format("[工具调用] %s %s\n", safeToolName, path);
+    }
+
     private void emitGeneratedCodeIfPresent(reactor.core.publisher.FluxSink<String> sink,
                                             CodeGenTypeEnum codeGenTypeEnum,
                                             String generatedDir) {
@@ -103,7 +213,7 @@ public class WorkflowCodeGeneratorFacade {
                 if (Files.isDirectory(dir)) {
                     try (var stream = Files.list(dir)) {
                         stream.filter(Files::isRegularFile)
-                                .sorted((a, b) -> a.getFileName().toString().compareToIgnoreCase(b.getFileName().toString()))
+                                .sorted(Comparator.comparing(p -> p.getFileName().toString(), String.CASE_INSENSITIVE_ORDER))
                                 .forEach(p -> {
                                     try {
                                         String body = Files.readString(p, StandardCharsets.UTF_8);
@@ -111,19 +221,105 @@ public class WorkflowCodeGeneratorFacade {
                                         String lang = markdownFenceLanguageForFileName(name);
                                         sink.next(wrapMarkdownCodeBlock(name, body, lang));
                                     } catch (Exception ignore) {
-                                        // 单文件读取失败不影响整体完成事件
+                                        // single file read failure should not break final response
                                     }
                                 });
                     }
                 }
+                return;
+            }
+
+            if (codeGenTypeEnum == CodeGenTypeEnum.VUE) {
+                emitVueGeneratedCode(sink, generatedDir);
             }
         } catch (Exception e) {
             log.warn("workflow 回显生成代码失败: type={}, dir={}", codeGenTypeEnum, generatedDir, e);
         }
     }
 
+    private void emitVueGeneratedCode(reactor.core.publisher.FluxSink<String> sink, String generatedDir) {
+        Path root = Path.of(generatedDir);
+        if (!Files.isDirectory(root)) {
+            return;
+        }
+
+        List<Path> files;
+        try (var walk = Files.walk(root)) {
+            files = walk
+                    .filter(Files::isRegularFile)
+                    .filter(path -> shouldEmitVueFile(root, path))
+                    .sorted(Comparator.comparing(
+                            path -> root.relativize(path).toString().replace('\\', '/').toLowerCase(Locale.ROOT)))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("workflow vue 目录遍历失败: {}", generatedDir, e);
+            return;
+        }
+
+        for (Path path : files) {
+            try {
+                long size = Files.size(path);
+                if (size > VUE_ECHO_MAX_FILE_BYTES) {
+                    continue;
+                }
+                if (!isLikelyTextFile(path)) {
+                    continue;
+                }
+                String body = Files.readString(path, StandardCharsets.UTF_8);
+                String relative = root.relativize(path).toString().replace('\\', '/');
+                String language = markdownFenceLanguageForFileName(relative);
+                sink.next(wrapMarkdownCodeBlock(relative, body, language));
+            } catch (Exception ignore) {
+                // skip unreadable/non-utf8 files
+            }
+        }
+    }
+
+    private boolean shouldEmitVueFile(Path root, Path file) {
+        Path relative = root.relativize(file);
+        int count = relative.getNameCount();
+        if (count == 0) {
+            return false;
+        }
+
+        for (int i = 0; i < count - 1; i++) {
+            String dir = relative.getName(i).toString();
+            if (VUE_ECHO_IGNORED_DIR_NAMES.contains(dir)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isLikelyTextFile(Path path) {
+        byte[] sample = new byte[4096];
+        int read;
+        try (InputStream in = Files.newInputStream(path)) {
+            read = in.read(sample);
+        } catch (Exception e) {
+            return false;
+        }
+
+        if (read <= 0) {
+            return true;
+        }
+
+        int controlChars = 0;
+        for (int i = 0; i < read; i++) {
+            int b = sample[i] & 0xFF;
+            if (b == 0) {
+                return false;
+            }
+            if (b < 9 || (b > 13 && b < 32)) {
+                controlChars++;
+            }
+        }
+
+        return controlChars < Math.max(4, read / 20);
+    }
+
     /**
-     * 与 aiservice / {@code Various_File_Prompt} 约定一致：html、css、javascript（.js 用 javascript 围栏）。
+     * 与 aiservice / Various_File_Prompt 约定一致：html、css、javascript（js 用 javascript 围栏）。
      */
     static String markdownFenceLanguageForFileName(String fileName) {
         if (fileName == null) {
@@ -133,10 +329,10 @@ public class WorkflowCodeGeneratorFacade {
         if (lower.endsWith(".html") || lower.endsWith(".htm")) {
             return "html";
         }
-        if (lower.endsWith(".css")) {
+        if (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) {
             return "css";
         }
-        if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
+        if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs") || lower.endsWith(".jsx")) {
             return "javascript";
         }
         if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
@@ -151,11 +347,17 @@ public class WorkflowCodeGeneratorFacade {
         if (lower.endsWith(".md")) {
             return "markdown";
         }
+        if (lower.endsWith(".yml") || lower.endsWith(".yaml")) {
+            return "yaml";
+        }
+        if (lower.endsWith(".xml") || lower.endsWith(".svg")) {
+            return "xml";
+        }
         return "plaintext";
     }
 
     /**
-     * 生成与前端 {@code parseMarkdownWithCode} 兼容的 fenced 块：开始/结束围栏独占一行。
+     * 生成与前端 parseMarkdownWithCode 兼容的 fenced 块：开始/结束围栏独占一行。
      */
     static String wrapMarkdownCodeBlock(String displayName, String content, String fenceLanguage) {
         String body = content == null ? "" : content;

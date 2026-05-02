@@ -20,24 +20,27 @@ import static org.bsc.langgraph4j.GraphDefinition.END;
 import static org.bsc.langgraph4j.GraphDefinition.START;
 import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 
-
 /**
- * 真实执行工作流的业务逻辑
+ * 真实执行工作流的业务逻辑。
  */
 @Slf4j
 public class CodeGenWorkflow {
 
-    /**
-     * 创建完整的工作流
-     */
     public CompiledGraph<MessagesState<String>> createWorkflow() {
+        return createWorkflow(null);
+    }
+
+    /**
+     * @param codeStreamChunkConsumer 仅在 code_generator 的 VUE 流式阶段透传 chunk，非必需。
+     */
+    public CompiledGraph<MessagesState<String>> createWorkflow(Consumer<String> codeStreamChunkConsumer) {
         try {
             return new MessagesStateGraph<String>()
                     // 添加节点 - 使用完整实现的节点
                     .addNode("image_collector", ImageCollectorNode.create())
                     .addNode("prompt_enhancer", PromptEnhancerNode.create())
                     .addNode("router", RouterNode.create())
-                    .addNode("code_generator", CodeGeneratorNode.create())
+                    .addNode("code_generator", CodeGeneratorNode.create(codeStreamChunkConsumer))
                     .addNode("project_builder", ProjectBuilderNode.create())
                     .addNode("code_quality_check", CodeQualityCheckNode.create())
 
@@ -95,12 +98,8 @@ public class CodeGenWorkflow {
         return "skip";
     }
 
-    /**
-     * 执行工作流
-     */
-    public WorkflowContext executeWorkflow (String originalPrompt, CodeGenTypeEnum codeGenTypeEnum) {
-        // 兼容旧调用语义：历史上 Vue 首次进入 code_generator 时走 firstRound=true。
-        return executeWorkflow(originalPrompt, codeGenTypeEnum, null, codeGenTypeEnum == CodeGenTypeEnum.VUE, null);
+    public WorkflowContext executeWorkflow(String originalPrompt, CodeGenTypeEnum codeGenTypeEnum) {
+        return executeWorkflow(originalPrompt, codeGenTypeEnum, null, codeGenTypeEnum == CodeGenTypeEnum.VUE, null, null);
     }
 
     /**
@@ -110,22 +109,31 @@ public class CodeGenWorkflow {
                                            CodeGenTypeEnum codeGenTypeEnum,
                                            Long appId,
                                            boolean firstRound) {
-        return executeWorkflow(originalPrompt, codeGenTypeEnum, appId, firstRound, null);
+        return executeWorkflow(originalPrompt, codeGenTypeEnum, appId, firstRound, null, null);
     }
 
-    /**
-     * 执行工作流，并在每步完成后可选推送一行进度文本（供 workflow SSE 使用）。
-     *
-     * @param progressConsumer 非空时推送 {@code [workflow] 第 n 步完成：…}，其中标签取自 {@link WorkflowContext#getCurrentStep()}
-     */
     public WorkflowContext executeWorkflow(String originalPrompt,
                                            CodeGenTypeEnum codeGenTypeEnum,
                                            Long appId,
                                            boolean firstRound,
                                            Consumer<String> progressConsumer) {
-        CompiledGraph<MessagesState<String>> workflow = createWorkflow();
+        return executeWorkflow(originalPrompt, codeGenTypeEnum, appId, firstRound, progressConsumer, null);
+    }
 
-        // 初始化 WorkflowContext
+    /**
+     * 执行工作流。
+     *
+     * @param progressConsumer        可选，每步完成后回调一行 [workflow] 进度。
+     * @param codeStreamChunkConsumer 可选，VUE code_generator 阶段透传原始流式 chunk。
+     */
+    public WorkflowContext executeWorkflow(String originalPrompt,
+                                           CodeGenTypeEnum codeGenTypeEnum,
+                                           Long appId,
+                                           boolean firstRound,
+                                           Consumer<String> progressConsumer,
+                                           Consumer<String> codeStreamChunkConsumer) {
+        CompiledGraph<MessagesState<String>> workflow = createWorkflow(codeStreamChunkConsumer);
+
         Long effectiveAppId = (appId == null || appId <= 0) ? System.currentTimeMillis() : appId;
         WorkflowContext initialContext = WorkflowContext.builder()
                 .originalPrompt(originalPrompt)
@@ -156,7 +164,7 @@ public class CodeGenWorkflow {
                 if (progressConsumer != null) {
                     String label = currentContext.getCurrentStep() != null
                             ? currentContext.getCurrentStep()
-                            : "—";
+                            : "-";
                     try {
                         progressConsumer.accept("[workflow] 第 " + stepCounter + " 步完成：" + label);
                     } catch (Exception e) {
@@ -166,7 +174,8 @@ public class CodeGenWorkflow {
             }
             stepCounter++;
         }
-        log.info("代码生成工作流执行完成！");
+
+        log.info("代码生成工作流执行完成");
         return finalContext;
     }
 }
