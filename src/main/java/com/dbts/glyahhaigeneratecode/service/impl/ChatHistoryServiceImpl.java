@@ -75,6 +75,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     /** 超过此长度才触发摘要；略提高以减少工作流重试轮次上的额外模型调用与上下文失真 */
     private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 2200;
     private static final int MEMORY_AI_CODE_SUMMARY_MAX_LENGTH = 500;
+    private static final String MESSAGE_TRUNCATED_SUFFIX = "\n...[message truncated]";
+    private static final int DEFAULT_SAFE_MESSAGE_LENGTH = 4000;
     private static final Pattern HTML_BLOCK_PATTERN = Pattern.compile("```html\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
     private static final Pattern CSS_BLOCK_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
     private static final Pattern JS_BLOCK_PATTERN = Pattern.compile("```(?:js|javascript)\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
@@ -95,27 +97,53 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 验证消息类型是否有效
         ChatHistoryMessageTypeEnum messageTypeEnum = ChatHistoryMessageTypeEnum.getEnumByValue(messageType);
         ThrowUtils.throwIf(messageTypeEnum == null, ErrorCode.PARAMS_ERROR, "不支持的消息类型: " + messageType);
+        ensureAuditColumnsIfMissing(appId);
+        String persistedMessage = sanitizeMessageForPersistence(message);
         ChatHistory chatHistory = ChatHistory.builder()
                 .appId(appId)
-                .message(message)
+                .message(persistedMessage)
                 .messageType(messageType)
                 .userId(userId)
                 .auditAction(auditAction)
                 .auditHitRule(auditHitRule)
                 .build();
-        ensureAuditColumnsIfMissing(appId);
         return this.save(chatHistory);
     }
 
     private void ensureAuditColumnsIfMissing(Long appId) {
         boolean actionExists = isColumnExists("auditAction");
         boolean hitRuleExists = isColumnExists("auditHitRule");
+        boolean messageIsLongText = isMessageColumnLongText();
         if (!actionExists) {
             jdbcTemplate.execute("ALTER TABLE chat_history ADD COLUMN auditAction varchar(16) NOT NULL DEFAULT 'SKIP' COMMENT '审查动作：ALLOW/REJECT/SKIP' AFTER userId");
         }
         if (!hitRuleExists) {
             jdbcTemplate.execute("ALTER TABLE chat_history ADD COLUMN auditHitRule varchar(64) NOT NULL DEFAULT 'NONE' COMMENT '命中审查规则编码' AFTER auditAction");
         }
+        if (!messageIsLongText) {
+            jdbcTemplate.execute("ALTER TABLE chat_history MODIFY COLUMN message LONGTEXT NOT NULL COMMENT '消息'");
+        }
+    }
+
+    private String sanitizeMessageForPersistence(String message) {
+        if (message == null) {
+            return null;
+        }
+        long columnMaxLength = getMessageColumnCharacterLimit();
+        int safeLimit;
+        if (columnMaxLength <= 0 || columnMaxLength > Integer.MAX_VALUE) {
+            safeLimit = Integer.MAX_VALUE;
+        } else {
+            safeLimit = (int) columnMaxLength;
+        }
+        if (safeLimit <= MESSAGE_TRUNCATED_SUFFIX.length()) {
+            safeLimit = DEFAULT_SAFE_MESSAGE_LENGTH;
+        }
+        if (message.length() <= safeLimit) {
+            return message;
+        }
+        int keepLength = Math.max(1, safeLimit - MESSAGE_TRUNCATED_SUFFIX.length());
+        return message.substring(0, keepLength) + MESSAGE_TRUNCATED_SUFFIX;
     }
 
     private boolean isColumnExists(String columnName) {
@@ -125,6 +153,22 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 columnName
         );
         return count != null && count > 0;
+    }
+
+    private boolean isMessageColumnLongText() {
+        String dataType = jdbcTemplate.queryForObject(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = 'message'",
+                String.class
+        );
+        return "longtext".equalsIgnoreCase(StrUtil.blankToDefault(dataType, ""));
+    }
+
+    private long getMessageColumnCharacterLimit() {
+        Long maxLength = jdbcTemplate.queryForObject(
+                "SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = 'message'",
+                Long.class
+        );
+        return maxLength == null ? DEFAULT_SAFE_MESSAGE_LENGTH : maxLength;
     }
 
     @Override
