@@ -21,6 +21,8 @@ public class StreamHandlerExecutor {
     @Resource
     private JsonMessageStreamHandler jsonMessageStreamHandler;
 
+    private final SimpleTextStreamHandler simpleTextStreamHandler = new SimpleTextStreamHandler();
+    private final WorkflowTextStreamHandler workflowTextStreamHandler = new WorkflowTextStreamHandler();
 
     /**
      * 创建流处理器并处理聊天历史记录
@@ -35,12 +37,15 @@ public class StreamHandlerExecutor {
     public Flux<String> doExecute(Flux<String> originFlux,
                                   ChatHistoryService chatHistoryService,
                                   long appId, User loginUser, CodeGenTypeEnum codeGenType,
-                                  boolean firstRound, String userMessage) {
+                                  boolean workflowMode, boolean firstRound, String userMessage) {
+        if (workflowMode) {
+            return workflowTextStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
+        }
         return switch (codeGenType) {
             case VUE -> // 使用注入的组件实例
                     jsonMessageStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser, firstRound, userMessage);
             case HTML, MULTI_FILE -> // 简单文本处理器不需要依赖注入
-                    new SimpleTextStreamHandler().handle(originFlux, chatHistoryService, appId, loginUser);
+                    simpleTextStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
         };
     }
 }

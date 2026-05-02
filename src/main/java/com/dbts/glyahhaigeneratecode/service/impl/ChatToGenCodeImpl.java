@@ -92,7 +92,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
 
         // 7. 添加 AI 回复到对话历史,转换格式并返回给前端
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, firstRound, message);
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message);
     }
 
     @Override
@@ -130,7 +130,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
                 message, codeGenTypeEnum, appId, firstRound);
 
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, firstRound, message);
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message);
     }
 
     private CodeGenTypeEnum resolveCodeGenType(String codeGenType) {

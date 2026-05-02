@@ -29,8 +29,8 @@ import {
   flushAssistantSseCarry,
   mergeWorkflowSteps,
   normalizeWorkflowStepsForUi,
-  parseWorkflowStepsFromText,
   resetSseLineAccumulator,
+  resolveWorkflowStepsFromMessageContent,
   stripAssistantNoiseLines,
 } from '@/utils/workflowChatFilters'
 import {
@@ -1571,7 +1571,7 @@ function stripVisualEditModelOnlyHint(text: string): string {
 
 function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
   if (m.role !== 'assistant') return []
-  const raw = m.workflowSteps && m.workflowSteps.length > 0 ? m.workflowSteps : parseWorkflowStepsFromText(m.content ?? '')
+  const raw = resolveWorkflowStepsFromMessageContent(m.workflowSteps, m.content ?? '')
   return normalizeWorkflowStepsForUi(raw, {
     historyMode: isHistoryMessage(m),
     streaming: isStreamActiveForMessage(m),
