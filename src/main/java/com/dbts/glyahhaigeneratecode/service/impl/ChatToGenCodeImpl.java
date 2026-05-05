@@ -127,9 +127,12 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId());
 
+        // 获取一手流式string代码
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
                 message, codeGenTypeEnum, appId, firstRound);
 
+        // 将代码转化成想要的格式,持久化到数据库
+        // 解析一下,准备给前端了
         return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message);
     }
 

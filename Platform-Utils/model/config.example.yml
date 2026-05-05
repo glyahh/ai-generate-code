@@ -1,0 +1,25 @@
+platforms:
+  - name: dashscope
+    api:
+      endpoint: "https://dashscope.aliyuncs.com/api/v1/billing/credit"
+      method: "GET"
+      headers:
+        Authorization: "Bearer ${ENV:DASHSCOPE_API_KEY}"
+      params: {}
+      quota_json_path: "data.totalBalance"
+    web:
+      url: "https://example.com/billing?model={model_name}"
+      regex: "remaining\\s*[:：]\\s*([0-9.]+)"
+
+  - name: custom-platform
+    api:
+      endpoint: "https://api.example.com/quota?model={model_name}"
+      method: "GET"
+      headers:
+        X-API-Key: "${ENV:CUSTOM_API_KEY}"
+      params: {}
+      quota_json_path: "quota.remaining"
+    web:
+      url: "https://console.example.com/models/{model_name}/quota"
+      css_selector: ".quota-remaining"
+      attr: ""

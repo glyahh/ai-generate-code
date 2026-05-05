@@ -27,7 +27,8 @@ public final class PromptSafetyAuditEvaluator {
 
     private static final List<String> SENSITIVE_WORDS = Arrays.asList(
             "忽略之前的指令", "ignore previous instructions", "ignore above",
-            "破解", "hack", "绕过", "bypass", "越狱", "jailbreak"
+            "破解", "hack", "绕过", "bypass", "越狱", "jailbreak",
+            "模型名", "现在使用的模型"
     );
 
     private static final List<Pattern> INJECTION_PATTERNS = Arrays.asList(

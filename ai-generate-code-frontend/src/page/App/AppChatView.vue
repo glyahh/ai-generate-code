@@ -1927,6 +1927,22 @@ async function sendMessage(text?: string) {
     const es = new EventSource(url, { withCredentials: true })
     eventSourceMap.set(streamId, es)
 
+    es.addEventListener('workflow-step', (event: MessageEvent) => {
+      const meta = activeStreamMeta.value[streamId]
+      if (!meta) return
+      const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
+      if (!msg || msg.role !== 'assistant') return
+      try {
+        const payload = JSON.parse(event.data || '{}') as { step?: number; label?: string }
+        const step = Number(payload?.step)
+        const label = String(payload?.label ?? '').trim()
+        if (!Number.isFinite(step) || !label) return
+        msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, [{ step, label }])
+      } catch {
+        // ignore malformed workflow-step payload
+      }
+    })
+
     es.onmessage = (event) => {
       const data = event.data
       if (!data || data === 'null') {

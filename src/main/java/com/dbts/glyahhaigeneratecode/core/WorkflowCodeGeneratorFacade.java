@@ -46,7 +46,7 @@ public class WorkflowCodeGeneratorFacade {
     @Resource
     private ToolManager toolManager;
 
-    public Flux<String> generateAndSaveCodeStream(String userMessage,
+    public Flux<String> generateAndSaveCodeStream (String userMessage,
                                                   CodeGenTypeEnum codeGenTypeEnum,
                                                   Long appId,
                                                   boolean firstRound) {
@@ -55,16 +55,22 @@ public class WorkflowCodeGeneratorFacade {
             CompletableFuture.runAsync(() -> {
                 try {
                     CodeGenWorkflow workflow = new CodeGenWorkflow();
+                    // 工作流第...步完成
                     Consumer<String> progress = msg -> {
                         try {
+                            // 将每一行的message的换行符保证不丢失
                             String normalized = normalizeWorkflowLine(msg);
                             sink.next(normalized);
                         } catch (Exception ignored) {
                             // downstream closed
                         }
                     };
+                    // 透传工作流中的工具调用信息
+                    // 声明有了chunk该怎么拼接 (Consumer<String>本质就是声明一个处理字符串的方法)
                     Consumer<String> codeStreamChunkConsumer = rawChunk -> {
                         try {
+                            // 解析ai返回的请求/意图
+                            // 工具请求,工具调用结果,ai相应
                             String adapted = adaptWorkflowCodeChunk(rawChunk);
                             if (adapted != null && !adapted.isEmpty()) {
                                 sink.next(adapted);
@@ -79,6 +85,7 @@ public class WorkflowCodeGeneratorFacade {
                             codeGenTypeEnum,
                             appId,
                             firstRound,
+                            // 两种处理不同字符串的方法, 在这里生命好了传给工作流用
                             progress,
                             codeStreamChunkConsumer);
 
@@ -143,16 +150,19 @@ public class WorkflowCodeGeneratorFacade {
 
         return switch (typeEnum) {
             case AI_RESPONSE -> {
+                // 将rawchunk转换为AiResponseMessage
                 AiResponseMessage aiMessage = JSONUtil.toBean(rawChunk, AiResponseMessage.class);
                 yield aiMessage.getData() == null ? "" : aiMessage.getData();
             }
             case TOOL_REQUEST -> {
+                //
                 ToolRequestMessage toolRequest = JSONUtil.toBean(rawChunk, ToolRequestMessage.class);
                 String toolName = toolRequest.getName();
                 BaseTool tool = toolManager.getTool(toolName);
                 if (tool != null) {
                     yield tool.generateToolRequestResponse();
                 }
+                // 实在不行用工具名不用专门给人看的展示名了
                 String label = (toolName == null || toolName.isBlank()) ? "未知工具" : toolName;
                 yield String.format("\n\n[选择工具] %s\n", label);
             }
@@ -161,8 +171,10 @@ public class WorkflowCodeGeneratorFacade {
                 JSONObject arguments = safeParseArguments(executed.getArguments());
                 BaseTool tool = toolManager.getTool(executed.getName());
                 if (tool != null) {
+                    // 直接获取工具调用的结果string
                     yield tool.generateToolExecutedResult(arguments);
                 }
+                // 强行构造一种工具调用的结果格式返回
                 yield fallbackToolExecutedFormatting(executed.getName(), arguments);
             }
         };
@@ -230,7 +242,7 @@ public class WorkflowCodeGeneratorFacade {
             }
 
             if (codeGenTypeEnum == CodeGenTypeEnum.VUE) {
-                emitVueGeneratedCode(sink, generatedDir);
+                return;
             }
         } catch (Exception e) {
             log.warn("workflow 回显生成代码失败: type={}, dir={}", codeGenTypeEnum, generatedDir, e);

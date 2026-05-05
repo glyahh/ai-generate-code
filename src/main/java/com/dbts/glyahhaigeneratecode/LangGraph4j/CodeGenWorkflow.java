@@ -40,6 +40,7 @@ public class CodeGenWorkflow {
                     .addNode("image_collector", ImageCollectorNode.create())
                     .addNode("prompt_enhancer", PromptEnhancerNode.create())
                     .addNode("router", RouterNode.create())
+                    // 由代码生成节点在流式输出时把这些 chunk 交给调用方（例如再写到 SSE）
                     .addNode("code_generator", CodeGeneratorNode.create(codeStreamChunkConsumer))
                     .addNode("project_builder", ProjectBuilderNode.create())
                     .addNode("code_quality_check", CodeQualityCheckNode.create())
@@ -51,6 +52,7 @@ public class CodeGenWorkflow {
                     .addEdge("router", "code_generator")
                     .addEdge("code_generator", "code_quality_check")
                     .addConditionalEdges("code_quality_check",
+                            //
                             edge_async(this::routeAfterCodeGenerator),
                             Map.of(
                                     "retry", "code_generator",
@@ -98,6 +100,9 @@ public class CodeGenWorkflow {
         return "skip";
     }
 
+
+
+
     public WorkflowContext executeWorkflow(String originalPrompt, CodeGenTypeEnum codeGenTypeEnum) {
         return executeWorkflow(originalPrompt, codeGenTypeEnum, null, codeGenTypeEnum == CodeGenTypeEnum.VUE, null, null);
     }
@@ -130,7 +135,9 @@ public class CodeGenWorkflow {
                                            CodeGenTypeEnum codeGenTypeEnum,
                                            Long appId,
                                            boolean firstRound,
+                                           // 拼接工作流第...步完成
                                            Consumer<String> progressConsumer,
+                                           // 拼接工作流tool调用?
                                            Consumer<String> codeStreamChunkConsumer) {
         CompiledGraph<MessagesState<String>> workflow = createWorkflow(codeStreamChunkConsumer);
 
@@ -162,10 +169,12 @@ public class CodeGenWorkflow {
                 finalContext = currentContext;
                 log.info("当前步骤上下文: {}", currentContext);
                 if (progressConsumer != null) {
+                    // 获取当前步骤
                     String label = currentContext.getCurrentStep() != null
                             ? currentContext.getCurrentStep()
                             : "-";
                     try {
+                        // 执行在workflow门面类声明的方法
                         progressConsumer.accept("[workflow] 第 " + stepCounter + " 步完成：" + label);
                     } catch (Exception e) {
                         log.debug("workflow 进度回调异常（可忽略）: {}", e.getMessage());

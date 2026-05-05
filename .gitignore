@@ -51,5 +51,9 @@ temp/**
 .cursor/settings.json
 .windsurf/
 
+### MCP / local agent config (DO NOT COMMIT) ###
+.mcp.json
+.tmp-cookies.txt
+
 ### Shared Cursor Assets (keep tracked) ###
 !.cursor/skills/**

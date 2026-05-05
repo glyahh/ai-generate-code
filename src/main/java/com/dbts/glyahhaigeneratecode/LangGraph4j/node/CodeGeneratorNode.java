@@ -45,9 +45,11 @@ public class CodeGeneratorNode {
             // 调用流式代码生成
             Flux<String> codeStream = codeGeneratorFacade.generateAndSaveCodeStream(userMessage, generationType, appId, firstRound);
 
+            // vue项目需要拼接
             if (generationType == CodeGenTypeEnum.VUE && streamChunkConsumer != null) {
                 codeStream = codeStream.doOnNext(chunk -> {
                     try {
+                        // 执行workflow门面类的方法
                         streamChunkConsumer.accept(chunk);
                     } catch (Exception e) {
                         log.debug("workflow code stream callback failed: {}", e.getMessage());

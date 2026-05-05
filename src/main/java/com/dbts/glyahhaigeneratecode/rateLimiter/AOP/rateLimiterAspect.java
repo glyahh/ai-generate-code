@@ -52,7 +52,7 @@ public class rateLimiterAspect {
             log.debug("RateLimiter 已存在配置，将复用旧配置: key={}, limitType={}, rate={}, intervalSeconds={}",
                     key, rateLimit.limitType(), rateLimit.rate(), rateLimit.rateInterval());
         }
-        // 尝试获取令牌，如果获取失败则限流
+        // 尝试获取令牌，如果获取失败则限流, 每次拿一个单位数量的蛋糕
         if (!rateLimiter.tryAcquire(1)) {
             throw new MyException(ErrorCode.TOO_MANY_REQUEST, rateLimit.message());
         }

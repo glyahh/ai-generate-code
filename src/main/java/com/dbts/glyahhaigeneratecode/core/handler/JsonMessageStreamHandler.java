@@ -62,6 +62,7 @@ public class JsonMessageStreamHandler {
 
                 .map(chunk -> {
                     // 解析每个 JSON 消息块,见下方函数
+                    // 指定消息拼接方式 请求+结果(卡片)
                     return handleJsonMessageChunk(
                             chunk,
                             chatHistoryStringBuilder,
