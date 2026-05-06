@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.LangGraph4j.node;
 
 import com.dbts.glyahhaigeneratecode.LangGraph4j.ai.ImageCollectionPlanService;
+import com.dbts.glyahhaigeneratecode.LangGraph4j.enums.ImageCategoryEnum;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.model.ImageCollectionPlan;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.model.ImageResource;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.state.WorkflowContext;
@@ -21,6 +22,9 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
 @Slf4j
 public class ImageCollectorNode {
+    private static final int MAX_PIXEL_IMAGES = 7;
+    private static final int MAX_IMAGE20_IMAGES = 2;
+    private static final int MAX_MERMAID_IMAGES = 1;
 
     public static AsyncNodeAction<MessagesState<String>> create() {
         return node_async(state -> {
@@ -75,13 +79,12 @@ public class ImageCollectorNode {
                         futures.toArray(new CompletableFuture[0]));
                 allTasks.join();
 
-                // 收集所有结果，限制总数为 20 张（提前终止收集）
-                int maxImages = 20;
+                // 收集所有结果，再按类别配额筛选：
+                // pixel(内容图+插画) <= 15；image20(LOGO) <= 5；mermaid(架构图) <= 2
+                List<ImageResource> pixelImages = new ArrayList<>();
+                List<ImageResource> image20Images = new ArrayList<>();
+                List<ImageResource> mermaidImages = new ArrayList<>();
                 for (CompletableFuture<List<ImageResource>> future : futures) {
-                    if (collectedImages.size() >= maxImages) {
-                        log.info("已收集到 {} 张图片，达到上限，停止收集", collectedImages.size());
-                        break; // 提前终止，不再处理剩余任务
-                    }
                     List<ImageResource> images = future.get();
                     if (images != null) {
                         for (ImageResource image : images) {
@@ -89,13 +92,21 @@ public class ImageCollectorNode {
                                 mermaidError = true;
                                 continue;
                             }
-                            if (collectedImages.size() >= maxImages) {
-                                break;
+                            ImageCategoryEnum category = image.getCategory();
+                            if (category == ImageCategoryEnum.ARCHITECTURE) {
+                                mermaidImages.add(image);
+                            } else if (category == ImageCategoryEnum.LOGO) {
+                                image20Images.add(image);
+                            } else {
+                                // 内容图（Pexels）+ 插画（unDraw）统一作为 pixel 配额池
+                                pixelImages.add(image);
                             }
-                            collectedImages.add(image);
                         }
                     }
                 }
+                collectedImages.addAll(limitSize(pixelImages, MAX_PIXEL_IMAGES));
+                collectedImages.addAll(limitSize(image20Images, MAX_IMAGE20_IMAGES));
+                collectedImages.addAll(limitSize(mermaidImages, MAX_MERMAID_IMAGES));
                 log.info("并发图片收集完成，共收集到 {} 张图片", collectedImages.size());
             } catch (Exception e) {
                 log.error("图片收集失败: {}", e.getMessage(), e);
@@ -108,5 +119,15 @@ public class ImageCollectorNode {
             }
             return WorkflowContext.saveContext(context);
         });
+    }
+
+    private static List<ImageResource> limitSize(List<ImageResource> source, int limit) {
+        if (source == null || source.isEmpty() || limit <= 0) {
+            return List.of();
+        }
+        if (source.size() <= limit) {
+            return source;
+        }
+        return source.subList(0, limit);
     }
 }

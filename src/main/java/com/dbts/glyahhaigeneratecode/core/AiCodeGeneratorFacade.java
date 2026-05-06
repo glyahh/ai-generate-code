@@ -80,18 +80,26 @@ public class AiCodeGeneratorFacade {
     }
 
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
-        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, false);
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, false, true);
     }
 
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId, boolean firstRound) {
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, firstRound, true);
+    }
+
+    public Flux<String> generateAndSaveCodeStream(String userMessage,
+                                                  CodeGenTypeEnum codeGenTypeEnum,
+                                                  Long appId,
+                                                  boolean firstRound,
+                                                  boolean compactMemoryOnCacheHit) {
         if (codeGenTypeEnum == null) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
 
         return switch (codeGenTypeEnum) {
-            case HTML -> generateAndSaveHtmlCodeStream(userMessage, appId);
-            case MULTI_FILE -> generateAndSaveMultiFileCodeStream(userMessage, appId);
-            case VUE -> generateAndSaveVueCodeStream(userMessage, appId, firstRound);
+            case HTML -> generateAndSaveHtmlCodeStream(userMessage, appId, compactMemoryOnCacheHit);
+            case MULTI_FILE -> generateAndSaveMultiFileCodeStream(userMessage, appId, compactMemoryOnCacheHit);
+            case VUE -> generateAndSaveVueCodeStream(userMessage, appId, firstRound, compactMemoryOnCacheHit);
             default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenTypeEnum.getValue());
         };
     }
@@ -110,25 +118,25 @@ public class AiCodeGeneratorFacade {
                 });
     }
 
-    private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage, Long appId) {
+    private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage, Long appId, boolean compactMemoryOnCacheHit) {
         aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.MULTI_FILE);
+                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.MULTI_FILE, false, compactMemoryOnCacheHit);
         String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.MULTI_FILE, appId);
         Flux<String> result = aiCodeGeneratorService.generateCodeMultiFileStream(finalPrompt);
         return processCodeStream(CodeGenTypeEnum.MULTI_FILE, result, appId);
     }
 
-    private Flux<String> generateAndSaveHtmlCodeStream(String userMessage, Long appId) {
+    private Flux<String> generateAndSaveHtmlCodeStream(String userMessage, Long appId, boolean compactMemoryOnCacheHit) {
         aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.HTML);
+                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.HTML, false, compactMemoryOnCacheHit);
         String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.HTML, appId);
         Flux<String> result = aiCodeGeneratorService.generateCodeHTMLStream(finalPrompt);
         return processCodeStream(CodeGenTypeEnum.HTML, result, appId);
     }
 
-    private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound) {
+    private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound, boolean compactMemoryOnCacheHit) {
         aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound);
+                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound, compactMemoryOnCacheHit);
         TokenStream tokenStream = aiCodeGeneratorService.generateCodeVueFileStream(appId, userMessage);
         return adaptVueTokenStream(tokenStream, appId);
     }

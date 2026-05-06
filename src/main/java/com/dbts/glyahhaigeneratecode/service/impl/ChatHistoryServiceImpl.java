@@ -39,6 +39,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -72,9 +73,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     private JdbcTemplate jdbcTemplate;
 
     private static final int MEMORY_AI_MESSAGE_MAX_LENGTH = 2400;
-    /** 超过此长度才触发摘要；略提高以减少工作流重试轮次上的额外模型调用与上下文失真 */
+    /** 超过此长度后固定截断（不走额外 AI 总结调用） */
     private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 2200;
-    private static final int MEMORY_AI_CODE_SUMMARY_MAX_LENGTH = 500;
     private static final String MESSAGE_TRUNCATED_SUFFIX = "\n...[message truncated]";
     private static final int DEFAULT_SAFE_MESSAGE_LENGTH = 4000;
     private static final Pattern HTML_BLOCK_PATTERN = Pattern.compile("```html\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
@@ -415,42 +415,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (code.length() <= maxLen) {
             return code;
         }
-        String summarized = summarizeLongCodeBlock(code, langLabel); // fatch的代码 代码类型(HTML这种)
-        if (StrUtil.isNotBlank(summarized)) {
-            return "/* 历史代码块较长，以下为自动总结 */\n" + summarized;
-        }
-        return code.substring(0, maxLen) + "\n// ...历史代码片段已截断";
+        String safePrefix = "/* 历史" + langLabel + "代码片段（已截断） */\n";
+        return safePrefix + code.substring(0, maxLen) + "\n// ...历史代码片段已截断";
     }
 
-    /**
-     * 超长代码块摘要：让模型归纳“做了哪些内容”，用于压缩历史上下文。
-     * 若摘要失败，返回空串，调用方再走原截断兜底。
-     */
-    private String summarizeLongCodeBlock(String code, String langLabel) {
-        try {
-            String prompt = "请阅读以下 " + langLabel + " 代码，简要总结它“做了哪些功能和关键逻辑”。\n"
-                    + "要求：\n"
-                    + "1) 用中文，2-5 行。\n"
-                    + "2) 只写功能与逻辑要点，不要建议，不要改写代码。\n"
-                    + "3) 不要包含 markdown 代码块标记。\n\n"
-                    + "代码如下：\n"
-                    + code
-                    + "注意总结篇幅在" + MEMORY_AI_CODE_SUMMARY_MAX_LENGTH + "个字符以内";
-            String summary = chatModel.chat(prompt);
-            if (StrUtil.isBlank(summary)) {
-                return "";
-            }
-            String normalized = summary.trim();
-            if (normalized.length() > MEMORY_AI_CODE_SUMMARY_MAX_LENGTH) {
-                normalized = normalized.substring(0, MEMORY_AI_CODE_SUMMARY_MAX_LENGTH);
-            }
-            return normalized;
-        } catch (Exception e) {
-            log.warn("超长代码块摘要失败，lang={}", langLabel, e);
-            return "";
-        }
-    }
-
+    
     /**
      * 根据应用的代码生成类型，将对应的系统 Prompt 追加到 Redis 管理的对话内存中。
      * HTML / MULTI_FILE / VUE 分别只追加自身对应的系统提示词，避免不同模式之间相互干扰。
@@ -548,16 +517,21 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     @Override
-    public void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId) {
+    public void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason) {
         if (appId == null || appId <= 0 || userId == null) {
             return;
         }
+        String reason = StrUtil.blankToDefault(triggerReason, "unknown");
         // 仅统计该应用下用户消息条数作为「轮数」，不校验登录态（内部在对话完成后调用）
         int roundCount = countRoundsByAppIdInternal(appId);
+        int beforeRoundCount = roundCount;
         if (roundCount <= ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
+            log.info("会话级总结跳过，compressType=conversation_summary, triggerReason={}, appId={}, roundCount={}, threshold={}",
+                    reason, appId, roundCount, ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY);
             return;
         }
         // 关键：每多 2 轮就合并最早 2 轮为 1 轮，循环直到不超过 20 轮（例如 26 轮 → 合并 6 次 → 20 轮）
+        int mergedCount = 0;
         while (roundCount > ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
             // 获取最早 4 条消息
             List<ChatHistory> oldestFour = listOldestMessagesForMerge(appId, ChatHistoryConstant.MESSAGES_PER_MERGE);
@@ -597,8 +571,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 //            this.save(aiSumEntity);
             syncRedisAfterMerge(appId, userSummary, aiSummary);
             roundCount--;
+            mergedCount++;
             log.info("已将最早两轮合并为一轮并同步 Redis，appId={}, 当前约轮数={}", appId, roundCount);
         }
+        log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeRoundCount={}, afterRoundCount={}, mergedCount={}",
+                reason, appId, beforeRoundCount, roundCount, mergedCount);
     }
 
     /**
@@ -706,20 +683,26 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     @Override
-    public void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+    public void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason) {
         if (appId == null || appId <= 0) {
             return;
         }
         if (codeGenTypeEnum != CodeGenTypeEnum.HTML && codeGenTypeEnum != CodeGenTypeEnum.MULTI_FILE) {
+            log.info("消息级截断跳过，compressType=message_truncate, triggerReason={}, appId={}, codeGenType={}",
+                    StrUtil.blankToDefault(triggerReason, "unknown"), appId,
+                    codeGenTypeEnum == null ? "null" : codeGenTypeEnum.getValue());
             return;
         }
         try {
             List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
             if (messages == null || messages.isEmpty()) {
+                log.info("消息级截断跳过，compressType=message_truncate, triggerReason={}, appId={}, codeGenType={}, beforeCount=0",
+                        StrUtil.blankToDefault(triggerReason, "unknown"), appId, codeGenTypeEnum.getValue());
                 return;
             }
             boolean changed = false;
             List<ChatMessage> newList = new ArrayList<>(messages.size());
+            int beforeCount = messages.size();
             for (ChatMessage message : messages) {
                 if (message instanceof AiMessage aiMessage) {
                     String raw = aiMessage.text();
@@ -734,10 +717,85 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             }
             if (changed) {
                 chatMemoryStore.updateMessages(appId, newList);
-                log.info("已在线压缩 Redis 历史上下文，appId={}, codeGenType={}", appId, codeGenTypeEnum.getValue());
+                log.info("消息级截断完成，compressType=message_truncate, triggerReason={}, appId={}, codeGenType={}, beforeCount={}, afterCount={}, changed=true",
+                        StrUtil.blankToDefault(triggerReason, "unknown"), appId, codeGenTypeEnum.getValue(), beforeCount, newList.size());
+            } else {
+                log.info("消息级截断跳过，compressType=message_truncate, triggerReason={}, appId={}, codeGenType={}, beforeCount={}, afterCount={}, changed=false",
+                        StrUtil.blankToDefault(triggerReason, "unknown"), appId, codeGenTypeEnum.getValue(), beforeCount, newList.size());
             }
         } catch (Exception e) {
             log.warn("在线压缩 Redis 历史上下文失败，appId={}", appId, e);
+        }
+    }
+
+    @Override
+    public boolean removeLatestFailedAiMessageForRetry(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason) {
+        if (appId == null || appId <= 0) {
+            return false;
+        }
+        if (codeGenTypeEnum != CodeGenTypeEnum.HTML && codeGenTypeEnum != CodeGenTypeEnum.MULTI_FILE) {
+            log.info("失败轮清理跳过，cleanupType=failed_round_cleanup, triggerReason={}, appId={}, codeGenType={}",
+                    StrUtil.blankToDefault(triggerReason, "unknown"), appId,
+                    codeGenTypeEnum == null ? "null" : codeGenTypeEnum.getValue());
+            return false;
+        }
+        try {
+            List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
+            if (messages == null || messages.isEmpty()) {
+                return false;
+            }
+            int removeIndex = -1;
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                ChatMessage msg = messages.get(i);
+                if (msg instanceof AiMessage aiMessage) {
+                    String text = aiMessage.text();
+                    if (StrUtil.isNotBlank(text) && text.length() > MEMORY_AI_MESSAGE_MAX_LENGTH) {
+                        removeIndex = i;
+                        break;
+                    }
+                }
+            }
+            if (removeIndex < 0) {
+                log.info("失败轮清理未命中，cleanupType=failed_round_cleanup, triggerReason={}, appId={}, codeGenType={}",
+                        StrUtil.blankToDefault(triggerReason, "unknown"), appId, codeGenTypeEnum.getValue());
+                return false;
+            }
+            List<ChatMessage> newList = new ArrayList<>(messages);
+            newList.remove(removeIndex);
+            chatMemoryStore.updateMessages(appId, newList);
+            log.info("失败轮清理完成，cleanupType=failed_round_cleanup, triggerReason={}, appId={}, codeGenType={}, removedIndex={}, beforeCount={}, afterCount={}",
+                    StrUtil.blankToDefault(triggerReason, "unknown"), appId, codeGenTypeEnum.getValue(), removeIndex, messages.size(), newList.size());
+            return true;
+        } catch (Exception e) {
+            log.warn("定向清理失败轮 AI 长消息失败，appId={}", appId, e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean shouldSummarizeBeforeWorkflowGeneration(Long appId) {
+        if (appId == null || appId <= 0) {
+            return false;
+        }
+        try {
+            QueryWrapper queryWrapper = new QueryWrapper();
+            queryWrapper.eq(ChatHistory::getAppId, appId);
+            queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.AI.getValue());
+            queryWrapper.orderBy(ChatHistory::getCreateTime, false);
+            queryWrapper.limit(1);
+            List<ChatHistory> latestAiMessages = this.list(queryWrapper);
+            if (latestAiMessages == null || latestAiMessages.isEmpty()) {
+                return false;
+            }
+            String latest = StrUtil.blankToDefault(latestAiMessages.getFirst().getMessage(), "");
+            String latestLower = latest.toLowerCase(Locale.ROOT);
+            if (latestLower.contains("[workflow] 生成失败")) {
+                return false;
+            }
+            return latestLower.contains("[workflow] 代码生成完成");
+        } catch (Exception e) {
+            log.warn("判断 workflow 入口是否触发会话总结失败，appId={}", appId, e);
+            return false;
         }
     }
 }

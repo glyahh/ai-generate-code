@@ -4,7 +4,6 @@ import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.config.OpenAiOutputGuardrailsConfig;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyInputGuardrail;
-import com.dbts.glyahhaigeneratecode.guardrail.RetryOutputGuardrail;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -80,13 +79,23 @@ public class aiCodeGeneratorServiceFactory {
      * @return
      */
     public aiCodeGeneratorService getAiCodeGeneratorService(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
-        return getAiCodeGeneratorService(appId, codeGenTypeEnum, false);
+        return getAiCodeGeneratorService(appId, codeGenTypeEnum, false, true);
     }
 
     /**
      * 获取 ai 代码生成器服务（支持首轮工具白名单控制）
      */
     public aiCodeGeneratorService getAiCodeGeneratorService(Long appId, CodeGenTypeEnum codeGenTypeEnum, boolean firstRound) {
+        return getAiCodeGeneratorService(appId, codeGenTypeEnum, firstRound, true);
+    }
+
+    /**
+     * 获取 ai 代码生成器服务（支持首轮工具白名单控制 + 可选缓存命中压缩）
+     */
+    public aiCodeGeneratorService getAiCodeGeneratorService(Long appId,
+                                                            CodeGenTypeEnum codeGenTypeEnum,
+                                                            boolean firstRound,
+                                                            boolean compactMemoryOnCacheHit) {
         // 首轮且 VUE：只暴露 writeFile，避免把“受限工具集”实例缓存到后续轮次, 并且直接创建Service
         if (firstRound && codeGenTypeEnum == CodeGenTypeEnum.VUE) {
             log.info("首轮 VUE 对话，创建 writeFile-only AI 服务，appId={}", appId);
@@ -107,8 +116,10 @@ public class aiCodeGeneratorServiceFactory {
                 }
             }
             if (service != null) {
-                // 缓存命中时也执行一次在线压缩，避免旧的超长历史 AI 消息持续放大请求 token
-                chatHistoryService.compactMemoryMessagesIfNeeded(appId, codeGenTypeEnum);
+                if (compactMemoryOnCacheHit) {
+                    // 缓存命中时也执行一次在线压缩，避免旧的超长历史 AI 消息持续放大请求 token
+                    chatHistoryService.compactMemoryMessagesIfNeeded(appId, codeGenTypeEnum, "cache_hit");
+                }
                 log.info("从缓存中获取 AI 服务实例，appId: {}", appId);
                 return service;
             }

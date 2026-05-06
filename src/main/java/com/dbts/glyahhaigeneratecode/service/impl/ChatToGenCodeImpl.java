@@ -86,7 +86,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         // 5.5. 生成前触发「旧轮次总结压缩」，降低上下文长度与 token 消耗
         // 说明：该压缩仅作用于 Redis 管理的上下文（不修改 DB），对后续生成请求生效。
-        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId());
+        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_normal");
 
         // 6. 调用 AI 生成代码（流式）
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
@@ -125,7 +125,11 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         );
         ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
 
-        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId());
+        if (!firstRound && chatHistoryService.shouldSummarizeBeforeWorkflowGeneration(appId)) {
+            chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_workflow_after_success");
+        } else {
+            log.info("workflow 入口跳过会话级总结，appId={}, firstRound={}", appId, firstRound);
+        }
 
         // 获取一手流式string代码
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(

@@ -43,7 +43,13 @@ public class CodeGeneratorNode {
             // Keep legacy behavior: only first round without generated dir is writeFile-only.
             boolean firstRound = Boolean.TRUE.equals(context.getFirstRound()) && context.getGeneratedCodeDir() == null;
             // 调用流式代码生成
-            Flux<String> codeStream = codeGeneratorFacade.generateAndSaveCodeStream(userMessage, generationType, appId, firstRound);
+            Flux<String> codeStream = codeGeneratorFacade.generateAndSaveCodeStream(
+                    userMessage,
+                    generationType,
+                    appId,
+                    firstRound,
+                    false
+            );
 
             // vue项目需要拼接
             if (generationType == CodeGenTypeEnum.VUE && streamChunkConsumer != null) {

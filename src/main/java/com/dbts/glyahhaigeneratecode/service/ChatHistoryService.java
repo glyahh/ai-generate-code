@@ -124,7 +124,18 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @param appId  应用 id
      * @param userId 用户 id（用于写入总结记录的 userId）
      */
-    void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId);
+    default void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId) {
+        trySummarizeOldestRoundsIfNeeded(appId, userId, "unknown");
+    }
+
+    /**
+     * 带触发来源标记的会话级总结压缩，便于线上定位由谁触发。
+     *
+     * @param appId         应用 id
+     * @param userId        用户 id
+     * @param triggerReason 触发来源（如 entry_normal / entry_workflow）
+     */
+    void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason);
 
     /**
      * 在线压缩 Redis ChatMemory 中的超长历史 AI 消息（仅影响模型上下文，不改 DB 历史文本）。
@@ -133,5 +144,46 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @param appId           应用 id
      * @param codeGenTypeEnum 代码生成类型
      */
-    void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum);
+    default void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+        compactMemoryMessagesIfNeeded(appId, codeGenTypeEnum, "unknown");
+    }
+
+    /**
+     * 带触发来源标记的消息级在线截断压缩。
+     *
+     * @param appId           应用 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param triggerReason   触发来源（如 workflow_quality_pass / cache_hit）
+     */
+    void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason);
+
+    /**
+     * 工作流重试前，定向清理 Redis ChatMemory 里上一轮失败生成的 AI 长消息（仅删失败产物，不清空整段会话）。
+     *
+     * @param appId           应用 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @return 是否执行了删除
+     */
+    default boolean removeLatestFailedAiMessageForRetry(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
+        return removeLatestFailedAiMessageForRetry(appId, codeGenTypeEnum, "unknown");
+    }
+
+    /**
+     * 带触发来源标记的失败轮无效产物清理。
+     *
+     * @param appId           应用 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param triggerReason   触发来源（如 workflow_retry / workflow_retry_exhausted）
+     * @return 是否执行了删除
+     */
+    boolean removeLatestFailedAiMessageForRetry(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason);
+
+    /**
+     * workflow 入口是否应触发会话级总结压缩。
+     * 仅在“非首轮 + 上一轮 workflow 成功”场景返回 true。
+     *
+     * @param appId 应用 id
+     * @return 是否触发会话级总结
+     */
+    boolean shouldSummarizeBeforeWorkflowGeneration(Long appId);
 }

@@ -5,6 +5,8 @@ import com.dbts.glyahhaigeneratecode.LangGraph4j.state.WorkflowContext;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
+import com.dbts.glyahhaigeneratecode.utils.SpringContextUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.GraphRepresentation;
@@ -25,6 +27,7 @@ import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
  */
 @Slf4j
 public class CodeGenWorkflow {
+    private static final int MAX_RETRY_COUNT = 3;
 
     public CompiledGraph<MessagesState<String>> createWorkflow() {
         return createWorkflow(null);
@@ -84,11 +87,33 @@ public class CodeGenWorkflow {
         }
 
         if (ctx.getQualityResult() != null && Boolean.FALSE.equals(ctx.getQualityResult().getIsValid())) {
-            log.info("代码质检未通过，重新执行 code_generator");
+            int currentRetryCount = ctx.getRetryCount() == null ? 0 : ctx.getRetryCount();
+            try {
+                ChatHistoryService chatHistoryService = SpringContextUtil.getBean(ChatHistoryService.class);
+                String reason = currentRetryCount >= MAX_RETRY_COUNT ? "workflow_retry_exhausted" : "workflow_retry";
+                boolean removed = chatHistoryService.removeLatestFailedAiMessageForRetry(ctx.getAppId(), ctx.getGenerationType(), reason);
+                log.info("质检失败后的失败产物清理完成，appId={}, retryCount={}, removed={}", ctx.getAppId(), currentRetryCount, removed);
+            } catch (Exception e) {
+                log.warn("质检失败后定向清理失败产物异常，appId={}, retryCount={}", ctx.getAppId(), currentRetryCount, e);
+            }
+            if (currentRetryCount >= MAX_RETRY_COUNT) {
+                log.warn("代码质检未通过且重试超过上限，结束工作流。appId={}, retryCount={}", ctx.getAppId(), currentRetryCount);
+                return "skip";
+            }
+            ctx.setRetryCount(currentRetryCount + 1);
+            log.info("代码质检未通过，重新执行 code_generator，retryCount={}", ctx.getRetryCount());
             // retry 场景：下一轮 code_generator 不应再按“首轮”限制工具集（writeFile-only）。
             // 直接修改 state 中的 ctx（可变引用）即可被后续节点读取。
             ctx.setFirstRound(false);
             return "retry";
+        }
+
+        // 仅在当前轮质检通过后压缩一次 Redis 记忆；失败轮不做任何压缩。
+        try {
+            ChatHistoryService chatHistoryService = SpringContextUtil.getBean(ChatHistoryService.class);
+            chatHistoryService.compactMemoryMessagesIfNeeded(ctx.getAppId(), ctx.getGenerationType(), "workflow_quality_pass");
+        } catch (Exception e) {
+            log.warn("质检通过后压缩 Redis 记忆失败，appId={}", ctx.getAppId(), e);
         }
 
         if (ctx.getGenerationType() == CodeGenTypeEnum.VUE) {

@@ -71,6 +71,12 @@ public class WorkflowContext implements Serializable {
     private Boolean firstRound;
 
     /**
+     * 工作流代码质检失败后的重试次数（仅 code_generator 重入计数）
+     */
+    @Builder.Default
+    private Integer retryCount = 0;
+
+    /**
      * 生成的代码目录
      */
     private String generatedCodeDir;
@@ -114,5 +120,4 @@ public class WorkflowContext implements Serializable {
         return Map.of(WORKFLOW_CONTEXT_KEY, context);
     }
 }
-
 

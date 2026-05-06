@@ -105,6 +105,8 @@ type ChatMessage = {
   workflowSteps?: WorkflowStepRow[]
   /** 本条消息是否收到 Mermaid 失败提示标记 */
   mermaidErrorNotice?: boolean
+  /** workflow 流式开始时间戳（用于长耗时提示） */
+  workflowStreamStartedAt?: number
   /**
    * 用于将 SSE 流与具体 assistant 气泡绑定。
    * 多并发流时，禁止再用“最后一条 assistant 消息”作为流式落点。
@@ -199,6 +201,9 @@ const codeTypePromptChoiceOnce = ref<string | null>(null)
 const eventSourceMap = new Map<string, EventSource>()
 const activeStreamOrder = ref<string[]>([])
 const activeStreamMeta = ref<Record<string, ActiveStreamMeta>>({})
+const WORKFLOW_SLOW_HINT_DELAY_MS = 120_000
+const workflowNowTs = ref(Date.now())
+let workflowSlowHintTicker: number | null = null
 
 const streaming = computed(() => Object.keys(activeStreamMeta.value).length > 0)
 let nextMessageId = 1
@@ -1578,6 +1583,26 @@ function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
   })
 }
 
+function getWorkflowLatestStepForMessage(m: ChatMessage): WorkflowStepRow | null {
+  const rows = getWorkflowStepsForMessage(m)
+  if (!rows.length) return null
+  return rows[rows.length - 1] ?? null
+}
+
+function isCodeGeneratingLabel(label: string): boolean {
+  const text = (label ?? '').trim()
+  if (!text) return false
+  return /代码生成中(\.\.\.|…)?$/.test(text) || /代码生成/.test(text)
+}
+
+function shouldShowWorkflowSlowHint(m: ChatMessage): boolean {
+  if (!isStreamActiveForMessage(m)) return false
+  if (!m.workflowStreamStartedAt) return false
+  const latest = getWorkflowLatestStepForMessage(m)
+  if (!latest || !isCodeGeneratingLabel(latest.label)) return false
+  return workflowNowTs.value - m.workflowStreamStartedAt >= WORKFLOW_SLOW_HINT_DELAY_MS
+}
+
 function workflowMessageKey(m: ChatMessage): string {
   return `${m.createTime ? 'h' : 's'}:${m.id}:${m.createTime ?? ''}`
 }
@@ -1797,6 +1822,23 @@ function stopStream(streamId?: string) {
   }
 }
 
+function startWorkflowSlowHintTicker() {
+  if (workflowSlowHintTicker != null) {
+    return
+  }
+  workflowSlowHintTicker = window.setInterval(() => {
+    workflowNowTs.value = Date.now()
+  }, 1000)
+}
+
+function stopWorkflowSlowHintTicker() {
+  if (workflowSlowHintTicker == null) {
+    return
+  }
+  window.clearInterval(workflowSlowHintTicker)
+  workflowSlowHintTicker = null
+}
+
 function createStreamId(): string {
   // 足够区分同一毫秒内的多次发送；无需引入依赖
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`
@@ -1894,6 +1936,7 @@ async function sendMessage(text?: string) {
     content: '',
     uiState: createAssistantUiState(),
     streamId,
+    workflowStreamStartedAt: genMode.value === 'workflow' ? Date.now() : undefined,
     // workflow 模式下先放入“初始化”占位步骤，避免首个工作流卡片延迟到首条 [workflow] SSE 后才出现。
     workflowSteps: genMode.value === 'workflow' ? [{ step: 1, label: '初始化' }] : [],
   })
@@ -2188,6 +2231,7 @@ function goEdit() {
 onMounted(() => {
   syncGenMode()
   void loadAppInfo()
+  startWorkflowSlowHintTicker()
   // 首次进入页面先做一次清理，避免历史会话遗留覆盖层影响当前预览滚动。
   cleanupVisualEditorArtifacts()
   if (chatMessagesRef.value) {
@@ -2196,6 +2240,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopWorkflowSlowHintTicker()
   stopPreviewProbing()
   exitVisualEditMode()
   // 页面卸载时关闭所有 SSE，避免后台连接泄露
@@ -2390,6 +2435,15 @@ onBeforeUnmount(() => {
                           >
                             <span class="workflow-step-badge">{{ row.step }}</span>
                             <span class="workflow-step-label">{{ row.label }}</span>
+                            <span
+                              class="workflow-step-slow-hint"
+                              :class="{
+                                'workflow-step-slow-hint--visible':
+                                  row.step === getWorkflowLatestStepForMessage(m)?.step && shouldShowWorkflowSlowHint(m),
+                              }"
+                            >
+                              Taking longer than expected
+                            </span>
                           </div>
                           </div>
                         </div>
@@ -3151,6 +3205,27 @@ onBeforeUnmount(() => {
 .workflow-step-label {
   flex: 1;
   min-width: 0;
+}
+
+.workflow-step-slow-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #9a3412;
+  border: 1px solid rgba(251, 146, 60, 0.5);
+  background: linear-gradient(135deg, rgba(254, 215, 170, 0.45), rgba(255, 237, 213, 0.85));
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.workflow-step-slow-hint--visible {
+  opacity: 1;
+  visibility: visible;
 }
 
 @keyframes workflowPulse {
