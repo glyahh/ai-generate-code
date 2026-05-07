@@ -1970,6 +1970,16 @@ function isStreamActiveForMessage(m: ChatMessage): boolean {
   return !!activeStreamMeta.value[sid]
 }
 
+function isToolRequestPending(m: ChatMessage, idx: number): boolean {
+  if (!isStreamActiveForMessage(m)) return false
+  const segs = getMessageUiSegments(m)
+  // 仅最后一个 tool_request 才显示动效，避免历史 pill 常驻闪烁
+  for (let i = segs.length - 1; i > idx; i--) {
+    if (segs[i]?.kind === 'tool_request') return false
+  }
+  return true
+}
+
 function appendAssistantChunkToStream(streamId: string, chunk: string) {
   const meta = activeStreamMeta.value[streamId]
   if (!meta) return
@@ -2540,7 +2550,7 @@ onBeforeUnmount(() => {
                           <div class="workflow-steps-title-row">
                             <div class="workflow-steps-title">工作流进度</div>
                             <div v-if="hasMermaidNoticeForMessage(m)" class="workflow-mermaid-notice">
-                              Mermaid构造异常（不影响生成）
+                              存在 Mermaid 构造失败（不影响生成）
                             </div>
                           </div>
                           <div class="workflow-steps-list">
@@ -2574,6 +2584,14 @@ onBeforeUnmount(() => {
                       <div v-if="segment.kind === 'tool_request'" class="tool-hint-pill">
                         <span class="tool-hint-label">选择工具</span>
                         <span class="tool-hint-main">{{ segment.toolName }}</span>
+                        <span
+                          v-if="isToolRequestPending(m, idx)"
+                          class="tool-hint-shimmer"
+                          aria-label="代码努力写入中"
+                        >
+                          <i class="dot" /><i class="dot" /><i class="dot" />
+                          <span class="shimmer-text">代码努力写入中 -></span>
+                        </span>
                       </div>
 
                       <!-- TOOL_EXECUTED：写入文件卡片（可流式追加） -->
@@ -2805,7 +2823,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: 100vh;
+  min-height: calc(100vh - 64px - 48px - 80px); /* 减去 BasicLayout header/padding/bottom */
   overflow: hidden;
 }
 
@@ -3411,13 +3429,11 @@ onBeforeUnmount(() => {
   margin: 0;
   border-radius: 6px;
   flex: 1;
-  min-height: 200px;
 }
 
 .bubble-content :deep(.code-block-container .code-block) {
   max-height: none;
   flex: 1;
-  min-height: 180px;
 }
 
 .bubble-user .bubble-content :deep(.code-block-container) {
@@ -3659,6 +3675,70 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 
+.tool-hint-shimmer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px 1px 6px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(34, 197, 94, 0.12) 0%,
+    rgba(14, 165, 233, 0.18) 50%,
+    rgba(34, 197, 94, 0.12) 100%
+  );
+  background-size: 200% 100%;
+  animation: tool-hint-shimmer-slide 1.6s linear infinite;
+  font-size: 11px;
+  color: #0f172a;
+}
+
+.tool-hint-shimmer .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: tool-hint-dot-blink 1.2s ease-in-out infinite;
+}
+
+.tool-hint-shimmer .dot:nth-child(2) {
+  animation-delay: 0.18s;
+  background: #0ea5e9;
+}
+
+.tool-hint-shimmer .dot:nth-child(3) {
+  animation-delay: 0.36s;
+  background: #22c55e;
+}
+
+.tool-hint-shimmer .shimmer-text {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+@keyframes tool-hint-shimmer-slide {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes tool-hint-dot-blink {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
 .tool-call-card {
   align-self: stretch;
   display: flex;
@@ -3748,7 +3828,6 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
   border-radius: 6px;
   flex: 1;
-  min-height: 200px;
 }
 
 @media (max-width: 992px) {
