@@ -22,6 +22,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+
 /**
  * 应用对话生成代码外观类，串联应用配置、权限校验和代码生成
  * 门面类(工具类)
@@ -31,6 +38,10 @@ import reactor.core.publisher.Flux;
 @RequiredArgsConstructor
 @Slf4j
 public class ChatToGenCodeImpl implements ChatToGenCode {
+    private static final long REQUEST_DEDUP_WINDOW_MS = 12_000L;
+    private static final int REQUEST_DEDUP_CACHE_MAX_SIZE = 10_000;
+    private static final Map<String, Long> REQUEST_DEDUP_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Long, ReentrantLock> FIRST_ROUND_LOCKS = new ConcurrentHashMap<>();
 
     private final AppService appService;
 
@@ -67,24 +78,32 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         CodeGenTypeEnum codeGenTypeEnum = resolveCodeGenType(app.getCodeGenType());
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
 
-        // 4.5 首轮判定：在写入本轮 user 消息前统计，round=0 代表首轮
-        int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
-        boolean firstRound = roundsBefore == 0;
+        assertRequestNotDuplicate(appId, user.getId(), message, "legacy");
 
-        // 5. 保存用户消息到对话历史(Mysql), 入链路前进行最小审查，并写入审查日志 + 会话扩展字段
-        String originalPrompt = message;
-        PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
-        log.info("prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
-                appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
-        chatHistoryService.addChatMessage(
-                appId,
-                message,
-                ChatHistoryMessageTypeEnum.USER.getValue(),
-                user.getId(),
-                auditResult.getAction(),
-                auditResult.getHitRule()
-        );
-        ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
+        // 4.5 首轮判定：同一 appId 串行判定 + 入库，避免并发下都读到 rounds=0
+        final boolean firstRound;
+        ReentrantLock lock = getFirstRoundLock(appId);
+        lock.lock();
+        try {
+            int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
+            firstRound = roundsBefore == 0;
+
+            // 5. 保存用户消息到对话历史(Mysql), 入链路前进行最小审查，并写入审查日志 + 会话扩展字段
+            PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
+            log.info("prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
+                    appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
+            chatHistoryService.addChatMessage(
+                    appId,
+                    message,
+                    ChatHistoryMessageTypeEnum.USER.getValue(),
+                    user.getId(),
+                    auditResult.getAction(),
+                    auditResult.getHitRule()
+            );
+            ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
+        } finally {
+            lock.unlock();
+        }
 
         // 5.5. 生成前触发「旧轮次总结压缩」，降低上下文长度与 token 消耗
         // 说明：该压缩仅作用于 Redis 管理的上下文（不修改 DB），对后续生成请求生效。
@@ -112,21 +131,30 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         CodeGenTypeEnum codeGenTypeEnum = resolveCodeGenType(app.getCodeGenType());
         ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
 
-        int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
-        boolean firstRound = roundsBefore == 0;
+        assertRequestNotDuplicate(appId, user.getId(), message, "workflow");
 
-        PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
-        log.info("workflow prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
-                appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
-        chatHistoryService.addChatMessage(
-                appId,
-                message,
-                ChatHistoryMessageTypeEnum.USER.getValue(),
-                user.getId(),
-                auditResult.getAction(),
-                auditResult.getHitRule()
-        );
-        ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
+        final boolean firstRound;
+        ReentrantLock lock = getFirstRoundLock(appId);
+        lock.lock();
+        try {
+            int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
+            firstRound = roundsBefore == 0;
+
+            PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
+            log.info("workflow prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
+                    appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
+            chatHistoryService.addChatMessage(
+                    appId,
+                    message,
+                    ChatHistoryMessageTypeEnum.USER.getValue(),
+                    user.getId(),
+                    auditResult.getAction(),
+                    auditResult.getHitRule()
+            );
+            ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
+        } finally {
+            lock.unlock();
+        }
 
         if (!firstRound && chatHistoryService.shouldSummarizeBeforeWorkflowGeneration(appId)) {
             chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_workflow_after_success");
@@ -170,6 +198,47 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "用户输入内容不能为空");
         ThrowUtils.throwIf(user == null || user.getId() == null, ErrorCode.NOT_LOGIN_ERROR, "用户未登录或会话失效");
+    }
+
+    /**
+     * 获取应用第一次请求锁
+     * 第一次请求时,会锁定应用,避免并发下都读到 rounds=0
+     * @param appId
+     * @return
+     */
+    private ReentrantLock getFirstRoundLock(Long appId) {
+        return FIRST_ROUND_LOCKS.computeIfAbsent(appId, k -> new ReentrantLock());
+    }
+
+    private void assertRequestNotDuplicate(Long appId, Long userId, String message, String channel) {
+        long now = System.currentTimeMillis();
+        // 小成本定期清理，防止 map 无界增长
+        if (REQUEST_DEDUP_CACHE.size() > REQUEST_DEDUP_CACHE_MAX_SIZE) {
+            REQUEST_DEDUP_CACHE.entrySet().removeIf(e -> now - e.getValue() > REQUEST_DEDUP_WINDOW_MS);
+        }
+        String key = buildRequestDedupKey(appId, userId, message, channel);
+        Long lastTs = REQUEST_DEDUP_CACHE.put(key, now);
+        if (lastTs != null && now - lastTs < REQUEST_DEDUP_WINDOW_MS) {
+            log.warn("拦截重复请求，appId={}, userId={}, channel={}, gapMs={}", appId, userId, channel, now - lastTs);
+            throw new MyException(ErrorCode.TOO_MANY_REQUEST, "请求过于频繁，请稍后重试");
+        }
+    }
+
+    private String buildRequestDedupKey(Long appId, Long userId, String message, String channel) {
+        String normalized = StrUtil.trimToEmpty(message).replaceAll("\\s+", " ");
+        String digest = sha256Base64(normalized);
+        return appId + "|" + userId + "|" + channel + "|" + digest;
+    }
+
+    private String sha256Base64(String text) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = md.digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        } catch (Exception e) {
+            // 退化兜底：即使哈希异常也保证 key 构造可用
+            return String.valueOf((text == null ? "" : text).hashCode());
+        }
     }
 
     /**

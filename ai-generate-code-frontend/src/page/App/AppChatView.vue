@@ -101,6 +101,10 @@ type ChatMessage = {
   content: string
   createTime?: string
   uiState?: AssistantUiState
+  /** 预解析 UI 片段缓存（主要用于历史回放，避免模板重复重解析） */
+  cachedUiSegments?: UiSegment[]
+  /** 预解析工作流步骤缓存（主要用于历史回放） */
+  cachedWorkflowSteps?: WorkflowStepRow[]
   /** 工作流 SSE：步骤卡片（流式中累加；历史从 content 回溯解析） */
   workflowSteps?: WorkflowStepRow[]
   /** 本条消息是否收到 Mermaid 失败提示标记 */
@@ -211,6 +215,18 @@ let nextMessageId = 1
 const hasGenerated = ref(false)
 /** 当前会话新产生的消息（不含历史） */
 const sessionMessages = ref<ChatMessage[]>([])
+/** 历史消息（由 loadedHistoryRecords 预处理而来，避免渲染期重复 map+parse） */
+const historyMessages = ref<ChatMessage[]>([])
+
+type MessageRenderCache = {
+  workflowVersion?: string
+  workflowSteps?: WorkflowStepRow[]
+  uiVersion?: string
+  uiSegments?: UiSegment[]
+  renderableVersion?: string
+  renderable?: boolean
+}
+const messageRenderCache = new WeakMap<ChatMessage, MessageRenderCache>()
 
 type GeneratedFileItem = {
   path: string
@@ -255,19 +271,71 @@ const isVueProject = computed(() => {
 /** 将 ChatHistory 转为 ChatMessage */
 function historyToMessage(r: ChatHistory): ChatMessage {
   const role = (r.messageType?.toLowerCase() === 'user' ? 'user' : 'assistant') as 'user' | 'assistant'
-  return {
+  const msg: ChatMessage = {
     id: r.id ?? 0,
     role,
     content: r.message ?? '',
     createTime: r.createTime,
   }
+  precomputeMessageRenderCaches(msg)
+  return msg
+}
+
+function stableSerializeWorkflowRows(rows: WorkflowStepRow[] | undefined): string {
+  if (!rows || rows.length === 0) return '[]'
+  return rows.map((row) => `${row.step}:${row.label}`).join('|')
+}
+
+function buildWorkflowRenderVersion(
+  m: ChatMessage,
+  opts?: { historyMode?: boolean; streaming?: boolean },
+): string {
+  const rawVersion = stableSerializeWorkflowRows(m.workflowSteps)
+  return `${rawVersion}|h=${opts?.historyMode === true ? 1 : 0}|s=${opts?.streaming === true ? 1 : 0}`
+}
+
+function buildUiRenderVersion(m: ChatMessage): string {
+  if (m.uiState) {
+    // 流式消息直接走 uiState，不使用历史缓存
+    return `stream:${m.uiState.segments.length}:${m.uiState.buffer.length}:${m.uiState.stage}`
+  }
+  return `hist:${m.content ?? ''}`
+}
+
+function precomputeMessageRenderCaches(m: ChatMessage) {
+  if (m.role !== 'assistant' || m.uiState) return
+  const cache = messageRenderCache.get(m) ?? {}
+
+  const rawWorkflow = resolveWorkflowStepsFromMessageContent(m.workflowSteps, m.content ?? '')
+  const workflowVersion = buildWorkflowRenderVersion(m, {
+    historyMode: !!m.createTime,
+    streaming: false,
+  })
+  const normalizedWorkflow = normalizeWorkflowStepsForUi(rawWorkflow, {
+    historyMode: !!m.createTime,
+    streaming: false,
+  })
+  cache.workflowVersion = workflowVersion
+  cache.workflowSteps = normalizedWorkflow
+  m.cachedWorkflowSteps = normalizedWorkflow
+
+  const uiVersion = buildUiRenderVersion(m)
+  const uiSegments = buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
+  cache.uiVersion = uiVersion
+  cache.uiSegments = uiSegments
+  m.cachedUiSegments = uiSegments
+
+  cache.renderableVersion = `${workflowVersion}|${uiVersion}`
+  cache.renderable = normalizedWorkflow.length > 0 || uiSegments.some((seg) => {
+    if (seg.kind !== 'markdown') return true
+    return (seg.content ?? '').trim().length > 0
+  })
+  messageRenderCache.set(m, cache)
 }
 
 /** 用于展示的完整消息列表（历史 + 当前会话），按 createTime 升序，无 createTime 的当前会话消息始终排在最下面 */
 const displayMessages = computed(() => {
-  const historyMsgs = loadedHistoryRecords.value.map(historyToMessage)
-  const session = sessionMessages.value
-  const combined = [...historyMsgs, ...session]
+  const combined = [...historyMessages.value, ...sessionMessages.value]
   return combined.sort((a, b) => {
     const ta = a.createTime || ''
     const tb = b.createTime || ''
@@ -1576,11 +1644,27 @@ function stripVisualEditModelOnlyHint(text: string): string {
 
 function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
   if (m.role !== 'assistant') return []
+  const historyMode = isHistoryMessage(m)
+  const streaming = isStreamActiveForMessage(m)
+  const version = buildWorkflowRenderVersion(m, { historyMode, streaming })
+  const cache = messageRenderCache.get(m)
+  if (cache?.workflowVersion === version && cache.workflowSteps) {
+    return cache.workflowSteps
+  }
   const raw = resolveWorkflowStepsFromMessageContent(m.workflowSteps, m.content ?? '')
-  return normalizeWorkflowStepsForUi(raw, {
-    historyMode: isHistoryMessage(m),
-    streaming: isStreamActiveForMessage(m),
+  const normalized = normalizeWorkflowStepsForUi(raw, {
+    historyMode,
+    streaming,
   })
+  messageRenderCache.set(m, {
+    ...(cache ?? {}),
+    workflowVersion: version,
+    workflowSteps: normalized,
+  })
+  if (historyMode) {
+    m.cachedWorkflowSteps = normalized
+  }
+  return normalized
 }
 
 function getWorkflowLatestStepForMessage(m: ChatMessage): WorkflowStepRow | null {
@@ -1663,17 +1747,53 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
     }
     return segs
   }
-  return buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
+  const version = buildUiRenderVersion(m)
+  const cache = messageRenderCache.get(m)
+  if (cache?.uiVersion === version && cache.uiSegments) {
+    return cache.uiSegments
+  }
+  const segments = buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
+  messageRenderCache.set(m, {
+    ...(cache ?? {}),
+    uiVersion: version,
+    uiSegments: segments,
+  })
+  if (isHistoryMessage(m)) {
+    m.cachedUiSegments = segments
+  }
+  return segments
 }
 
 function assistantHasRenderableOutput(m: ChatMessage): boolean {
   if (m.role !== 'assistant') return true
-  if (getWorkflowStepsForMessage(m).length > 0) return true
+  const workflowVersion = buildWorkflowRenderVersion(m, {
+    historyMode: isHistoryMessage(m),
+    streaming: isStreamActiveForMessage(m),
+  })
+  const uiVersion = buildUiRenderVersion(m)
+  const combinedVersion = `${workflowVersion}|${uiVersion}`
+  const cache = messageRenderCache.get(m)
+  if (cache?.renderableVersion === combinedVersion && typeof cache.renderable === 'boolean') {
+    return cache.renderable
+  }
+  if (getWorkflowStepsForMessage(m).length > 0) {
+    messageRenderCache.set(m, {
+      ...(cache ?? {}),
+      renderableVersion: combinedVersion,
+      renderable: true,
+    })
+    return true
+  }
   const segs = getMessageUiSegments(m)
   for (const s of segs) {
     if (s.kind !== 'markdown') return true
     if ((s.content ?? '').trim().length > 0) return true
   }
+  messageRenderCache.set(m, {
+    ...(cache ?? {}),
+    renderableVersion: combinedVersion,
+    renderable: false,
+  })
   return false
 }
 
@@ -2120,6 +2240,7 @@ async function loadChatHistory(lastCreateTime?: string) {
       } else {
         loadedHistoryRecords.value = records
       }
+      historyMessages.value = loadedHistoryRecords.value.map(historyToMessage)
       // 历史回放需要重建工具输出（否则“查看项目回显/架构”按钮会丢失）
       rebuildGeneratedFilesFromHistory()
       const totalRow = page?.totalRow ?? 0

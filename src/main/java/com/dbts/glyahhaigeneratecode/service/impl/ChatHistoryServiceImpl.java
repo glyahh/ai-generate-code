@@ -512,7 +512,12 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         queryWrapper.eq(ChatHistory::getAppId, appId);
         queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
         long count = this.count(queryWrapper);
-        log.info("统计对话轮数，appId={}, rounds={}", appId, count);
+        int redisRounds = countRoundsByAppIdInternal(appId);
+        if (redisRounds != (int) count) {
+            log.warn("对话轮数存在 Redis/DB 偏差，appId={}, dbRounds={}, redisRounds={}", appId, count, redisRounds);
+        } else {
+            log.info("统计对话轮数，appId={}, rounds={}, redisAligned=true", appId, count);
+        }
         return (int) count;
     }
 
@@ -586,6 +591,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         try {
             List<ChatMessage> messages = chatMemoryStore.getMessages(appId);
             if (messages == null || messages.isEmpty()) {
+                log.info("从 Redis 统计轮数，appId={}, rounds=0, reason=empty", appId);
                 return 0;
             }
             int userCount = 0;
@@ -594,13 +600,16 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                     userCount++;
                 }
             }
+            log.info("从 Redis 统计轮数，appId={}, rounds={}", appId, userCount);
             return userCount;
         } catch (Exception e) {
             log.warn("从 Redis 统计对话轮数失败，回退到数据库统计, appId={}", appId, e);
             QueryWrapper q = new QueryWrapper();
             q.eq(ChatHistory::getAppId, appId);
             q.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
-            return (int) this.count(q);
+            int dbRounds = (int) this.count(q);
+            log.info("Redis 统计失败后回退 DB 轮数，appId={}, dbRounds={}", appId, dbRounds);
+            return dbRounds;
         }
     }
 
@@ -677,6 +686,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             newList.add(0, new AiMessage(aiSummary));
             newList.add(0, new UserMessage(userSummary));
             chatMemoryStore.updateMessages(appId, newList);
+            log.info("Redis memory 已按摘要重建，appId={}, beforeCount={}, afterCount={}",
+                    appId, messages.size(), newList.size());
         } catch (Exception e) {
             log.error("同步 Redis 对话记忆失败，appId={}", appId, e);
         }

@@ -148,6 +148,9 @@ function extractWorkflowStepsFromText(text: string): WorkflowStepRow[] {
 }
 
 const INTERNAL_DIR_LINE_RE = /^(生成目录|构建目录)\s*[:：].+$/
+const SHORT_NOISE_ENGLISH_WORD_RE = /^[a-z]{1,14}$/i
+const PROTOCOL_FRAGMENT_RE = /^(data:|event:|id:|retry:|workflow_notice|workflow)\b/i
+const TRAILING_NOISE_TOKEN_RE = /\b(background|color|padding|margin|border|font|display|width|height)\s*$/i
 
 export type SseLineAccumulator = { carry: string }
 export type WorkflowSseFilterResult = {
@@ -167,6 +170,42 @@ function normalizeUiText(text: string): string {
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
+}
+
+function isLikelyReadableCarryText(text: string): boolean {
+  const t = (text ?? '').trim()
+  if (!t) return false
+  if (INTERNAL_DIR_LINE_RE.test(t)) return false
+  if (WORKFLOW_STEP_LINE_RE.test(t)) return false
+  if (WORKFLOW_DONE_LINE_RE.test(t)) return false
+  if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) return false
+  if (PROTOCOL_FRAGMENT_RE.test(t)) return false
+  if (SHORT_NOISE_ENGLISH_WORD_RE.test(t)) return false
+
+  // 存在中日韩字符，通常是用户可读正文
+  if (/[\u4e00-\u9fa5]/.test(t)) return true
+
+  // 英文至少两个词，或有正常句子标点，才允许尾包回灌
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.length >= 2) return true
+  if (/[.!?;,:，。！？；：]/.test(t)) return true
+  return false
+}
+
+function stripInlineNoiseFragments(line: string): string {
+  if (!line) return ''
+  let out = line
+    .replace(WORKFLOW_STEP_GLOBAL_RE, '')
+    .replace(WORKFLOW_NOTICE_MERMAID_ERROR_RE, '')
+    .replace(/\[workflow\][^\n\r]*/g, '')
+    .replace(/\b(?:data|event|id|retry)\s*:\s*[^\s]+/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+
+  if (TRAILING_NOISE_TOKEN_RE.test(out)) {
+    out = out.replace(TRAILING_NOISE_TOKEN_RE, '').trim()
+  }
+  return out
 }
 
 /**
@@ -269,6 +308,9 @@ export function flushAssistantSseCarry(acc: SseLineAccumulator): WorkflowSseFilt
       return { uiText: '', newSteps, mermaidErrorNotice }
     }
   }
+  if (!isLikelyReadableCarryText(tail)) {
+    return { uiText: '', newSteps, mermaidErrorNotice }
+  }
   return { uiText: normalizeUiText(tail), newSteps, mermaidErrorNotice }
 }
 
@@ -281,15 +323,20 @@ export function stripAssistantNoiseLines(text: string): string {
   if (!text) return ''
   return text
     .split(/\r?\n/)
-    .filter((line) => {
+    .map((line) => {
       const t = line.trim()
-      if (!t) return true
-      if (WORKFLOW_STEP_LINE_RE.test(t)) return false
-      if (WORKFLOW_DONE_LINE_RE.test(t)) return false
-      if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) return false
-      if (INTERNAL_DIR_LINE_RE.test(t)) return false
-      return true
+      if (!t) return line
+      if (WORKFLOW_STEP_LINE_RE.test(t)) return ''
+      if (WORKFLOW_DONE_LINE_RE.test(t)) return ''
+      if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) return ''
+      if (INTERNAL_DIR_LINE_RE.test(t)) return ''
+      const stripped = stripInlineNoiseFragments(line)
+      if (!stripped) return ''
+      if (SHORT_NOISE_ENGLISH_WORD_RE.test(stripped)) return ''
+      if (PROTOCOL_FRAGMENT_RE.test(stripped)) return ''
+      return stripped
     })
+    .filter((line) => line !== '')
     .join('\n')
 }
 

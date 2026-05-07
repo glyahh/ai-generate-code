@@ -20,7 +20,9 @@ public class ProjectBuilderNode {
     public static AsyncNodeAction<MessagesState<String>> create() {
         return node_async(state -> {
             WorkflowContext context = WorkflowContext.getContext(state);
-            log.info("执行节点: 项目构建");
+            Long appId = context != null ? context.getAppId() : null;
+            String source = "workflow";
+            log.info("执行节点: 项目构建, source={}, appId={}", source, appId);
 
             // 获取必要的参数
             String generatedCodeDir = context.getGeneratedCodeDir();
@@ -34,19 +36,19 @@ public class ProjectBuilderNode {
                 if (buildSuccess) {
                     // 构建成功，返回 dist 目录路径
                     buildResultDir = generatedCodeDir + File.separator + "dist";
-                    log.info("Vue 项目构建成功，dist 目录: {}", buildResultDir);
+                    log.info("Vue 项目构建成功，source={}, appId={}, dist={}", source, appId, buildResultDir);
                 } else {
                     throw new MyException(ErrorCode.SYSTEM_ERROR, "Vue 项目构建失败");
                 }
             } catch (Exception e) {
-                log.error("Vue 项目构建异常: {}", e.getMessage(), e);
+                log.error("Vue 项目构建异常, source={}, appId={}, err={}", source, appId, e.getMessage(), e);
                 buildResultDir = generatedCodeDir; // 异常时返回原路径
             }
 
             // 更新状态
             context.setCurrentStep("项目构建");
             context.setBuildResultDir(buildResultDir);
-            log.info("项目构建节点完成，最终目录: {}", buildResultDir);
+            log.info("项目构建节点完成，source={}, appId={}, finalDir={}", source, appId, buildResultDir);
             return WorkflowContext.saveContext(context);
         });
     }
