@@ -179,6 +179,16 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     boolean removeLatestFailedAiMessageForRetry(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason);
 
     /**
+     * 按 (appId, userId, message, type=USER) 删除最新一条用户消息，用于异常回滚。
+     *
+     * @param appId   应用 id
+     * @param userId  用户 id
+     * @param message 用户消息原文
+     * @return 是否删除成功
+     */
+    boolean removeUserMessageByContent(Long appId, Long userId, String message);
+
+    /**
      * workflow 入口是否应触发会话级总结压缩。
      * 仅在“非首轮 + 上一轮 workflow 成功”场景返回 true。
      *

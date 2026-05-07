@@ -97,7 +97,7 @@ langchain4j:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${langchain4j.open-ai.chat-model.api-key}
       model-name: qwen3.5-flash
-      max-tokens: 2048
+      max-tokens: 768
       temperature: 0.1
       log-requests: true
       log-responses: true
@@ -133,13 +133,13 @@ aliyun:
 
 
 
-# springdoc-openapi????
+# springdoc-openapi 配置
 springdoc:
   group-configs:
     - group: 'default'
       paths-to-match: '/**'
       packages-to-scan: com.dbts.glyahhaigeneratecode.controller
-# knife4j?????
+# knife4j 配置项
 knife4j:
   enable: true
   setting:

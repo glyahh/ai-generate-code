@@ -773,6 +773,30 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     @Override
+    public boolean removeUserMessageByContent(Long appId, Long userId, String message) {
+        if (appId == null || appId <= 0 || userId == null || userId <= 0 || StrUtil.isBlank(message)) {
+            return false;
+        }
+        try {
+            QueryWrapper queryWrapper = new QueryWrapper();
+            queryWrapper.eq(ChatHistory::getAppId, appId);
+            queryWrapper.eq(ChatHistory::getUserId, userId);
+            queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
+            queryWrapper.eq(ChatHistory::getMessage, message);
+            queryWrapper.orderBy(ChatHistory::getCreateTime, false);
+            queryWrapper.limit(1);
+            List<ChatHistory> latestMatches = this.list(queryWrapper);
+            if (latestMatches == null || latestMatches.isEmpty()) {
+                return false;
+            }
+            return this.removeById(latestMatches.getFirst().getId());
+        } catch (Exception e) {
+            log.warn("按内容回滚用户消息失败, appId={}, userId={}", appId, userId, e);
+            return false;
+        }
+    }
+
+    @Override
     public boolean shouldSummarizeBeforeWorkflowGeneration(Long appId) {
         if (appId == null || appId <= 0) {
             return false;

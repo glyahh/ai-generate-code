@@ -5,6 +5,7 @@ import com.dbts.glyahhaigeneratecode.core.AiCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.core.WorkflowCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.core.handler.StreamHandlerExecutor;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
+import dev.langchain4j.guardrail.InputGuardrailException;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyAuditEvaluator;
 import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyAuditResult;
@@ -71,6 +72,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         boolean firstRound = roundsBefore == 0;
 
         // 5. 保存用户消息到对话历史(Mysql), 入链路前进行最小审查，并写入审查日志 + 会话扩展字段
+        String originalPrompt = message;
         PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
         log.info("prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
                 appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
@@ -98,6 +100,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     @Override
     public Flux<String> chatToGenCodeByWorkflow(Long appId, String message, User user) {
         validateParams(appId, message, user);
+        String originalPrompt = message;
 
         App app = appService.getById(appId);
         if (app == null) {
@@ -137,7 +140,11 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         // 将代码转化成想要的格式,持久化到数据库
         // 解析一下,准备给前端了
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message);
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message)
+                .doOnError(InputGuardrailException.class, e -> {
+                    chatHistoryService.removeUserMessageByContent(appId, user.getId(), originalPrompt);
+                    log.warn("Guardrail 拒绝，已回滚 DB user 消息，appId={}", appId);
+                });
     }
 
     private CodeGenTypeEnum resolveCodeGenType(String codeGenType) {

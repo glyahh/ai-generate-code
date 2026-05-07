@@ -17,7 +17,7 @@ public final class PromptSafetyAuditEvaluator {
     /**
      * 普通文本输入长度上限（用于拦截明显异常的超长提示词）。
      */
-    private static final int MAX_INPUT_LENGTH = 1000;
+    private static final int MAX_INPUT_LENGTH = 2200;
 
     /**
      * 代码类输入长度上限：当输入内容包含明显的代码/文件片段时，允许更长内容，
@@ -46,7 +46,7 @@ public final class PromptSafetyAuditEvaluator {
         if (input.length() > MAX_INPUT_LENGTH) {
             // 允许代码类内容更长（例如：上一轮生成的 HTML/多文件内容进入上下文，二轮要求增量修改）
             if (!looksLikeCodeOrProjectText(input) || input.length() > MAX_CODE_INPUT_LENGTH) {
-                return PromptSafetyAuditResult.reject("LENGTH_LIMIT", "输入内容过长，不要超过 1000 字");
+                return PromptSafetyAuditResult.reject("LENGTH_LIMIT", "输入内容过长，不要超过 2200 字");
             }
         }
         if (StrUtil.isBlank(input)) {

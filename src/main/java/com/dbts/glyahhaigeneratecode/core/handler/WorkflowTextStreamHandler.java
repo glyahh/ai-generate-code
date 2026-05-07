@@ -6,10 +6,12 @@ import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Workflow 文本流处理器。
- * 仅用于 /chat/gen/workflow 路由，保留原始文本协议并避免空消息落库。
  */
 @Slf4j
 public class WorkflowTextStreamHandler {
@@ -19,32 +21,42 @@ public class WorkflowTextStreamHandler {
                                long appId,
                                User loginUser) {
         StringBuilder aiResponseBuilder = new StringBuilder();
+        AtomicBoolean persisted = new AtomicBoolean(false);
+
         return originFlux
                 .map(chunk -> {
                     aiResponseBuilder.append(chunk);
                     return chunk;
                 })
                 .doOnComplete(() -> {
-                    String aiResponse = aiResponseBuilder.toString();
-                    if (StrUtil.isBlank(aiResponse)) {
-                        log.info("workflow 流结束时 AI 响应为空，跳过写入聊天历史，appId={}", appId);
+                    if (!persisted.compareAndSet(false, true)) {
                         return;
                     }
-                    chatHistoryService.addChatMessage(
-                            appId,
-                            aiResponse,
-                            ChatHistoryMessageTypeEnum.AI.getValue(),
-                            loginUser.getId()
-                    );
+                    String aiResponse = aiResponseBuilder.toString();
+                    if (StrUtil.isBlank(aiResponse)) {
+                        log.info("workflow stream completed with blank response, skip persist, appId={}", appId);
+                        return;
+                    }
+                    chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
                 })
                 .doOnError(error -> {
-                    String errorMessage = "AI回复失败: " + error.getMessage();
-                    chatHistoryService.addChatMessage(
-                            appId,
-                            errorMessage,
-                            ChatHistoryMessageTypeEnum.AI.getValue(),
-                            loginUser.getId()
-                    );
+                    if (persisted.compareAndSet(false, true)) {
+                        String errorMessage = "AI回复失败: " + error.getMessage();
+                        chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                    }
+                })
+                .doFinally(signal -> {
+                    if (signal == SignalType.CANCEL && persisted.compareAndSet(false, true)) {
+                        String partial = aiResponseBuilder.toString();
+                        if (StrUtil.isNotBlank(partial)) {
+                            chatHistoryService.addChatMessage(
+                                    appId,
+                                    partial + "\n\n[中断]",
+                                    ChatHistoryMessageTypeEnum.AI.getValue(),
+                                    loginUser.getId()
+                            );
+                        }
+                    }
                 });
     }
 }

@@ -57,3 +57,6 @@ temp/**
 
 ### Shared Cursor Assets (keep tracked) ###
 !.cursor/skills/**
+
+### Local Bug Notes (DO NOT COMMIT) ###
+bugs/

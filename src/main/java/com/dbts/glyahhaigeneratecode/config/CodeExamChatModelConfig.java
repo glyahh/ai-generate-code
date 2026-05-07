@@ -7,6 +7,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Map;
+
 /**
  * 工作流「代码质检」专用同步 {@link ChatModel}：与主 {@code openAiChatModel} 解耦，
  * 默认使用更快的小模型与较低输出上限，降低二次质检 HTTP 耗时（见计划 qc-latency）。
@@ -39,6 +41,7 @@ public class CodeExamChatModelConfig {
                 .baseUrl(baseUrl)
                 .maxTokens(maxTokens)
                 .temperature(temperature)
+                .customHeaders(Map.of("X-DashScope-EnableThinking", "false"))
                 .logRequests(logRequests)
                 .logResponses(logResponses)
                 .build();
