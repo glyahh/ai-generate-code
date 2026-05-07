@@ -1,5 +1,6 @@
 package com.dbts.glyahhaigeneratecode.ai;
 
+import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.config.OpenAiOutputGuardrailsConfig;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -9,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -21,6 +23,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.time.Duration;
 
@@ -153,7 +156,7 @@ public class aiCodeGeneratorServiceFactory {
                 .builder()
                 .id(appId)
                 .chatMemoryStore(chatMemoryStore)
-                .maxMessages(20)
+                .maxMessages(80)
                 .build();
 
         // 预加载历史对话到内存（抛开用户刚发送的那条）
@@ -219,6 +222,42 @@ public class aiCodeGeneratorServiceFactory {
         } catch (Exception e) {
             log.warn("检查 Redis 对话记忆时异常，视为需重建，appId={}", appId, e);
             return true;
+        }
+    }
+
+    /**
+     * 确保用户消息已存在
+     *
+     * @param appId
+     * @param userMessageText
+     */
+    public void ensureUserMessagePresent(Long appId, String userMessageText) {
+        if (appId == null || appId <= 0 || StrUtil.isBlank(userMessageText)) {
+            return;
+        }
+        try {
+            List<ChatMessage> msgs = chatMemoryStore.getMessages(appId);
+            boolean hasFirstUserMessage = false;
+            if (msgs != null) {
+                for (ChatMessage msg : msgs) {
+                    if (msg instanceof UserMessage) {
+                        hasFirstUserMessage = true;
+                        break;
+                    }
+                    // 只关心 AI 回复之前是否出现第一条 user message
+                    if (!(msg instanceof ToolExecutionResultMessage)) {
+                        break;
+                    }
+                }
+            }
+            if (!hasFirstUserMessage) {
+                log.warn("Chat memory 无 UserMessage，注入兜底 user 提示。appId={}", appId);
+                List<ChatMessage> next = msgs == null ? new ArrayList<>() : new ArrayList<>(msgs);
+                next.add(UserMessage.from(userMessageText));
+                chatMemoryStore.updateMessages(appId, next);
+            }
+        } catch (Exception e) {
+            log.error("ensureUserMessagePresent 失败，appId={}", appId, e);
         }
     }
 

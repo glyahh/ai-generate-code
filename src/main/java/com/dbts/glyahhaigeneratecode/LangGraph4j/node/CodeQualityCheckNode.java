@@ -6,6 +6,7 @@ import com.dbts.glyahhaigeneratecode.LangGraph4j.ai.CodeQualityCheckService;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.state.QualityResult;
 import com.dbts.glyahhaigeneratecode.LangGraph4j.state.WorkflowContext;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.utils.SpringContextUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
@@ -13,10 +14,7 @@ import org.bsc.langgraph4j.prebuilt.MessagesState;
 
 import java.io.File;
 import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
+import java.util.*;
 
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
@@ -74,6 +72,26 @@ public class CodeQualityCheckNode {
         return node_async(state -> {
             WorkflowContext context = WorkflowContext.getContext(state);
             log.info("执行节点: 代码质量检查");
+
+            // Vue build output exists -> skip AI quality check
+            String tentativeDir = context.getGeneratedCodeDir();
+            if (context.getGenerationType() == CodeGenTypeEnum.VUE
+                    && StrUtil.isNotBlank(tentativeDir)) {
+                File distIndex = new File(tentativeDir, "dist/index.html");
+                if (distIndex.isFile()) {
+                    log.info("Vue dist/index.html 已存在，跳过 AI 质检。appId={}", context.getAppId());
+                    QualityResult ok = QualityResult.builder()
+                            .isValid(true)
+                            .errors(Collections.emptyList())
+                            .suggestions(List.of("Vue 项目构建已通过，跳过 AI 质检"))
+                            .build();
+
+                    // 更新workflowContext数据
+                    context.setCurrentStep("代码质量检查");
+                    context.setQualityResult(ok);
+                    return WorkflowContext.saveContext(context);
+                }
+            }
 
             String generatedCodeDir = context.getGeneratedCodeDir();
             QualityResult qualityResult;

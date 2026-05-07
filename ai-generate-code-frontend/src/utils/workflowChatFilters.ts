@@ -4,7 +4,7 @@ export type WorkflowStageKey = 'initializing' | 'image_collecting' | 'code_gener
 
 const WORKFLOW_STEP_LINE_RE = /^\[workflow\]\s*第\s*(\d+)\s*步完成[：:]\s*(.+)\s*$/
 const WORKFLOW_STEP_GLOBAL_RE = /\[workflow\]\s*第\s*(\d+)\s*步完成[：:]\s*([^[]+)/g
-const WORKFLOW_DONE_LINE_RE = /^\[workflow\]\s*(代码生成完成|工作流结束|生成完成)\s*。?\s*$/
+const WORKFLOW_DONE_LINE_RE = /^\[workflow\]\s*(代码生成完成|工作流结束，生成完成)\s*[。.]?\s*$/
 const WORKFLOW_NOTICE_MERMAID_ERROR_RE = /^\[workflow_notice\]\s*mermaid_error\s*$/
 const WORKFLOW_STAGE_ORDER: WorkflowStageKey[] = [
   'initializing',
@@ -32,7 +32,7 @@ function getWorkflowStageLabel(stage: WorkflowStageKey, done: boolean): string {
 function classifyWorkflowStage(rawLabel: string): WorkflowStageKey | null {
   const t = (rawLabel ?? '').trim()
   if (!t) return null
-  if (/初始化|提示词增强|智能路由|开始|准备/.test(t)) return 'initializing'
+  if (/初始化|提示词增强|智能路由|开始准备/.test(t)) return 'initializing'
   if (/就绪|完成|结束/.test(t)) return 'ready'
   if (/图片|收集|图像|插画|logo|架构图/i.test(t)) return 'image_collecting'
   if (/代码质量检查|质量检查|质检|检查/.test(t)) return 'code_checking'
@@ -83,7 +83,7 @@ export function normalizeWorkflowStepsForUi(
   const orderedStages = WORKFLOW_STAGE_ORDER.filter((s) => stageSet.has(s))
   const displayStages = [...orderedStages]
 
-  // 仅在流式阶段前移一节：后端到达 X 时，前端展示到 X+1。
+  // 仅在流式阶段前移一节：后端到达 X 时，前端展示到 X+1
   if (isStreaming && !isHistoryMode && displayStages.length > 0) {
     const lastStage = displayStages[displayStages.length - 1]
     const lastIdx = lastStage ? WORKFLOW_STAGE_ORDER.indexOf(lastStage) : -1
@@ -187,7 +187,7 @@ export function filterAssistantSseChunkForUi(
   const endsWithBreak = /\r?\n$/.test(s)
   const allParts = s.split(/\r?\n/)
 
-  // 单行且无换行结尾：整段就是一条 [workflow] 时立即消费（避免步骤卡片延迟到下一包）
+  // 单行且无换行结尾：整段就是一条 [workflow] 时立即消费（避免步骤卡片延迟到下一个包）
   if (!endsWithBreak && allParts.length === 1) {
     const singleLine = allParts[0] ?? ''
     if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(singleLine.trim())) {
@@ -212,16 +212,14 @@ export function filterAssistantSseChunkForUi(
 
   const kept: string[] = []
   for (const line of completeLines) {
-    const trimmed = line.trim()
+    const cleanedLine = line.replace(WORKFLOW_STEP_GLOBAL_RE, (_match, step, label) => {
+      const s = Number(step)
+      const l = (label ?? '').trim()
+      if (Number.isFinite(s) && l) newSteps.push({ step: s, label: l })
+      return ''
+    })
+    const trimmed = cleanedLine.trim()
     if (trimmed) {
-      const wm = trimmed.match(WORKFLOW_STEP_LINE_RE)
-      if (wm) {
-        const step = Number(wm[1] ?? '')
-        if (Number.isFinite(step)) {
-          newSteps.push({ step, label: (wm[2] ?? '').trim() })
-        }
-        continue
-      }
       if (WORKFLOW_DONE_LINE_RE.test(trimmed)) {
         maybeAppendDoneStep(trimmed, newSteps)
         continue
@@ -232,10 +230,17 @@ export function filterAssistantSseChunkForUi(
       }
       if (INTERNAL_DIR_LINE_RE.test(trimmed)) continue
     }
-    kept.push(line)
+    kept.push(cleanedLine)
   }
 
-  const uiText = normalizeUiText(kept.join('\n') + (endsWithBreak && completeLines.length > 0 ? '\n' : ''))
+  const filteredKept = kept.filter((line) => {
+    const t = line.trim()
+    if (!t) return true
+    if (t.length <= 2 && !/[A-Za-z0-9\u4e00-\u9fa5]/.test(t)) return false
+    return true
+  })
+
+  const uiText = normalizeUiText(filteredKept.join('\n') + (endsWithBreak && completeLines.length > 0 ? '\n' : ''))
   return { uiText, newSteps, mermaidErrorNotice }
 }
 
@@ -271,7 +276,7 @@ export function resetSseLineAccumulator(acc: SseLineAccumulator) {
   acc.carry = ''
 }
 
-/** 历史回放 / 全文解析：去掉不应展示给用户的行 */
+/** 历史回放/全文解析：去掉不应展示给用户的行 */
 export function stripAssistantNoiseLines(text: string): string {
   if (!text) return ''
   return text

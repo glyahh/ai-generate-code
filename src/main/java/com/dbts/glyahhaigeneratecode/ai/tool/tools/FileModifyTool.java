@@ -29,7 +29,7 @@ import java.nio.file.StandardOpenOption;
 @Component
 public class FileModifyTool extends BaseTool {
 
-    @Tool("修改文件内容，用新内容替换指定的旧内容")
+    @Tool("修改文件内容，用新内容替换指定旧内容")
     public String modifyFile(
             @P("文件的相对路径")
             String relativeFilePath,
@@ -76,7 +76,9 @@ public class FileModifyTool extends BaseTool {
 
             String modifiedContent = originalContent.replace(oldContent, newContent == null ? "" : newContent);
             if (originalContent.equals(modifiedContent)) {
-                return "信息：替换后文件内容未发生变化 - " + relativeFilePath;
+                return "错误：替换后文件内容未发生变化（" + relativeFilePath + "）。"
+                        + "可能是 oldContent 与 newContent 等价。"
+                        + "禁止使用相同参数重复调用 modifyFile；若无需进一步修改，请立即调用 exit 工具结束。";
             }
 
             Files.writeString(path, modifiedContent, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);

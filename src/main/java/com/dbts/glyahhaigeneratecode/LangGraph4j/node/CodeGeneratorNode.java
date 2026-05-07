@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.LangGraph4j.node;
 
 import com.dbts.glyahhaigeneratecode.LangGraph4j.state.WorkflowContext;
+import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorServiceFactory;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.core.AiCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
@@ -11,6 +12,7 @@ import org.bsc.langgraph4j.prebuilt.MessagesState;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.function.Consumer;
 
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
@@ -42,6 +44,31 @@ public class CodeGeneratorNode {
 
             // Keep legacy behavior: only first round without generated dir is writeFile-only.
             boolean firstRound = Boolean.TRUE.equals(context.getFirstRound()) && context.getGeneratedCodeDir() == null;
+
+            // 质检失败后的重试
+            boolean isRetry = !Boolean.TRUE.equals(context.getFirstRound())
+                    && context.getRetryCount() != null && context.getRetryCount() >= 1
+                    && context.getQualityResult() != null
+                    && Boolean.FALSE.equals(context.getQualityResult().getIsValid());
+            if (isRetry && generationType == CodeGenTypeEnum.VUE) {
+                List<String> errors = context.getQualityResult().getErrors();
+                
+                StringBuilder sb = new StringBuilder();
+                // 这里是为了更好的让ai调用modifyFile工具,实际上上一轮代码构建肯定不通过
+                sb.append("[上一轮代码构建失败且检测不通过，请仅做针对性修复]\n");
+                if (errors != null) {
+                    for (String err : errors) sb.append("- ").append(err).append('\n');
+                }
+                sb.append("\n硬性约束：\n");
+                sb.append("1) 禁止 writeFile/deleteFile，仅可用 modifyFile/readFile/readDir/exit。\n");
+                sb.append("2) 若 modifyFile 返回未发生变化或未找到替换内容，立即调用 exit。\n");
+                sb.append("3) 禁止重写整个文件，仅修复具体错误。\n\n");
+                sb.append("原始需求：\n").append(userMessage);
+                userMessage = sb.toString();
+                aiCodeGeneratorServiceFactory factory =
+                        SpringContextUtil.getBean(aiCodeGeneratorServiceFactory.class);
+                factory.ensureUserMessagePresent(appId, userMessage);
+            }
             // 调用流式代码生成
             Flux<String> codeStream = codeGeneratorFacade.generateAndSaveCodeStream(
                     userMessage,

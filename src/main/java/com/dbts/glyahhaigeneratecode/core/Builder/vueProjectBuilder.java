@@ -1,5 +1,6 @@
 package com.dbts.glyahhaigeneratecode.core.Builder;
 
+import cn.hutool.core.io.FileUtil;
 import com.dbts.glyahhaigeneratecode.ai.tool.tools.VueSfcSyntaxCheckFixTool;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -62,6 +63,17 @@ public class vueProjectBuilder {
             return false;
         }
         log.info("开始构建 Vue 项目: {}", projectPath);
+
+        // A1: clean old dist before each build
+        File distDirToClean = new File(projectDir, "dist");
+        if (distDirToClean.exists()) {
+            try {
+                FileUtil.del(distDirToClean);
+                log.info("已清理旧 dist 目录，准备本轮构建");
+            } catch (Exception e) {
+                log.warn("清理旧 dist 失败（继续构建）: {}", e.getMessage());
+            }
+        }
 
         // [LLM 缺陷兜底] Vite 配置文件常见缺陷：使用 fileURLToPath 但未 import，导致构建直接失败。
         // 证据：ReferenceError: fileURLToPath is not defined（vite 加载 bundled config 时抛出）。
