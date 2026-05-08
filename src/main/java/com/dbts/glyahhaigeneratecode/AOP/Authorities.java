@@ -30,6 +30,13 @@ public class Authorities {
         String role = MyRole.role();
 
         //获取request
+        /**
+         * RequestContextHolder: Spring 的上下文持有器, 底层通过 ThreadLocal 绑定当前请求
+         * 相当于更好的threadlocal
+         * RequestAttributes: Spring 的请求上下文抽象
+         * ServletRequestAttributes: Servlet 场景下的实现, 可取到 request/response
+         * HttpServletRequest: 最底层 HTTP 请求对象, 有参数/请求头/请求行/请求路径/session
+         */
         RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
         HttpServletRequest request = null;
         if (requestAttributes != null) {
@@ -51,7 +58,7 @@ public class Authorities {
             return ResultUtils.error(ErrorCode.NO_AUTH_ERROR, "用户没有权限");
         }
 
-        // 当不需要权限时
+        // 当不需要权限时,放行
         if (userNeedRole == null){
             return proceedingJoinPoint.proceed();
         }
@@ -61,6 +68,7 @@ public class Authorities {
             return ResultUtils.error(ErrorCode.NO_AUTH_ERROR, "用户没有管理员权限");
         }
 
+        // 放行
         return proceedingJoinPoint.proceed();
     }
 }

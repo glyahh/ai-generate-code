@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Prompt 安全审查评估器（最小链路）。
+ * Prompt 安全审查评估器。
  */
 public final class PromptSafetyAuditEvaluator {
 

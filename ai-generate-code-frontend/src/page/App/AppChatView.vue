@@ -268,6 +268,35 @@ const isVueProject = computed(() => {
   return codeGenType === CodeGenTypeEnum.VUE_PROJECT
 })
 
+function dedupHistoryRecords(records: ChatHistory[]): ChatHistory[] {
+  const byId = new Map<number, ChatHistory>()
+  const fallbackKeys = new Set<string>()
+  const deduped: ChatHistory[] = []
+
+  for (const item of records) {
+    const id = item.id
+    if (typeof id === 'number' && Number.isFinite(id) && id > 0) {
+      byId.set(id, item)
+      continue
+    }
+    const fallbackKey = `${item.createTime ?? ''}|${item.messageType ?? ''}|${item.message ?? ''}`
+    if (fallbackKeys.has(fallbackKey)) continue
+    fallbackKeys.add(fallbackKey)
+    deduped.push(item)
+  }
+
+  deduped.push(...byId.values())
+  deduped.sort((a, b) => {
+    const ta = a.createTime ?? ''
+    const tb = b.createTime ?? ''
+    if (ta !== tb) return ta.localeCompare(tb)
+    const ia = typeof a.id === 'number' ? a.id : 0
+    const ib = typeof b.id === 'number' ? b.id : 0
+    return ia - ib
+  })
+  return deduped
+}
+
 /** 将 ChatHistory 转为 ChatMessage */
 function historyToMessage(r: ChatHistory): ChatMessage {
   const role = (r.messageType?.toLowerCase() === 'user' ? 'user' : 'assistant') as 'user' | 'assistant'
@@ -2246,9 +2275,9 @@ async function loadChatHistory(lastCreateTime?: string) {
       const page = res.data.data
       const records = page?.records ?? []
       if (isLoadMore) {
-        loadedHistoryRecords.value = [...records, ...loadedHistoryRecords.value]
+        loadedHistoryRecords.value = dedupHistoryRecords([...records, ...loadedHistoryRecords.value])
       } else {
-        loadedHistoryRecords.value = records
+        loadedHistoryRecords.value = dedupHistoryRecords(records)
       }
       historyMessages.value = loadedHistoryRecords.value.map(historyToMessage)
       // 历史回放需要重建工具输出（否则“查看项目回显/架构”按钮会丢失）
