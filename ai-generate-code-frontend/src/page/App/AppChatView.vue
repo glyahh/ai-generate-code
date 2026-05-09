@@ -23,13 +23,14 @@ import {
   parseMarkdownWithCode,
   findLineAlignedClosingFenceInBuffer,
 } from '@/utils/markdownParser'
-import type { WorkflowStepRow } from '@/utils/workflowChatFilters'
+import type { WorkflowHistoryOutcome, WorkflowStepRow } from '@/utils/workflowChatFilters'
 import {
   filterAssistantSseChunkForUi,
   flushAssistantSseCarry,
   mergeWorkflowSteps,
   normalizeWorkflowStepsForUi,
   resetSseLineAccumulator,
+  resolveWorkflowHistoryOutcomeFromContent,
   resolveWorkflowStepsFromMessageContent,
   stripAssistantNoiseLines,
 } from '@/utils/workflowChatFilters'
@@ -317,10 +318,10 @@ function stableSerializeWorkflowRows(rows: WorkflowStepRow[] | undefined): strin
 
 function buildWorkflowRenderVersion(
   m: ChatMessage,
-  opts?: { historyMode?: boolean; streaming?: boolean },
+  opts?: { historyMode?: boolean; streaming?: boolean; historyOutcome?: WorkflowHistoryOutcome },
 ): string {
   const rawVersion = stableSerializeWorkflowRows(m.workflowSteps)
-  return `${rawVersion}|h=${opts?.historyMode === true ? 1 : 0}|s=${opts?.streaming === true ? 1 : 0}`
+  return `${rawVersion}|h=${opts?.historyMode === true ? 1 : 0}|s=${opts?.streaming === true ? 1 : 0}|o=${opts?.historyOutcome ?? 'unknown'}`
 }
 
 function buildUiRenderVersion(m: ChatMessage): string {
@@ -334,15 +335,21 @@ function buildUiRenderVersion(m: ChatMessage): string {
 function precomputeMessageRenderCaches(m: ChatMessage) {
   if (m.role !== 'assistant' || m.uiState) return
   const cache = messageRenderCache.get(m) ?? {}
+  const historyOutcome = m.createTime
+    ? resolveWorkflowHistoryOutcomeFromContent(m.content ?? '')
+    : 'unknown'
 
   const rawWorkflow = resolveWorkflowStepsFromMessageContent(m.workflowSteps, m.content ?? '')
   const workflowVersion = buildWorkflowRenderVersion(m, {
     historyMode: !!m.createTime,
     streaming: false,
+    historyOutcome,
   })
   const normalizedWorkflow = normalizeWorkflowStepsForUi(rawWorkflow, {
     historyMode: !!m.createTime,
     streaming: false,
+    historyOutcome,
+    rawContent: m.content ?? '',
   })
   cache.workflowVersion = workflowVersion
   cache.workflowSteps = normalizedWorkflow
@@ -1654,6 +1661,38 @@ function buildUiSegmentsFromFullText(fullText: string): UiSegment[] {
   })
 }
 
+function isFirstSessionAssistantMessage(m: ChatMessage): boolean {
+  if (m.role !== 'assistant' || !!m.createTime) return false
+  const firstAssistant = sessionMessages.value.find((item) => item.role === 'assistant' && !item.createTime)
+  return firstAssistant?.id === m.id
+}
+
+function normalizeFirstRoundMarkdownText(text: string): string {
+  if (!text) return ''
+  let normalized = text.replace(/\r\n/g, '\n')
+  normalized = normalized.replace(/^(?:[ \t]*\n)+/, '')
+  normalized = normalized.replace(/(?:\n[ \t]*)+$/, '')
+  // 保持段落感：最多保留 2 个连续换行（即 1 个空行）。
+  // 含围栏代码块时不改中间内容，避免误伤代码格式。
+  if (!normalized.includes('```')) {
+    normalized = normalized.replace(/\n{3,}/g, '\n\n')
+  }
+  return normalized
+}
+
+function normalizeFirstRoundUiSegments(m: ChatMessage, segments: UiSegment[]): UiSegment[] {
+  if (!isFirstSessionAssistantMessage(m)) return segments
+  return segments
+    .map((segment) => {
+      if (segment.kind !== 'markdown') return segment
+      return {
+        kind: 'markdown' as const,
+        content: normalizeFirstRoundMarkdownText(segment.content),
+      }
+    })
+    .filter((segment) => segment.kind !== 'markdown' || segment.content.trim().length > 0)
+}
+
 /** 仅附加在发给模型的 prompt 末尾，不应在用户气泡中展示 */
 const VISUAL_EDIT_MODEL_ONLY_HINT =
   '请根据以上元素信息，对该元素及其相关区域进行定向修改/优化,注意只能修改用户选中的区域,其他区域不可动,并不要再下面的对话中提到这句话'
@@ -1675,7 +1714,10 @@ function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
   if (m.role !== 'assistant') return []
   const historyMode = isHistoryMessage(m)
   const streaming = isStreamActiveForMessage(m)
-  const version = buildWorkflowRenderVersion(m, { historyMode, streaming })
+  const historyOutcome = historyMode
+    ? resolveWorkflowHistoryOutcomeFromContent(m.content ?? '')
+    : 'unknown'
+  const version = buildWorkflowRenderVersion(m, { historyMode, streaming, historyOutcome })
   const cache = messageRenderCache.get(m)
   if (cache?.workflowVersion === version && cache.workflowSteps) {
     return cache.workflowSteps
@@ -1684,6 +1726,8 @@ function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
   const normalized = normalizeWorkflowStepsForUi(raw, {
     historyMode,
     streaming,
+    historyOutcome,
+    rawContent: m.content ?? '',
   })
   messageRenderCache.set(m, {
     ...cache,
@@ -1774,12 +1818,12 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
         }
       }
     }
-    return segs
+    return normalizeFirstRoundUiSegments(m, segs)
   }
   const version = buildUiRenderVersion(m)
   const cache = messageRenderCache.get(m)
   if (cache?.uiVersion === version && cache.uiSegments) {
-    return cache.uiSegments
+    return normalizeFirstRoundUiSegments(m, cache.uiSegments)
   }
   const segments = buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
   messageRenderCache.set(m, {
@@ -1790,7 +1834,7 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
   if (isHistoryMessage(m)) {
     m.cachedUiSegments = segments
   }
-  return segments
+  return normalizeFirstRoundUiSegments(m, segments)
 }
 
 function assistantHasRenderableOutput(m: ChatMessage): boolean {

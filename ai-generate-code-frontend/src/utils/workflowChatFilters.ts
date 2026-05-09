@@ -1,6 +1,7 @@
 /** 从 SSE 片段中解析出的工作流步骤（与后端 CodeGenWorkflow 文案一致） */
 export type WorkflowStepRow = { step: number; label: string }
 export type WorkflowStageKey = 'initializing' | 'image_collecting' | 'code_generating' | 'code_checking' | 'ready'
+export type WorkflowHistoryOutcome = 'success' | 'failed' | 'unknown'
 
 const WORKFLOW_STEP_LINE_RE = /^\[workflow\]\s*第\s*(\d+)\s*步完成[：:]\s*(.+)\s*$/
 const WORKFLOW_STEP_GLOBAL_RE = /\[workflow\]\s*第\s*(\d+)\s*步完成[：:]\s*([^[]+)/g
@@ -32,12 +33,59 @@ function getWorkflowStageLabel(stage: WorkflowStageKey, done: boolean): string {
 function classifyWorkflowStage(rawLabel: string): WorkflowStageKey | null {
   const t = (rawLabel ?? '').trim()
   if (!t) return null
-  if (/初始化|提示词增强|智能路由|开始准备/.test(t)) return 'initializing'
   if (/就绪|完成|结束/.test(t)) return 'ready'
   if (/图片|收集|图像|插画|logo|架构图/i.test(t)) return 'image_collecting'
   if (/代码质量检查|质量检查|质检|检查/.test(t)) return 'code_checking'
+  if (/智能路由|路由/.test(t)) return 'code_generating'
   if (/代码生成|项目构建|生成代码|生成/.test(t)) return 'code_generating'
+  if (/初始化|提示词增强|开始准备/.test(t)) return 'initializing'
   return null
+}
+
+const WORKFLOW_HISTORY_SUCCESS_RE = /(代码生成完成|工作流结束|构建成功|生成完成|ready)/i
+const WORKFLOW_HISTORY_FAILED_RE = /(失败|异常|error|中断|出现问题|超时)/i
+const WORKFLOW_STAGE_FAILED_RE: Record<WorkflowStageKey, RegExp> = {
+  initializing: /(初始化|提示词增强|开始准备)/i,
+  image_collecting: /(图片|收集|图像|插画|logo|架构图)/i,
+  code_generating: /(代码生成|项目构建|智能路由|生成代码|生成)/i,
+  code_checking: /(代码质量检查|质量检查|质检|检查)/i,
+  ready: /(就绪|完成|结束)/i,
+}
+
+/**
+ * 解析历史消息的工作流终态（success/failed/unknown）。
+ * @param rawContent 历史消息全文
+ * @return 历史消息终态
+ */
+export function resolveWorkflowHistoryOutcomeFromContent(rawContent: string): WorkflowHistoryOutcome {
+  const text = (rawContent ?? '').trim()
+  if (!text) return 'unknown'
+  if (WORKFLOW_HISTORY_FAILED_RE.test(text)) return 'failed'
+  if (WORKFLOW_HISTORY_SUCCESS_RE.test(text)) return 'success'
+  return 'unknown'
+}
+
+/**
+ * 在失败终态下推断失败阶段，用于裁剪历史卡片并标记“出现问题”。
+ * @param rows 当前可解析到的工作流步骤
+ * @param rawContent 历史消息全文
+ * @return 失败阶段，无法推断时返回代码生成阶段
+ */
+function resolveFailedStage(rows: WorkflowStepRow[] | undefined, rawContent: string): WorkflowStageKey {
+  const text = rawContent ?? ''
+  for (const stage of WORKFLOW_STAGE_ORDER.slice().reverse()) {
+    if (WORKFLOW_STAGE_FAILED_RE[stage].test(text)) {
+      return stage
+    }
+  }
+  const existing = rows ?? []
+  for (let i = existing.length - 1; i >= 0; i--) {
+    const stage = classifyWorkflowStage(existing[i]?.label ?? '')
+    if (stage) {
+      return stage
+    }
+  }
+  return 'code_generating'
 }
 
 function hasOnlyInitializingPlaceholder(rows: WorkflowStepRow[] | undefined): boolean {
@@ -66,7 +114,7 @@ export function resolveWorkflowStepsFromMessageContent(
 
 export function normalizeWorkflowStepsForUi(
   rows: WorkflowStepRow[] | undefined,
-  opts?: { historyMode?: boolean; streaming?: boolean },
+  opts?: { historyMode?: boolean; streaming?: boolean; historyOutcome?: WorkflowHistoryOutcome; rawContent?: string },
 ): WorkflowStepRow[] {
   if (!rows || rows.length === 0) return []
   const stageSet = new Set<WorkflowStageKey>()
@@ -80,6 +128,29 @@ export function normalizeWorkflowStepsForUi(
   }
   const isHistoryMode = opts?.historyMode === true
   const isStreaming = opts?.streaming === true
+  const historyOutcome = opts?.historyOutcome ?? 'unknown'
+  const rawContent = opts?.rawContent ?? ''
+
+  if (isHistoryMode && historyOutcome === 'success') {
+    return WORKFLOW_STAGE_ORDER.map((stage, index) => ({
+      step: index + 1,
+      label: getWorkflowStageLabel(stage, true),
+    }))
+  }
+
+  if (isHistoryMode && historyOutcome === 'failed') {
+    const failedStage = resolveFailedStage(rows, rawContent)
+    const failedIndex = WORKFLOW_STAGE_ORDER.indexOf(failedStage)
+    if (failedIndex < 0) return []
+    const displayStages = WORKFLOW_STAGE_ORDER.slice(0, failedIndex + 1)
+    return displayStages.map((stage, index) => ({
+      step: index + 1,
+      label: stage === failedStage
+        ? `${WORKFLOW_STAGE_BASE_LABEL[stage]}出现问题`
+        : getWorkflowStageLabel(stage, true),
+    }))
+  }
+
   const orderedStages = WORKFLOW_STAGE_ORDER.filter((s) => stageSet.has(s))
   const displayStages = [...orderedStages]
 

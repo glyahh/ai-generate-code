@@ -16,6 +16,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -56,7 +57,7 @@ public class WorkflowCodeGeneratorFacade {
             CompletableFuture.runAsync(() -> {
                 try {
                     CodeGenWorkflow workflow = new CodeGenWorkflow();
-                    Set<String> seenToolIds = new HashSet<>();
+                    WorkflowChunkDedupState dedupState = new WorkflowChunkDedupState();
                     // 工作流第...步完成
                     Consumer<String> progress = msg -> {
                         try {
@@ -73,7 +74,7 @@ public class WorkflowCodeGeneratorFacade {
                         try {
                             // 解析ai返回的请求/意图
                             // 工具请求,工具调用结果,ai相应
-                            String adapted = adaptWorkflowCodeChunk(rawChunk, seenToolIds);
+                            String adapted = adaptWorkflowCodeChunk(rawChunk, dedupState);
                             if (adapted != null && !adapted.isEmpty()) {
                                 sink.next(adapted);
                             }
@@ -132,7 +133,7 @@ public class WorkflowCodeGeneratorFacade {
         return msg.endsWith("\n") ? msg : msg + "\n";
     }
 
-    private String adaptWorkflowCodeChunk(String rawChunk, Set<String> seenToolIds) {
+    private String adaptWorkflowCodeChunk(String rawChunk, WorkflowChunkDedupState dedupState) {
         if (rawChunk == null || rawChunk.isBlank()) {
             return "";
         }
@@ -158,8 +159,8 @@ public class WorkflowCodeGeneratorFacade {
             }
             case TOOL_REQUEST -> {
                 ToolRequestMessage toolRequest = JSONUtil.toBean(rawChunk, ToolRequestMessage.class);
-                String toolCallId = toolRequest.getId();
-                if (toolCallId != null && !toolCallId.isBlank() && !seenToolIds.add(toolCallId)) {
+                // 忽略重复工具请求,如果是重复的就忽略
+                if (isDuplicateToolRequest(toolRequest, dedupState)) {
                     yield "";
                 }
                 String toolName = toolRequest.getName();
@@ -174,6 +175,10 @@ public class WorkflowCodeGeneratorFacade {
             case TOOL_EXECUTED -> {
                 ToolExecutedMessage executed = JSONUtil.toBean(rawChunk, ToolExecutedMessage.class);
                 JSONObject arguments = safeParseArguments(executed.getArguments());
+                // 忽略重复工具执行
+                if (isDuplicateToolExecuted(executed, arguments, dedupState)) {
+                    yield "";
+                }
                 BaseTool tool = toolManager.getTool(executed.getName());
                 if (tool != null) {
                     // 直接使用工具定义的执行结果格式
@@ -198,6 +203,79 @@ public class WorkflowCodeGeneratorFacade {
         }
     }
 
+    /**
+     * 判定并记录工具请求去重状态（优先按 toolCallId，缺失时按工具名+参数摘要做短窗口去重）。
+     * @param toolRequest 当前工具请求消息
+     * @param dedupState 当前流内幂等状态
+     * @return true 表示命中重复并应忽略；false 表示首次出现可继续处理
+     */
+    private boolean isDuplicateToolRequest(ToolRequestMessage toolRequest, WorkflowChunkDedupState dedupState) {
+        String toolCallId = toolRequest.getId();
+        if (toolCallId != null && !toolCallId.isBlank()) {
+            return !dedupState.seenToolRequestIds.add(toolCallId);
+        }
+        // 1. 无 toolCallId 时，按“工具名 + 原始参数”做连续分片兜底去重，避免首轮异常放大“选择工具”卡片
+        String fallbackKey = buildToolRequestFallbackKey(toolRequest.getName(), toolRequest.getArguments());
+        // 2. 仅压制短窗口重复：相邻同 key 才去重，不影响同轮后续真实重复调用
+        if (fallbackKey.equals(dedupState.lastToolRequestFallbackKey)) {
+            return true;
+        }
+        dedupState.lastToolRequestFallbackKey = fallbackKey;
+        return false;
+    }
+
+    /**
+     * 判定并记录工具执行结果去重状态（优先按 toolCallId，缺失时按工具名+路径做短窗口去重）。
+     * @param executed 当前工具执行消息
+     * @param arguments 工具执行参数
+     * @param dedupState 当前流内幂等状态
+     * @return true 表示命中重复并应忽略；false 表示首次出现可继续处理
+     */
+    private boolean isDuplicateToolExecuted(ToolExecutedMessage executed, JSONObject arguments, WorkflowChunkDedupState dedupState) {
+        String toolCallId = executed.getId();
+        if (toolCallId != null && !toolCallId.isBlank()) {
+            return !dedupState.seenToolExecutedIds.add(toolCallId);
+        }
+        // 1. 无 toolCallId 时，按工具名+目标路径做兜底 key
+        String fallbackKey = buildToolExecutedFallbackKey(executed.getName(), arguments);
+        // 2. 仅压制相邻重复，避免误吞同轮合法多次操作
+        if (fallbackKey.equals(dedupState.lastToolExecutedFallbackKey)) {
+            return true;
+        }
+        dedupState.lastToolExecutedFallbackKey = fallbackKey;
+        return false;
+    }
+
+    /**
+     * 生成工具请求兜底去重键。
+     * @param toolName 工具名
+     * @param rawArguments 原始参数串
+     * @return 去重键
+     */
+    private String buildToolRequestFallbackKey(String toolName, String rawArguments) {
+        String safeToolName = (toolName == null || toolName.isBlank()) ? "-" : toolName;
+        String safeArguments = (rawArguments == null) ? "" : rawArguments.trim();
+        return safeToolName + "|" + safeArguments;
+    }
+
+    /**
+     * 生成工具执行兜底去重键。
+     * @param toolName 工具名
+     * @param arguments 工具参数
+     * @return 去重键
+     */
+    private String buildToolExecutedFallbackKey(String toolName, JSONObject arguments) {
+        String safeToolName = (toolName == null || toolName.isBlank()) ? "-" : toolName;
+        String path = arguments == null ? "" : arguments.getStr("relativeFilePath");
+        if (path == null || path.isBlank()) {
+            path = arguments == null ? "" : arguments.getStr("relativeDirPath");
+        }
+        if (path == null) {
+            path = "";
+        }
+        return safeToolName + "|" + path.trim();
+    }
+
     private String fallbackToolExecutedFormatting(String toolName, JSONObject arguments) {
         String safeToolName = (toolName == null || toolName.isBlank()) ? "工具" : toolName;
         String path = arguments.getStr("relativeFilePath");
@@ -210,7 +288,14 @@ public class WorkflowCodeGeneratorFacade {
         return String.format("[工具调用] %s %s\n", safeToolName, path);
     }
 
-    private void emitGeneratedCodeIfPresent(reactor.core.publisher.FluxSink<String> sink,
+
+    /**
+     * 尝试生成并输出最终代码块。
+     * @param sink
+     * @param codeGenTypeEnum
+     * @param generatedDir
+     */
+    private void emitGeneratedCodeIfPresent(FluxSink<String> sink,
                                             CodeGenTypeEnum codeGenTypeEnum,
                                             String generatedDir) {
         try {
@@ -381,7 +466,11 @@ public class WorkflowCodeGeneratorFacade {
         String tailNewline = body.endsWith("\n") ? "" : "\n";
         return "### " + displayName + "\n```" + fenceLanguage + "\n" + body + tailNewline + "```\n\n";
     }
+
+    private static class WorkflowChunkDedupState {
+        private final Set<String> seenToolRequestIds = new HashSet<>();
+        private final Set<String> seenToolExecutedIds = new HashSet<>();
+        private String lastToolRequestFallbackKey;
+        private String lastToolExecutedFallbackKey;
+    }
 }
-
-
-

@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -78,7 +80,8 @@ public class WorkflowTextStreamHandler {
         // 2. 按行分割
         String[] lines = message.split("\\r?\\n");
         StringBuilder cleaned = new StringBuilder(message.length());
-        String lastToolRequestLine = null;
+        Set<String> seenToolRequestLines = new HashSet<>();
+        Set<String> seenToolExecutedLines = new HashSet<>();
 
         // 3. 逐行处理
         for (String line : lines) {
@@ -91,14 +94,17 @@ public class WorkflowTextStreamHandler {
             if (trimmed.startsWith("[workflow]")) {
                 continue;
             }
-            // 3.3 跳过工具调用噪声
+            // 3.3 仅清洗重复工具协议块：历史脏数据可能重复落库，导致回放卡片倍增
             if (trimmed.startsWith("[选择工具]")) {
-                if (trimmed.equals(lastToolRequestLine)) {
+                if (!seenToolRequestLines.add(trimmed)) {
                     continue;
                 }
-                lastToolRequestLine = trimmed;
             }
-
+            if (trimmed.startsWith("[工具调用]")) {
+                if (!seenToolExecutedLines.add(trimmed)) {
+                    continue;
+                }
+            }
             // 3.4 拼接行
             if (cleaned.length() > 0) {
                 cleaned.append('\n');

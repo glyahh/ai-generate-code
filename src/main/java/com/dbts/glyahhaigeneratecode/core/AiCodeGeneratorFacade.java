@@ -192,8 +192,9 @@ public class AiCodeGeneratorFacade {
                 .onToolExecuted((ToolExecution toolExecution) -> {
                     try {
                         String toolCallId = toolExecution.request().id();
-                        boolean switched = nativeToolExecutedMode.compareAndSet(false, true);
-                        if (switched && toolCallId != null && syntheticExecutedIds.contains(toolCallId)) {
+                        nativeToolExecutedMode.compareAndSet(false, true);
+                        // 只要该 toolCallId 已经发过 synthetic tool_executed，就始终跳过 native 同 ID 事件，避免同一工具卡片重复渲染。
+                        if (toolCallId != null && syntheticExecutedIds.contains(toolCallId)) {
                             return;
                         }
                     } catch (Exception ignore) {
