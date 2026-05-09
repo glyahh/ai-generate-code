@@ -70,35 +70,49 @@ public class WorkflowTextStreamHandler {
      * @return
      */
     private String sanitizeBeforePersist(String message) {
+        // 1. 非空验证
         if (StrUtil.isBlank(message)) {
             return "";
         }
+
+        // 2. 按行分割
         String[] lines = message.split("\\r?\\n");
         StringBuilder cleaned = new StringBuilder(message.length());
         String lastToolRequestLine = null;
+
+        // 3. 逐行处理
         for (String line : lines) {
             String trimmed = line == null ? "" : line.trim();
+            // 3.1 跳过 workflow旁路通知 噪声
             if (trimmed.startsWith("[workflow_notice]")) {
                 continue;
             }
+            // 3.2 跳过 workflow 噪声
             if (trimmed.startsWith("[workflow]")) {
                 continue;
             }
+            // 3.3 跳过工具调用噪声
             if (trimmed.startsWith("[选择工具]")) {
                 if (trimmed.equals(lastToolRequestLine)) {
                     continue;
                 }
                 lastToolRequestLine = trimmed;
             }
+
+            // 3.4 拼接行
             if (cleaned.length() > 0) {
                 cleaned.append('\n');
             }
             cleaned.append(line == null ? "" : line);
         }
+
+        // 4.1 如果不超过长度限制,则返回拼接结果
         String result = cleaned.toString().trim();
         if (result.length() <= WORKFLOW_HISTORY_MAX_LENGTH) {
             return result;
         }
+
+        // 4.2 如果超过长度限制,则截断并添加截断标记
         return result.substring(0, WORKFLOW_HISTORY_MAX_LENGTH) + "\n...[workflow message truncated]";
     }
 }

@@ -1686,7 +1686,7 @@ function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
     streaming,
   })
   messageRenderCache.set(m, {
-    ...(cache ?? {}),
+    ...cache,
     workflowVersion: version,
     workflowSteps: normalized,
   })
@@ -1783,7 +1783,7 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
   }
   const segments = buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
   messageRenderCache.set(m, {
-    ...(cache ?? {}),
+    ...cache,
     uiVersion: version,
     uiSegments: segments,
   })
@@ -1807,7 +1807,7 @@ function assistantHasRenderableOutput(m: ChatMessage): boolean {
   }
   if (getWorkflowStepsForMessage(m).length > 0) {
     messageRenderCache.set(m, {
-      ...(cache ?? {}),
+      ...cache,
       renderableVersion: combinedVersion,
       renderable: true,
     })
@@ -1819,7 +1819,7 @@ function assistantHasRenderableOutput(m: ChatMessage): boolean {
     if ((s.content ?? '').trim().length > 0) return true
   }
   messageRenderCache.set(m, {
-    ...(cache ?? {}),
+    ...cache,
     renderableVersion: combinedVersion,
     renderable: false,
   })
@@ -2852,7 +2852,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: calc(100vh - 64px - 48px - 80px); /* 减去 BasicLayout header/padding/bottom */
+  /* 按要求向底部再扩展约 50px */
+  height: calc(100vh - 64px - 48px + 50px);
+  min-height: calc(100vh - 64px - 48px + 50px);
+  max-height: calc(100vh - 64px - 48px + 50px);
   overflow: hidden;
 }
 
@@ -2937,6 +2940,7 @@ onBeforeUnmount(() => {
   gap: 16px;
   flex: 1;
   min-height: 0;
+  align-items: stretch;
   overflow: hidden;
 }
 
@@ -2948,7 +2952,9 @@ onBeforeUnmount(() => {
   padding: 16px;
   display: flex;
   flex-direction: column;
+  flex: 1;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
