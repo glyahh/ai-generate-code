@@ -8,8 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 
-import java.util.HashSet;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -33,9 +31,12 @@ public class WorkflowTextStreamHandler {
                     return chunk;
                 })
                 .doOnComplete(() -> {
+                    // 会话结束后，如果已经保存过，则返回
+                    // 只有第一次把 false 改成 true 的那条路径能执行入库
                     if (!persisted.compareAndSet(false, true)) {
                         return;
                     }
+                    
                     // 在会话结束后保存到数据库时,清理消息
                     String aiResponse = sanitizeBeforePersist(aiResponseBuilder.toString());
                     if (StrUtil.isBlank(aiResponse)) {
@@ -80,8 +81,6 @@ public class WorkflowTextStreamHandler {
         // 2. 按行分割
         String[] lines = message.split("\\r?\\n");
         StringBuilder cleaned = new StringBuilder(message.length());
-        Set<String> seenToolRequestLines = new HashSet<>();
-        Set<String> seenToolExecutedLines = new HashSet<>();
 
         // 3. 逐行处理
         for (String line : lines) {
@@ -93,17 +92,6 @@ public class WorkflowTextStreamHandler {
             // 3.2 跳过 workflow 噪声
             if (trimmed.startsWith("[workflow]")) {
                 continue;
-            }
-            // 3.3 仅清洗重复工具协议块：历史脏数据可能重复落库，导致回放卡片倍增
-            if (trimmed.startsWith("[选择工具]")) {
-                if (!seenToolRequestLines.add(trimmed)) {
-                    continue;
-                }
-            }
-            if (trimmed.startsWith("[工具调用]")) {
-                if (!seenToolExecutedLines.add(trimmed)) {
-                    continue;
-                }
             }
             // 3.4 拼接行
             if (cleaned.length() > 0) {

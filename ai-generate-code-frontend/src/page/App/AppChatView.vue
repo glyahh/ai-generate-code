@@ -1106,13 +1106,23 @@ function drainBufferToSegments(state: AssistantUiState) {
 function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string) {
   state.buffer += chunk ?? ''
 
-  const TOOL_REQUEST_ANY_RE = /\[选择工具\]\s*([^\r\n]+)\s*\r?\n/
+  const TOOL_REQUEST_ANY_RE = /\[选择工具\]\s*([^\r\n]+)\s*(?:\r?\n|$)/
 
-  const TOOL_EXEC_HEADER_RE_WRITE_FILE = /\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*\r?\n/
-  const TOOL_EXEC_HEADER_RE_MODIFY_FILE = /\[工具调用\]\s*修改文件\s+([^\r\n]+)\s*\r?\n/
-  const TOOL_EXEC_HEADER_RE_DELETE_FILE = /\[工具调用\]\s*删除文件\s+([^\r\n]+)\s*\r?\n/
-  const TOOL_EXEC_HEADER_RE_READ_FILE = /\[工具调用\]\s*读取文件\s+([^\r\n]+)\s*\r?\n/
-  const TOOL_EXEC_HEADER_RE_READ_DIR = /\[工具调用\]\s*读取目录结构\s+([^\r\n]+)\s*\r?\n/
+  const TOOL_EXEC_HEADER_RE_WRITE_FILE = /\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
+  const TOOL_EXEC_HEADER_RE_MODIFY_FILE = /\[工具调用\]\s*修改文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
+  const TOOL_EXEC_HEADER_RE_DELETE_FILE = /\[工具调用\]\s*删除文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
+  const TOOL_EXEC_HEADER_RE_READ_FILE = /\[工具调用\]\s*读取文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
+  const TOOL_EXEC_HEADER_RE_READ_DIR = /\[工具调用\]\s*读取目录结构\s+([^\r\n]+)\s*(?:\r?\n|$)/
+  const ensureToolRequestBeforeExecute = (toolName: string) => {
+    const normalizedName = (toolName ?? '').trim() || '未知工具'
+    if (state.lastToolRequestName === normalizedName) return
+    state.segments.push({
+      kind: 'tool_request',
+      rawLabel: `[选择工具] ${normalizedName}`,
+      toolName: normalizedName,
+    })
+    state.lastToolRequestName = normalizedName
+  }
 
   const loopGuardMax = 2000
   let loopGuard = 0
@@ -1230,6 +1240,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
+        ensureToolRequestBeforeExecute('写入文件')
         state.pendingFilePath = filePath
         // 进入真实工具执行后，重置“选择工具”去重状态，允许下一轮提示正常出现。
         state.lastToolRequestName = undefined
@@ -1247,6 +1258,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
+        ensureToolRequestBeforeExecute('修改文件')
         // 与 writeFile 一致：执行开始后清空去重状态。
         state.lastToolRequestName = undefined
 
@@ -1268,6 +1280,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
+        ensureToolRequestBeforeExecute('删除文件')
         state.lastToolRequestName = undefined
 
         removeGeneratedFile(filePath)
@@ -1291,6 +1304,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
+        ensureToolRequestBeforeExecute('读取文件')
         state.lastToolRequestName = undefined
 
         state.segments.push({
@@ -1312,6 +1326,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
+        ensureToolRequestBeforeExecute('读取目录结构')
         state.lastToolRequestName = undefined
 
         state.segments.push({
@@ -1744,6 +1759,14 @@ function getWorkflowLatestStepForMessage(m: ChatMessage): WorkflowStepRow | null
   const rows = getWorkflowStepsForMessage(m)
   if (!rows.length) return null
   return rows[rows.length - 1] ?? null
+}
+
+function getWorkflowStepLabelClass(m: ChatMessage, row: WorkflowStepRow): string {
+  if (!isHistoryMessage(m)) return ''
+  if (row.status === 'success') return 'workflow-step-label--success'
+  if (row.status === 'failed') return 'workflow-step-label--failed'
+  if (row.status === 'pending') return 'workflow-step-label--pending'
+  return ''
 }
 
 function isCodeGeneratingLabel(label: string): boolean {
@@ -2638,7 +2661,7 @@ onBeforeUnmount(() => {
                             }"
                           >
                             <span class="workflow-step-badge">{{ row.step }}</span>
-                            <span class="workflow-step-label">{{ row.label }}</span>
+                            <span class="workflow-step-label" :class="getWorkflowStepLabelClass(m, row)">{{ row.label }}</span>
                             <span
                               class="workflow-step-slow-hint"
                               :class="{
@@ -3423,6 +3446,18 @@ onBeforeUnmount(() => {
 .workflow-step-label {
   flex: 1;
   min-width: 0;
+}
+
+.workflow-step-label--success {
+  color: #16a34a;
+}
+
+.workflow-step-label--failed {
+  color: #dc2626;
+}
+
+.workflow-step-label--pending {
+  color: #94a3b8;
 }
 
 .workflow-step-slow-hint {

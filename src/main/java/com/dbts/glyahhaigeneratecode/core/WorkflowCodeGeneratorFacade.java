@@ -9,6 +9,7 @@ import com.dbts.glyahhaigeneratecode.ai.model.message.StreamMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.StreamMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.ai.model.message.ToolExecutedMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
+import com.dbts.glyahhaigeneratecode.ai.model.message.WorkflowChunkDedupState;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
@@ -23,7 +24,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -159,7 +159,7 @@ public class WorkflowCodeGeneratorFacade {
             }
             case TOOL_REQUEST -> {
                 ToolRequestMessage toolRequest = JSONUtil.toBean(rawChunk, ToolRequestMessage.class);
-                // 忽略重复工具请求,如果是重复的就忽略
+                // 忽略重复工具请求,如果是true(存在)重复的就忽略
                 if (isDuplicateToolRequest(toolRequest, dedupState)) {
                     yield "";
                 }
@@ -204,28 +204,26 @@ public class WorkflowCodeGeneratorFacade {
     }
 
     /**
-     * 判定并记录工具请求去重状态（优先按 toolCallId，缺失时按工具名+参数摘要做短窗口去重）。
+     * 判定并记录工具请求去重状态（仅按 toolCallId 幂等）。
+     * 与 Vue 的 adaptVueTokenStream 链路保持一致：只要 toolCallId 不变，就视为同一工具请求事件。
+     * toolCallId 缺失时不做去重（宁可多展示一次，也不要误吞合法工具调用）。
      * @param toolRequest 当前工具请求消息
      * @param dedupState 当前流内幂等状态
      * @return true 表示命中重复并应忽略；false 表示首次出现可继续处理
      */
     private boolean isDuplicateToolRequest(ToolRequestMessage toolRequest, WorkflowChunkDedupState dedupState) {
         String toolCallId = toolRequest.getId();
-        if (toolCallId != null && !toolCallId.isBlank()) {
-            return !dedupState.seenToolRequestIds.add(toolCallId);
+        if (toolCallId == null || toolCallId.isBlank()) {
+            return false;
         }
-        // 1. 无 toolCallId 时，按“工具名 + 原始参数”做连续分片兜底去重，避免首轮异常放大“选择工具”卡片
-        String fallbackKey = buildToolRequestFallbackKey(toolRequest.getName(), toolRequest.getArguments());
-        // 2. 仅压制短窗口重复：相邻同 key 才去重，不影响同轮后续真实重复调用
-        if (fallbackKey.equals(dedupState.lastToolRequestFallbackKey)) {
-            return true;
-        }
-        dedupState.lastToolRequestFallbackKey = fallbackKey;
-        return false;
+
+        // 判断是否已经存在，如果存在则返回true，否则返回false
+        return !dedupState.getSeenToolRequestIds().add(toolCallId);
     }
 
     /**
-     * 判定并记录工具执行结果去重状态（优先按 toolCallId，缺失时按工具名+路径做短窗口去重）。
+     * 判定并记录工具执行结果去重状态（仅按 toolCallId 幂等）。
+     * toolCallId 缺失时不做去重，避免误吞合法执行结果。
      * @param executed 当前工具执行消息
      * @param arguments 工具执行参数
      * @param dedupState 当前流内幂等状态
@@ -233,47 +231,11 @@ public class WorkflowCodeGeneratorFacade {
      */
     private boolean isDuplicateToolExecuted(ToolExecutedMessage executed, JSONObject arguments, WorkflowChunkDedupState dedupState) {
         String toolCallId = executed.getId();
-        if (toolCallId != null && !toolCallId.isBlank()) {
-            return !dedupState.seenToolExecutedIds.add(toolCallId);
+        if (toolCallId == null || toolCallId.isBlank()) {
+            return false;
         }
-        // 1. 无 toolCallId 时，按工具名+目标路径做兜底 key
-        String fallbackKey = buildToolExecutedFallbackKey(executed.getName(), arguments);
-        // 2. 仅压制相邻重复，避免误吞同轮合法多次操作
-        if (fallbackKey.equals(dedupState.lastToolExecutedFallbackKey)) {
-            return true;
-        }
-        dedupState.lastToolExecutedFallbackKey = fallbackKey;
-        return false;
-    }
-
-    /**
-     * 生成工具请求兜底去重键。
-     * @param toolName 工具名
-     * @param rawArguments 原始参数串
-     * @return 去重键
-     */
-    private String buildToolRequestFallbackKey(String toolName, String rawArguments) {
-        String safeToolName = (toolName == null || toolName.isBlank()) ? "-" : toolName;
-        String safeArguments = (rawArguments == null) ? "" : rawArguments.trim();
-        return safeToolName + "|" + safeArguments;
-    }
-
-    /**
-     * 生成工具执行兜底去重键。
-     * @param toolName 工具名
-     * @param arguments 工具参数
-     * @return 去重键
-     */
-    private String buildToolExecutedFallbackKey(String toolName, JSONObject arguments) {
-        String safeToolName = (toolName == null || toolName.isBlank()) ? "-" : toolName;
-        String path = arguments == null ? "" : arguments.getStr("relativeFilePath");
-        if (path == null || path.isBlank()) {
-            path = arguments == null ? "" : arguments.getStr("relativeDirPath");
-        }
-        if (path == null) {
-            path = "";
-        }
-        return safeToolName + "|" + path.trim();
+            // 判断是否已经存在，如果存在则返回true，否则返回false
+        return !dedupState.getSeenToolExecutedIds().add(toolCallId);
     }
 
     private String fallbackToolExecutedFormatting(String toolName, JSONObject arguments) {
@@ -467,10 +429,4 @@ public class WorkflowCodeGeneratorFacade {
         return "### " + displayName + "\n```" + fenceLanguage + "\n" + body + tailNewline + "```\n\n";
     }
 
-    private static class WorkflowChunkDedupState {
-        private final Set<String> seenToolRequestIds = new HashSet<>();
-        private final Set<String> seenToolExecutedIds = new HashSet<>();
-        private String lastToolRequestFallbackKey;
-        private String lastToolExecutedFallbackKey;
-    }
 }

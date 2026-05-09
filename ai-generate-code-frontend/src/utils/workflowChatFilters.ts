@@ -1,5 +1,6 @@
 /** 从 SSE 片段中解析出的工作流步骤（与后端 CodeGenWorkflow 文案一致） */
-export type WorkflowStepRow = { step: number; label: string }
+export type WorkflowStepStatus = 'success' | 'failed' | 'pending'
+export type WorkflowStepRow = { step: number; label: string; status?: WorkflowStepStatus }
 export type WorkflowStageKey = 'initializing' | 'image_collecting' | 'code_generating' | 'code_checking' | 'ready'
 export type WorkflowHistoryOutcome = 'success' | 'failed' | 'unknown'
 
@@ -7,6 +8,8 @@ const WORKFLOW_STEP_LINE_RE = /^\[workflow\]\s*第\s*(\d+)\s*步完成[：:]\s*(
 const WORKFLOW_STEP_GLOBAL_RE = /\[workflow\]\s*第\s*(\d+)\s*步完成[：:]\s*([^[]+)/g
 const WORKFLOW_DONE_LINE_RE = /^\[workflow\]\s*(代码生成完成|工作流结束，生成完成)\s*[。.]?\s*$/
 const WORKFLOW_NOTICE_MERMAID_ERROR_RE = /^\[workflow_notice\]\s*mermaid_error\s*$/
+const WORKFLOW_STAGE_STATUS_LINE_RE = /^\[workflow_stage_status\]\s*(.+)\s*$/m
+const WORKFLOW_STAGE_STATUS_ITEM_RE = /(initializing|image_collecting|code_generating|code_checking|ready)\s*=\s*(success|failed|pending)/gi
 const WORKFLOW_STAGE_ORDER: WorkflowStageKey[] = [
   'initializing',
   'image_collecting',
@@ -28,6 +31,39 @@ function getWorkflowStageLabel(stage: WorkflowStageKey, done: boolean): string {
     return `${WORKFLOW_STAGE_BASE_LABEL[stage]}已完成！`
   }
   return `${WORKFLOW_STAGE_BASE_LABEL[stage]}中...`
+}
+
+function getWorkflowStageLabelByStatus(stage: WorkflowStageKey, status: WorkflowStepStatus): string {
+  if (status === 'failed') return `${WORKFLOW_STAGE_BASE_LABEL[stage]}出现问题`
+  if (status === 'pending') return `${WORKFLOW_STAGE_BASE_LABEL[stage]}中...`
+  if (stage === 'ready') return '就绪！'
+  return `${WORKFLOW_STAGE_BASE_LABEL[stage]}已完成！`
+}
+
+function parseWorkflowStageStatusFromContent(rawContent: string): Partial<Record<WorkflowStageKey, WorkflowStepStatus>> | null {
+  const text = (rawContent ?? '').trim()
+  if (!text) return null
+  const markerMatch = text.match(WORKFLOW_STAGE_STATUS_LINE_RE)
+  if (!markerMatch) return null
+  const markerBody = markerMatch[1] ?? ''
+  const stageStatusMap: Partial<Record<WorkflowStageKey, WorkflowStepStatus>> = {}
+  for (const item of markerBody.matchAll(WORKFLOW_STAGE_STATUS_ITEM_RE)) {
+    const stage = item[1] as WorkflowStageKey
+    const status = item[2] as WorkflowStepStatus
+    stageStatusMap[stage] = status
+  }
+  return Object.keys(stageStatusMap).length > 0 ? stageStatusMap : null
+}
+
+function buildWorkflowRowsFromStageStatus(stageStatusMap: Partial<Record<WorkflowStageKey, WorkflowStepStatus>>): WorkflowStepRow[] {
+  return WORKFLOW_STAGE_ORDER.map((stage, index) => {
+    const status = stageStatusMap[stage] ?? 'success'
+    return {
+      step: index + 1,
+      label: getWorkflowStageLabelByStatus(stage, status),
+      status,
+    }
+  })
 }
 
 function classifyWorkflowStage(rawLabel: string): WorkflowStageKey | null {
@@ -60,6 +96,11 @@ const WORKFLOW_STAGE_FAILED_RE: Record<WorkflowStageKey, RegExp> = {
 export function resolveWorkflowHistoryOutcomeFromContent(rawContent: string): WorkflowHistoryOutcome {
   const text = (rawContent ?? '').trim()
   if (!text) return 'unknown'
+  const stageStatusMap = parseWorkflowStageStatusFromContent(text)
+  if (stageStatusMap) {
+    const hasFailed = WORKFLOW_STAGE_ORDER.some((stage) => stageStatusMap[stage] === 'failed')
+    return hasFailed ? 'failed' : 'success'
+  }
   if (WORKFLOW_HISTORY_FAILED_RE.test(text)) return 'failed'
   if (WORKFLOW_HISTORY_SUCCESS_RE.test(text)) return 'success'
   return 'unknown'
@@ -116,6 +157,12 @@ export function normalizeWorkflowStepsForUi(
   rows: WorkflowStepRow[] | undefined,
   opts?: { historyMode?: boolean; streaming?: boolean; historyOutcome?: WorkflowHistoryOutcome; rawContent?: string },
 ): WorkflowStepRow[] {
+  const isHistoryMode = opts?.historyMode === true
+  const rawContent = opts?.rawContent ?? ''
+  const stageStatusMap = isHistoryMode ? parseWorkflowStageStatusFromContent(rawContent) : null
+  if (stageStatusMap) {
+    return buildWorkflowRowsFromStageStatus(stageStatusMap)
+  }
   if (!rows || rows.length === 0) return []
   const stageSet = new Set<WorkflowStageKey>()
   // 只要存在工作流卡片，就固定在最前面展示“初始化”
@@ -126,10 +173,8 @@ export function normalizeWorkflowStepsForUi(
       stageSet.add(stage)
     }
   }
-  const isHistoryMode = opts?.historyMode === true
   const isStreaming = opts?.streaming === true
   const historyOutcome = opts?.historyOutcome ?? 'unknown'
-  const rawContent = opts?.rawContent ?? ''
 
   if (isHistoryMode && historyOutcome === 'success') {
     return WORKFLOW_STAGE_ORDER.map((stage, index) => ({
@@ -397,6 +442,7 @@ export function stripAssistantNoiseLines(text: string): string {
     .map((line) => {
       const t = line.trim()
       if (!t) return line
+      if (WORKFLOW_STAGE_STATUS_LINE_RE.test(t)) return ''
       if (WORKFLOW_STEP_LINE_RE.test(t)) return ''
       if (WORKFLOW_DONE_LINE_RE.test(t)) return ''
       if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) return ''
@@ -426,3 +472,4 @@ export function mergeWorkflowSteps(
     .sort((a, b) => a[0] - b[0])
     .map(([step, label]) => ({ step, label }))
 }
+

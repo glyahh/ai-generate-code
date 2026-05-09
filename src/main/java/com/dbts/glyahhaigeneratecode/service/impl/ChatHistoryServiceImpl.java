@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -73,13 +74,30 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     private JdbcTemplate jdbcTemplate;
 
     private static final int MEMORY_AI_MESSAGE_MAX_LENGTH = 2400;
-    /** 超过此长度后固定截断（不走额外 AI 总结调用） */
+    /**
+     * 超过此长度后固定截断（不走额外 AI 总结调用）
+     * */
     private static final int MEMORY_AI_CODE_BLOCK_KEEP_LENGTH = 2200;
     private static final String MESSAGE_TRUNCATED_SUFFIX = "\n...[message truncated]";
     private static final int DEFAULT_SAFE_MESSAGE_LENGTH = 4000;
     private static final Pattern HTML_BLOCK_PATTERN = Pattern.compile("```html\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
     private static final Pattern CSS_BLOCK_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
     private static final Pattern JS_BLOCK_PATTERN = Pattern.compile("```(?:js|javascript)\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
+    private static final String WORKFLOW_STAGE_STATUS_PREFIX = "[workflow_stage_status]";
+    private static final Pattern WORKFLOW_STAGE_STATUS_LINE_PATTERN = Pattern.compile("(?m)^\\[workflow_stage_status\\].*$");
+    private static final List<String> WORKFLOW_FAILURE_KEYWORDS = List.of(
+            "失败", "报错", "error", "异常", "中断", "超时", "failed", "exception", "timeout"
+    );
+    private static final List<String> WORKFLOW_SUCCESS_EVIDENCE_KEYWORDS = List.of(
+            "代码已生成完毕", "写入文件", "项目已生成完毕", "代码生成完成", "工作流结束，生成完成"
+    );
+    private static final Map<String, Pattern> WORKFLOW_STAGE_FAILURE_PATTERNS = Map.of(
+            "initializing", Pattern.compile("(初始化|提示词增强|开始准备).{0,40}(失败|报错|error|异常|中断|超时)|(失败|报错|error|异常|中断|超时).{0,40}(初始化|提示词增强|开始准备)", Pattern.CASE_INSENSITIVE),
+            "image_collecting", Pattern.compile("(图片|图像|插画|logo|架构图|mermaid).{0,40}(失败|报错|error|异常|中断|超时)|(失败|报错|error|异常|中断|超时).{0,40}(图片|图像|插画|logo|架构图|mermaid)", Pattern.CASE_INSENSITIVE),
+            "code_generating", Pattern.compile("(代码生成|项目构建|生成代码|写入文件|写文件|创建文件).{0,40}(失败|报错|error|异常|中断|超时)|(失败|报错|error|异常|中断|超时).{0,40}(代码生成|项目构建|生成代码|写入文件|写文件|创建文件)", Pattern.CASE_INSENSITIVE),
+            "code_checking", Pattern.compile("(代码检查|质量检查|代码质检|lint|测试).{0,40}(失败|报错|error|异常|中断|超时)|(失败|报错|error|异常|中断|超时).{0,40}(代码检查|质量检查|代码质检|lint|测试)", Pattern.CASE_INSENSITIVE),
+            "ready", Pattern.compile("(就绪|完成|结束).{0,40}(失败|报错|error|异常|中断|超时)|(失败|报错|error|异常|中断|超时).{0,40}(就绪|完成|结束)", Pattern.CASE_INSENSITIVE)
+    );
 
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
@@ -193,7 +211,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         QueryWrapper queryWrapper = this.buildQueryWrapper(queryRequest);
 
         // 查询数据
-        return this.page(Page.of(1, pageSize), queryWrapper);
+        Page<ChatHistory> page = this.page(Page.of(1, pageSize), queryWrapper);
+        
+        // 为 workflow AI 消息追加五阶段状态标记行
+        appendWorkflowStageStatusForHistoryPage(page);
+        return page;
     }
 
     @Override
@@ -262,6 +284,130 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         ChatHistoryVO chatHistoryVO = new ChatHistoryVO();
         BeanUtil.copyProperties(chatHistory, chatHistoryVO);
         return chatHistoryVO;
+    }
+
+    /**
+     * 在历史回显分页结果中为 workflow AI 消息追加五阶段状态标记行。
+     * @param page 历史分页结果
+     * @return 无
+     */
+    private void appendWorkflowStageStatusForHistoryPage(Page<ChatHistory> page) {
+        if (page == null || page.getRecords() == null || page.getRecords().isEmpty()) {
+            return;
+        }
+        for (ChatHistory history : page.getRecords()) {
+            if (history == null) {
+                continue;
+            }
+            if (!ChatHistoryMessageTypeEnum.AI.getValue().equalsIgnoreCase(StrUtil.blankToDefault(history.getMessageType(), ""))) {
+                continue;
+            }
+            String message = history.getMessage();
+            if (!isWorkflowRelatedHistoryMessage(message)) {
+                continue;
+            }
+            // 1. 先清理可能存在的旧标记，避免分页重复请求导致多次拼接。
+            String cleanedMessage = WORKFLOW_STAGE_STATUS_LINE_PATTERN.matcher(StrUtil.blankToDefault(message, "")).replaceAll("").trim();
+            // 2. 再基于当前 message 解析阶段状态并拼接到尾部，仅影响历史回显，不改 DB 原文。
+            String markerLine = buildWorkflowStageStatusMarkerLine(cleanedMessage);
+            history.setMessage(cleanedMessage + "\n" + markerLine);
+        }
+    }
+
+    /**
+     * 判断历史消息是否属于 workflow 回显消息，避免普通对话误挂工作流卡片。
+     * @param message 历史消息文本
+     * @return true-属于 workflow；false-普通消息
+     */
+    private boolean isWorkflowRelatedHistoryMessage(String message) {
+        if (StrUtil.isBlank(message)) {
+            return false;
+        }
+        String lowerText = message.toLowerCase(Locale.ROOT);
+        return lowerText.contains("[workflow]")
+                || lowerText.contains("[workflow_notice]")
+                || lowerText.contains("[workflow_stage_status]")
+                || lowerText.contains("[选择工具]")
+                || lowerText.contains("[工具调用]")
+                || lowerText.contains("工作流");
+    }
+
+    /**
+     * 将 workflow 历史消息映射为固定五阶段状态行，供前端直接渲染绿/红/灰字体。
+     * @param message workflow 历史消息文本
+     * @return 阶段状态标记行
+     */
+    private String buildWorkflowStageStatusMarkerLine(String message) {
+        String safeMessage = StrUtil.blankToDefault(message, "");
+        String lowerText = safeMessage.toLowerCase(Locale.ROOT);
+        String[] statuses = {"success", "success", "success", "success", "success"};
+
+        // 1. 先按“阶段关键词 + 失败关键词”定位失败阶段，命中则该阶段红色、后续灰色。
+        int failedStageIndex = resolveFailedWorkflowStageIndex(safeMessage, lowerText);
+        if (failedStageIndex >= 0) {
+            for (int i = failedStageIndex; i < statuses.length; i++) {
+                statuses[i] = (i == failedStageIndex) ? "failed" : "pending";
+            }
+        }
+        // 2. 未命中失败时按需求保持全绿；成功证据关键词用于增强语义稳定性，避免误判。
+        if (failedStageIndex < 0 && containsAnyKeyword(lowerText, WORKFLOW_SUCCESS_EVIDENCE_KEYWORDS)) {
+            statuses = new String[]{"success", "success", "success", "success", "success"};
+        }
+
+        return String.format(Locale.ROOT,
+                "%s initializing=%s;image_collecting=%s;code_generating=%s;code_checking=%s;ready=%s",
+                WORKFLOW_STAGE_STATUS_PREFIX, statuses[0], statuses[1], statuses[2], statuses[3], statuses[4]);
+    }
+
+    /**
+     * 根据消息文本判定 workflow 失败阶段索引，顺序固定为初始化/图片/代码生成/代码检查/就绪。
+     * @param rawText 原始消息文本
+     * @param lowerText 小写消息文本
+     * @return 失败阶段索引；未命中返回 -1
+     */
+    private int resolveFailedWorkflowStageIndex(String rawText, String lowerText) {
+        if (StrUtil.isBlank(rawText) || StrUtil.isBlank(lowerText) || !containsAnyKeyword(lowerText, WORKFLOW_FAILURE_KEYWORDS)) {
+            return -1;
+        }
+        // 1. 优先用阶段映射规则定位失败点，保证“前绿、当前红、后灰”的可解释性。
+        if (WORKFLOW_STAGE_FAILURE_PATTERNS.get("initializing").matcher(rawText).find()) {
+            return 0;
+        }
+        if (WORKFLOW_STAGE_FAILURE_PATTERNS.get("image_collecting").matcher(rawText).find()) {
+            return 1;
+        }
+        if (WORKFLOW_STAGE_FAILURE_PATTERNS.get("code_generating").matcher(rawText).find()) {
+            return 2;
+        }
+        if (WORKFLOW_STAGE_FAILURE_PATTERNS.get("code_checking").matcher(rawText).find()) {
+            return 3;
+        }
+        if (WORKFLOW_STAGE_FAILURE_PATTERNS.get("ready").matcher(rawText).find()) {
+            return 4;
+        }
+        // 2. 兜底：出现失败词但未命中具体阶段时，按代码生成阶段失败处理。
+        return 2;
+    }
+
+    /**
+     * 判断文本是否命中任一关键词。
+     * @param lowerText 已小写化文本
+     * @param keywords 关键词列表
+     * @return true-命中；false-未命中
+     */
+    private boolean containsAnyKeyword(String lowerText, List<String> keywords) {
+        if (StrUtil.isBlank(lowerText) || keywords == null || keywords.isEmpty()) {
+            return false;
+        }
+        for (String keyword : keywords) {
+            if (StrUtil.isBlank(keyword)) {
+                continue;
+            }
+            if (lowerText.contains(keyword.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -419,7 +565,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         return safePrefix + code.substring(0, maxLen) + "\n// ...历史代码片段已截断";
     }
 
-    
+
     /**
      * 根据应用的代码生成类型，将对应的系统 Prompt 追加到 Redis 管理的对话内存中。
      * HTML / MULTI_FILE / VUE 分别只追加自身对应的系统提示词，避免不同模式之间相互干扰。
