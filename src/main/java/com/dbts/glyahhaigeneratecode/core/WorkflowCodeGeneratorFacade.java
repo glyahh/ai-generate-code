@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -46,15 +47,16 @@ public class WorkflowCodeGeneratorFacade {
     @Resource
     private ToolManager toolManager;
 
-    public Flux<String> generateAndSaveCodeStream (String userMessage,
+    public Flux<String> generateAndSaveCodeStream(String userMessage,
                                                   CodeGenTypeEnum codeGenTypeEnum,
                                                   Long appId,
                                                   boolean firstRound) {
         return Flux.create(sink -> {
-            // 使用异步线程执行 workflow，避免同线程阻塞导致 SSE 早期消息滞后
+            // 使用异步线程执行 workflow，避免阻塞当前线程导致 SSE 早期消息滞后
             CompletableFuture.runAsync(() -> {
                 try {
                     CodeGenWorkflow workflow = new CodeGenWorkflow();
+                    Set<String> seenToolIds = new HashSet<>();
                     // 工作流第...步完成
                     Consumer<String> progress = msg -> {
                         try {
@@ -71,7 +73,7 @@ public class WorkflowCodeGeneratorFacade {
                         try {
                             // 解析ai返回的请求/意图
                             // 工具请求,工具调用结果,ai相应
-                            String adapted = adaptWorkflowCodeChunk(rawChunk);
+                            String adapted = adaptWorkflowCodeChunk(rawChunk, seenToolIds);
                             if (adapted != null && !adapted.isEmpty()) {
                                 sink.next(adapted);
                             }
@@ -130,7 +132,7 @@ public class WorkflowCodeGeneratorFacade {
         return msg.endsWith("\n") ? msg : msg + "\n";
     }
 
-    private String adaptWorkflowCodeChunk(String rawChunk) {
+    private String adaptWorkflowCodeChunk(String rawChunk, Set<String> seenToolIds) {
         if (rawChunk == null || rawChunk.isBlank()) {
             return "";
         }
@@ -150,19 +152,22 @@ public class WorkflowCodeGeneratorFacade {
 
         return switch (typeEnum) {
             case AI_RESPONSE -> {
-                // 将rawchunk转换为AiResponseMessage
+                // 将 rawChunk 转换为 AiResponseMessage
                 AiResponseMessage aiMessage = JSONUtil.toBean(rawChunk, AiResponseMessage.class);
                 yield aiMessage.getData() == null ? "" : aiMessage.getData();
             }
             case TOOL_REQUEST -> {
-                //
                 ToolRequestMessage toolRequest = JSONUtil.toBean(rawChunk, ToolRequestMessage.class);
+                String toolCallId = toolRequest.getId();
+                if (toolCallId != null && !toolCallId.isBlank() && !seenToolIds.add(toolCallId)) {
+                    yield "";
+                }
                 String toolName = toolRequest.getName();
                 BaseTool tool = toolManager.getTool(toolName);
                 if (tool != null) {
                     yield tool.generateToolRequestResponse();
                 }
-                // 实在不行用工具名不用专门给人看的展示名了
+                // 工具不存在时回退到工具名展示
                 String label = (toolName == null || toolName.isBlank()) ? "未知工具" : toolName;
                 yield String.format("\n\n[选择工具] %s\n", label);
             }
@@ -171,10 +176,10 @@ public class WorkflowCodeGeneratorFacade {
                 JSONObject arguments = safeParseArguments(executed.getArguments());
                 BaseTool tool = toolManager.getTool(executed.getName());
                 if (tool != null) {
-                    // 直接获取工具调用的结果string
+                    // 直接使用工具定义的执行结果格式
                     yield tool.generateToolExecutedResult(arguments);
                 }
-                // 强行构造一种工具调用的结果格式返回
+                // 回退为通用工具执行结果格式
                 yield fallbackToolExecutedFormatting(executed.getName(), arguments);
             }
         };
@@ -331,7 +336,7 @@ public class WorkflowCodeGeneratorFacade {
     }
 
     /**
-     * 与 aiservice / Various_File_Prompt 约定一致：html、css、javascript（js 用 javascript 围栏）。
+     * 与 ai service / Various_File_Prompt 约定一致：html、css、javascript（ts 也使用 javascript 围栏）。
      */
     static String markdownFenceLanguageForFileName(String fileName) {
         if (fileName == null) {
@@ -369,7 +374,7 @@ public class WorkflowCodeGeneratorFacade {
     }
 
     /**
-     * 生成与前端 parseMarkdownWithCode 兼容的 fenced 块：开始/结束围栏独占一行。
+     * 生成与前端 parseMarkdownWithCode 兼容的 fenced 代码块：起始/结束围栏各占一行。
      */
     static String wrapMarkdownCodeBlock(String displayName, String content, String fenceLanguage) {
         String body = content == null ? "" : content;
@@ -377,3 +382,6 @@ public class WorkflowCodeGeneratorFacade {
         return "### " + displayName + "\n```" + fenceLanguage + "\n" + body + tailNewline + "```\n\n";
     }
 }
+
+
+
