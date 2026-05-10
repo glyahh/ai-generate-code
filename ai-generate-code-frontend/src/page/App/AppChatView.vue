@@ -2620,11 +2620,11 @@ onBeforeUnmount(() => {
                   <div class="bubble-content">
                     <template
                       v-if="m.role === 'assistant' && isStreamActiveForMessage(m) && !assistantHasRenderableOutput(m)">
-                      <div class="typing-indicator">
-                        <span class="typing-dot" />
-                        <span class="typing-dot" />
-                        <span class="typing-dot" />
-                        <span class="typing-text">应用助手思考中…</span>
+                      <div class="typing-indicator" role="status" aria-live="polite" aria-label="应用助手正在思考">
+                        <span class="typing-dot" aria-hidden="true" />
+                        <span class="typing-dot" aria-hidden="true" />
+                        <span class="typing-dot" aria-hidden="true" />
+                        <span class="typing-text">思考中</span>
                       </div>
                     </template>
                     <template v-else>
@@ -3497,14 +3497,22 @@ onBeforeUnmount(() => {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  background:
+    radial-gradient(circle at 12% 20%, rgba(59, 130, 246, 0.14), transparent 55%),
+    radial-gradient(circle at 90% 30%, rgba(45, 212, 191, 0.12), transparent 52%),
+    rgba(15, 23, 42, 0.04);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .typing-dot {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(37, 99, 235, 0.65);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.26);
   animation: typingDot 1.4s infinite ease-in-out;
 }
 
@@ -3518,7 +3526,9 @@ onBeforeUnmount(() => {
 
 .typing-text {
   font-size: 12px;
-  color: #6b7280;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(15, 23, 42, 0.7);
 }
 
 @keyframes typingDot {
@@ -3533,6 +3543,13 @@ onBeforeUnmount(() => {
   30% {
     transform: translateY(-3px);
     opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: none;
+    opacity: 0.6;
   }
 }
 

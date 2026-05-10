@@ -32,6 +32,7 @@ const creating = ref(false)
 
 const codeTypePickerOpen = ref(false)
 const selectedCodeType = ref<string>(CodeGenTypeEnum.MULTI_FILE)
+const autoCodeTypeEnabled = ref(true)
 const workflowBetaEnabled = ref(false)
 const workflowBetaTooltip = '该功能处于测试状态，可能不稳定'
 const workflowAdvantageTips = ['逻辑更严谨', '图片更贴切', '代码质量检测']
@@ -63,7 +64,9 @@ const CODE_TYPE_CHOICES: Array<{
 ]
 
 const selectedCodeTypeLabel = computed(
-  () => CODE_TYPE_CHOICES.find((x) => x.value === selectedCodeType.value)?.label ?? '多文件',
+  () => (autoCodeTypeEnabled.value
+    ? 'Auto'
+    : CODE_TYPE_CHOICES.find((x) => x.value === selectedCodeType.value)?.label ?? '多文件'),
 )
 
 const deployModalVisible = ref(false)
@@ -253,7 +256,7 @@ async function handleCreateApp() {
       body: {
         appName: buildAppNameFromPrompt(content),
         initPrompt: content,
-        codeGenType: selectedCodeType.value,
+        codeGenType: autoCodeTypeEnabled.value ? undefined : selectedCodeType.value,
         isBeta: workflowBetaEnabled.value ? 1 : 0,
       },
     })
@@ -296,7 +299,15 @@ function toggleCodeTypePicker() {
 function selectCodeType(value: CodeGenTypeEnum) {
   if (creating.value) return
   selectedCodeType.value = value
+  autoCodeTypeEnabled.value = false
   codeTypePickerOpen.value = false
+}
+
+function handleAutoSelectCodeType() {
+  if (creating.value) return
+  autoCodeTypeEnabled.value = true
+  codeTypePickerOpen.value = false
+  message.success('已切换为 Auto，将自动选择代码类型')
 }
 
 /** 将关键字解析为 id 或 appName 查询参数 */
@@ -611,6 +622,17 @@ onMounted(() => {
                     <span class="code-type-picker-btn-caret">▾</span>
                   </button>
                   <div v-show="codeTypePickerOpen" class="code-type-options">
+                    <div class="code-type-auto-head">
+                      <button
+                        type="button"
+                        class="code-type-auto-btn"
+                        :class="{ 'is-active': autoCodeTypeEnabled }"
+                        @click="handleAutoSelectCodeType"
+                      >
+                        <span class="code-type-auto-btn__dot" aria-hidden="true" />
+                        <span class="code-type-auto-btn__text">auto</span>
+                      </button>
+                    </div>
                     <ATooltip
                       v-for="c in CODE_TYPE_CHOICES"
                       :key="c.value"
@@ -622,7 +644,7 @@ onMounted(() => {
                         class="code-type-option-btn"
                         :class="[
                           `code-type-option-btn--${c.accent}`,
-                          selectedCodeType === c.value ? 'is-selected' : '',
+                          !autoCodeTypeEnabled && selectedCodeType === c.value ? 'is-selected' : '',
                         ]"
                         @click="selectCodeType(c.value)"
                       >
@@ -647,7 +669,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="apps-section">
+    <section class="apps-section apps-section--featured">
       <div class="section-header">
         <h2>精选应用</h2>
         <span class="section-subtitle">由管理员挑选的优质案例</span>
@@ -702,7 +724,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="apps-section">
+    <section class="apps-section apps-section--mine">
       <div class="section-header">
         <h2>我的应用</h2>
         <span class="section-subtitle">最多每页展示 20 个，可根据名称搜索</span>
@@ -825,7 +847,7 @@ onMounted(() => {
   border-radius: 24px;
   overflow: hidden;
   padding: 40px 32px 32px;
-  min-height: 60vh;
+  min-height: calc(60vh + 100px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -849,6 +871,7 @@ onMounted(() => {
   margin: 0 auto;
   text-align: center;
   padding-inline: 24px;
+  transform: translateY(-30px);
 }
 
 .hero-title {
@@ -1170,6 +1193,76 @@ onMounted(() => {
   animation: codeTypePickerPop 160ms ease-out;
 }
 
+.code-type-auto-head {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+.code-type-auto-btn {
+  width: 100%;
+  height: 34px;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 16% 20%, rgba(191, 219, 254, 0.55), transparent 40%),
+    linear-gradient(120deg, rgba(219, 234, 254, 0.9), rgba(186, 230, 253, 0.84), rgba(224, 242, 254, 0.88));
+  color: #1e3a8a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow:
+    0 6px 16px rgba(59, 130, 246, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  transition:
+    transform 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    filter 0.16s ease-out;
+}
+
+.code-type-auto-btn:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.06);
+  box-shadow:
+    0 10px 20px rgba(59, 130, 246, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.code-type-auto-btn.is-active {
+  border-color: rgba(37, 99, 235, 0.42);
+  background:
+    radial-gradient(circle at 16% 20%, rgba(96, 165, 250, 0.35), transparent 40%),
+    linear-gradient(120deg, rgba(191, 219, 254, 0.92), rgba(125, 211, 252, 0.88), rgba(191, 219, 254, 0.9));
+  box-shadow:
+    0 12px 26px rgba(37, 99, 235, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.code-type-auto-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.22),
+    0 12px 24px rgba(37, 99, 235, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.58);
+}
+
+.code-type-auto-btn__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #3b82f6;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
+}
+
+.code-type-auto-btn__text {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 @keyframes codeTypePickerPop {
   from {
     opacity: 0;
@@ -1230,11 +1323,74 @@ onMounted(() => {
 }
 
 .apps-section {
-  background: #ffffff;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: rgba(255, 255, 255, 0.95);
   border-radius: 20px;
   padding: 20px 20px 16px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  box-shadow:
+    0 12px 30px rgba(15, 23, 42, 0.05),
+    0 4px 12px rgba(15, 23, 42, 0.05),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 0 0 1px rgba(148, 163, 184, 0.07) inset,
+    0 0 0 1px rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
   color: #0f172a;
+}
+
+.apps-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+}
+
+.apps-section::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.48;
+}
+
+.apps-section--featured::before {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(56, 189, 248, 0.2), transparent 38%),
+    radial-gradient(circle at 92% 8%, rgba(129, 140, 248, 0.2), transparent 38%),
+    radial-gradient(circle at 48% 120%, rgba(45, 212, 191, 0.16), transparent 44%),
+    linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(236, 253, 245, 0.94), rgba(239, 246, 255, 0.96));
+}
+
+.apps-section--featured::after {
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)),
+    repeating-linear-gradient(
+      -28deg,
+      rgba(59, 130, 246, 0.04) 0 10px,
+      rgba(56, 189, 248, 0.02) 10px 20px
+    );
+}
+
+.apps-section--mine::before {
+  background:
+    radial-gradient(circle at 12% -6%, rgba(251, 191, 36, 0.18), transparent 36%),
+    radial-gradient(circle at 88% 4%, rgba(244, 114, 182, 0.14), transparent 34%),
+    radial-gradient(circle at 76% 112%, rgba(99, 102, 241, 0.14), transparent 40%),
+    linear-gradient(136deg, rgba(255, 255, 255, 0.98), rgba(254, 242, 242, 0.94), rgba(238, 242, 255, 0.95));
+}
+
+.apps-section--mine::after {
+  background:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.08)),
+    repeating-linear-gradient(
+      35deg,
+      rgba(236, 72, 153, 0.03) 0 9px,
+      rgba(79, 70, 229, 0.02) 9px 18px
+    );
 }
 .section-header {
   display: flex;
