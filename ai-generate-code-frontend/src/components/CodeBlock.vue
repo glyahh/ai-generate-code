@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 
 interface Props {
   code: string
@@ -15,6 +15,35 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const codeRef = ref<HTMLElement | null>(null)
+
+function decodeHtmlEntitiesOnce(text: string): string {
+  // decode &amp; first so &amp;lt; becomes &lt;, then decode angle quotes, etc.
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
+function maybeDecodePreEscapedHtml(raw: string, language: string): string {
+  const lang = (language ?? 'text').toLowerCase()
+  if (!(lang === 'html' || lang === 'xml' || lang === 'vue')) return raw
+
+  // Heuristic: if it contains HTML entities but lacks real angle brackets,
+  // it's likely pre-escaped upstream; decode defensively.
+  const hasEntities = /&(lt|gt|amp|quot|#39);/.test(raw)
+  const hasAngle = /[<>]/.test(raw)
+  if (!hasEntities || hasAngle) return raw
+
+  let out = raw
+  for (let i = 0; i < 2; i++) {
+    const decoded = decodeHtmlEntitiesOnce(out)
+    if (decoded === out) break
+    out = decoded
+  }
+  return out
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -137,7 +166,7 @@ function highlightVue(raw: string): string {
 }
 
 const highlightedCode = computed(() => {
-  const raw = props.code ?? ''
+  const raw = maybeDecodePreEscapedHtml(props.code ?? '', props.language ?? 'text')
   const lang = (props.language ?? 'text').toLowerCase()
   if (lang === 'vue') return highlightVue(raw)
   if (lang === 'javascript' || lang === 'js' || lang === 'typescript' || lang === 'ts') return highlightJsLike(raw)
@@ -179,7 +208,7 @@ function scrollToBottom() {
         📋
       </button>
     </div>
-    <pre ref="codeRef" class="code-block"><code v-html="highlightedCode"></code><span v-if="isStreaming" class="streaming-cursor">▋</span></pre>
+    <pre ref="codeRef" class="code-block"><code v-html="highlightedCode"></code></pre>
     <button class="scroll-button scroll-button-top" @click="scrollToTop" title="回到顶部">
       ↑
     </button>
@@ -383,23 +412,4 @@ function scrollToBottom() {
   color: #7ee787;
 }
 
-.streaming-cursor {
-  display: inline-block;
-  color: #d4d4d4;
-  animation: blink 1s infinite;
-  margin-left: 2px;
-}
-
-@keyframes blink {
-
-  0%,
-  50% {
-    opacity: 1;
-  }
-
-  51%,
-  100% {
-    opacity: 0;
-  }
-}
 </style>

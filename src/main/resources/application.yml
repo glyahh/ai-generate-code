@@ -69,7 +69,8 @@ langchain4j:
       # 开启详细的请求和回答日志记录
       log-requests: true
       log-responses: true
-      max-tokens: 8192
+      # 单页 HTML / 多文件流式输出易触顶 LENGTH；酌情调高（需与模型服务商上限一致）
+      max-tokens: 12288
       # 最大重试次数
       max-retries: 2
 

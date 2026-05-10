@@ -437,24 +437,44 @@ export function resetSseLineAccumulator(acc: SseLineAccumulator) {
 /** 历史回放/全文解析：去掉不应展示给用户的行 */
 export function stripAssistantNoiseLines(text: string): string {
   if (!text) return ''
-  return text
-    .split(/\r?\n/)
-    .map((line) => {
-      const t = line.trim()
-      if (!t) return line
-      if (WORKFLOW_STAGE_STATUS_LINE_RE.test(t)) return ''
-      if (WORKFLOW_STEP_LINE_RE.test(t)) return ''
-      if (WORKFLOW_DONE_LINE_RE.test(t)) return ''
-      if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) return ''
-      if (INTERNAL_DIR_LINE_RE.test(t)) return ''
-      const stripped = stripInlineNoiseFragments(line)
-      if (!stripped) return ''
-      if (SHORT_NOISE_ENGLISH_WORD_RE.test(stripped)) return ''
-      if (PROTOCOL_FRAGMENT_RE.test(stripped)) return ''
-      return stripped
-    })
-    .filter((line) => line !== '')
-    .join('\n')
+  const out: string[] = []
+
+  // Fence-aware: fenced code blocks must preserve whitespace exactly.
+  // We only strip workflow/protocol noise outside fences.
+  let inFence = false
+
+  for (const line of text.split(/\r?\n/)) {
+    const fenceCandidate = line.replace(/^ {0,3}/, '')
+    const isFenceLine = fenceCandidate.startsWith('```')
+    if (isFenceLine) {
+      inFence = !inFence
+      out.push(line)
+      continue
+    }
+
+    if (inFence) {
+      out.push(line)
+      continue
+    }
+
+    const t = line.trim()
+    if (!t) {
+      out.push(line)
+      continue
+    }
+    if (WORKFLOW_STAGE_STATUS_LINE_RE.test(t)) continue
+    if (WORKFLOW_STEP_LINE_RE.test(t)) continue
+    if (WORKFLOW_DONE_LINE_RE.test(t)) continue
+    if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) continue
+    if (INTERNAL_DIR_LINE_RE.test(t)) continue
+    const stripped = stripInlineNoiseFragments(line)
+    if (!stripped) continue
+    if (SHORT_NOISE_ENGLISH_WORD_RE.test(stripped)) continue
+    if (PROTOCOL_FRAGMENT_RE.test(stripped)) continue
+    out.push(stripped)
+  }
+
+  return out.join('\n')
 }
 
 export function mergeWorkflowSteps(

@@ -1,5 +1,6 @@
 package com.dbts.glyahhaigeneratecode.core.handler;
 
+import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlStreamIntegrity;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -29,7 +30,12 @@ public class SimpleTextStreamHandler {
                 })
                 .doOnComplete(() -> {
                     if (persisted.compareAndSet(false, true)) {
-                        String aiResponse = aiResponseBuilder.toString();
+                        String raw = aiResponseBuilder.toString();
+                        String aiResponse = LegacyHtmlStreamIntegrity.appendIntegrityNoticeIfNeeded(raw);
+                        if (!raw.equals(aiResponse)) {
+                            log.warn("legacy AI 消息疑似末尾截断（未闭合标签样式），已追加提示，appId={} charLen={}", appId, raw.length());
+                        }
+                        log.info("SimpleTextStreamHandler doOnComplete appId={} aiCharLen={}", appId, aiResponse.length());
                         chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
                     }
                 })
@@ -40,8 +46,11 @@ public class SimpleTextStreamHandler {
                     }
                 })
                 .doFinally(signal -> {
+                    if (signal == SignalType.CANCEL) {
+                        log.warn("SimpleTextStreamHandler flux CANCEL appId={} bufferedChars={}", appId, aiResponseBuilder.length());
+                    }
                     if (signal == SignalType.CANCEL && persisted.compareAndSet(false, true)) {
-                        String partial = aiResponseBuilder.toString();
+                        String partial = LegacyHtmlStreamIntegrity.appendIntegrityNoticeIfNeeded(aiResponseBuilder.toString());
                         if (!partial.isBlank()) {
                             chatHistoryService.addChatMessage(
                                     appId,

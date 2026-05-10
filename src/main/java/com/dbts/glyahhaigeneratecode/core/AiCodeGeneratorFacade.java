@@ -14,6 +14,7 @@ import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.core.context.HtmlMultiFileEditContextBuilder;
 import com.dbts.glyahhaigeneratecode.core.parser.CodeParserExecutor;
 import com.dbts.glyahhaigeneratecode.core.saver.CodeFileSaverExecutor;
+import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlStreamIntegrity;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
@@ -24,6 +25,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -109,11 +111,32 @@ public class AiCodeGeneratorFacade {
         return result.doOnNext(codeBuilder::append)
                 .doOnComplete(() -> {
                     try {
-                        Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, codeBuilder.toString());
+                        String full = codeBuilder.toString();
+                        int len = full.length();
+                        String tail = len > 200 ? full.substring(len - 200) : full;
+                        log.info(
+                                "legacy 流式聚合完成 appId={} codeGenType={} charLen={} possibleTruncatedTail={}\ntailSample=\n{}",
+                                appId,
+                                codeGenTypeEnum,
+                                len,
+                                LegacyHtmlStreamIntegrity.looksLikeIncompleteTrailingTag(full),
+                                tail
+                        );
+                        Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, full);
                         File file = codeFileSaverExecutor.execute(codeGenTypeEnum, executeResult, appId);
                         log.info("保存目录: {}", file.getAbsolutePath());
                     } catch (Exception e) {
                         log.error("生成代码失败: {}", e.getMessage(), e);
+                    }
+                })
+                .doFinally(signal -> {
+                    if (signal == SignalType.CANCEL) {
+                        log.warn(
+                                "legacy 流式被取消 appId={} codeGenType={} partialCharLen={}",
+                                appId,
+                                codeGenTypeEnum,
+                                codeBuilder.length()
+                        );
                     }
                 });
     }
@@ -237,7 +260,8 @@ public class AiCodeGeneratorFacade {
         synthetic.put("type", "tool_executed");
         synthetic.put("id", toolCallId);
         synthetic.put("name", "writeFile");
-        synthetic.put("arguments", JSONUtil.toJsonStr(extractedArguments));
+        // Keep `arguments` as an object to avoid double JSON encoding (which breaks newlines/escaping on frontend).
+        synthetic.put("arguments", extractedArguments);
         synthetic.put("result", "");
         return JSONUtil.toJsonStr(synthetic);
     }

@@ -101,6 +101,12 @@ type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   createTime?: string
+  /** 会话消息流式开始时间（历史回放无此字段） */
+  streamStartedAt?: number
+  /** 首个可见内容出现时间（用于“共思考X秒”） */
+  firstVisibleAt?: number
+  /** 流式完成时间（用于“共消耗Y秒”） */
+  streamFinishedAt?: number
   uiState?: AssistantUiState
   /** 预解析 UI 片段缓存（主要用于历史回放，避免模板重复重解析） */
   cachedUiSegments?: UiSegment[]
@@ -122,6 +128,7 @@ type ChatMessage = {
 type ActiveStreamMeta = {
   assistantMessageId: number
   sseCarry: { carry: string }
+  mode: 'legacy' | 'workflow'
 }
 
 type UiMarkdownSegment = { kind: 'markdown'; content: string }
@@ -1893,6 +1900,40 @@ function assistantHasRenderableOutput(m: ChatMessage): boolean {
   return false
 }
 
+function getThinkingElapsedSec(m: ChatMessage): number | null {
+  if (m.role !== 'assistant' || m.createTime || !m.streamStartedAt) return null
+  const endTs = m.firstVisibleAt ?? workflowNowTs.value
+  return Math.max(0, Math.floor((endTs - m.streamStartedAt) / 1000))
+}
+
+function getTotalElapsedSec(m: ChatMessage): number | null {
+  if (m.role !== 'assistant' || m.createTime || !m.streamStartedAt || !m.streamFinishedAt) return null
+  return Math.max(0, Math.floor((m.streamFinishedAt - m.streamStartedAt) / 1000))
+}
+
+function getThinkingStatusText(m: ChatMessage): string {
+  const thinkingSec = getThinkingElapsedSec(m)
+  if (thinkingSec == null) return ''
+  const baseText = `${m.firstVisibleAt ? '共思考' : '已思考'}${thinkingSec}秒`
+  const totalSec = getTotalElapsedSec(m)
+  if (totalSec == null) return baseText
+  return `${baseText} | 共消耗${totalSec}秒`
+}
+
+function markFirstVisibleAt(msg: ChatMessage, now = Date.now()) {
+  if (msg.firstVisibleAt || msg.role !== 'assistant' || !!msg.createTime) return
+  if (assistantHasRenderableOutput(msg)) {
+    msg.firstVisibleAt = now
+  }
+}
+
+function markStreamFinishedAt(msg: ChatMessage, now = Date.now()) {
+  if (msg.role !== 'assistant' || !!msg.createTime) return
+  if (!msg.streamFinishedAt) {
+    msg.streamFinishedAt = now
+  }
+}
+
 function rebuildGeneratedFilesFromHistory() {
   generatedFiles.value = []
   generatedFileMap.value = {}
@@ -1976,6 +2017,10 @@ function stopStream(streamId?: string) {
         resetSseLineAccumulator(meta.sseCarry)
       }
       if (msg?.uiState) drainBufferToSegments(msg.uiState)
+      if (msg) {
+        markFirstVisibleAt(msg)
+        markStreamFinishedAt(msg)
+      }
     }
     const es = eventSourceMap.get(streamId)
     if (es) {
@@ -2014,6 +2059,10 @@ function stopStream(streamId?: string) {
           resetSseLineAccumulator(meta.sseCarry)
         }
         if (msg?.uiState) drainBufferToSegments(msg.uiState)
+        if (msg) {
+          markFirstVisibleAt(msg)
+          markStreamFinishedAt(msg)
+        }
       }
     }
     for (const [, es] of eventSourceMap.entries()) {
@@ -2082,15 +2131,19 @@ function appendAssistantChunkToStream(streamId: string, chunk: string) {
   const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
   if (!msg || msg.role !== 'assistant') return
 
-  if (!meta.sseCarry) {
-    meta.sseCarry = { carry: '' }
-  }
-  const { uiText, newSteps, mermaidErrorNotice } = filterAssistantSseChunkForUi(meta.sseCarry, chunk)
-  if (newSteps.length) {
-    msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, newSteps)
-  }
-  if (mermaidErrorNotice) {
-    msg.mermaidErrorNotice = true
+  let uiText = chunk
+  if (meta.mode === 'workflow') {
+    if (!meta.sseCarry) {
+      meta.sseCarry = { carry: '' }
+    }
+    const filtered = filterAssistantSseChunkForUi(meta.sseCarry, chunk)
+    uiText = filtered.uiText
+    if (filtered.newSteps.length) {
+      msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, filtered.newSteps)
+    }
+    if (filtered.mermaidErrorNotice) {
+      msg.mermaidErrorNotice = true
+    }
   }
 
   msg.content += chunk
@@ -2098,6 +2151,7 @@ function appendAssistantChunkToStream(streamId: string, chunk: string) {
   if (uiText) {
     processAssistantChunkIntoUiState(msg.uiState, uiText)
   }
+  markFirstVisibleAt(msg)
   nextTick(() => {
     if (shouldAutoScroll.value) scrollToBottom()
   })
@@ -2160,6 +2214,7 @@ async function sendMessage(text?: string) {
     id: assistantMessageId,
     role: 'assistant',
     content: '',
+    streamStartedAt: Date.now(),
     uiState: createAssistantUiState(),
     streamId,
     workflowStreamStartedAt: genMode.value === 'workflow' ? Date.now() : undefined,
@@ -2168,9 +2223,17 @@ async function sendMessage(text?: string) {
   })
   activeStreamMeta.value = {
     ...activeStreamMeta.value,
-    [streamId]: { assistantMessageId, sseCarry: { carry: '' } },
+    [streamId]: {
+      assistantMessageId,
+      sseCarry: { carry: '' },
+      mode: genMode.value === 'workflow' ? 'workflow' : 'legacy',
+    },
   }
   activeStreamOrder.value = [...activeStreamOrder.value, streamId]
+  const createdAssistant = sessionMessages.value.find((x) => x.id === assistantMessageId)
+  if (createdAssistant) {
+    markFirstVisibleAt(createdAssistant)
+  }
 
   inputMessage.value = ''
   sending.value = true
@@ -2178,7 +2241,7 @@ async function sendMessage(text?: string) {
    // 首次生成时给出“分析代码 ing~”提示，告诉用户正在分析并决定生成格式
   if (!hasGenerated.value && !appInfo.value?.hasGeneratedCode && !analyzingHintCloser.value) {
     try {
-      analyzingHintCloser.value = message.loading('分析代码ing~ 请不要退出界面以及其他操作', 0)
+      analyzingHintCloser.value = message.loading('分析代码ing~  请不要退出/刷新界面', 0)
     } catch {
       analyzingHintCloser.value = null
     }
@@ -2624,10 +2687,16 @@ onBeforeUnmount(() => {
                         <span class="typing-dot" aria-hidden="true" />
                         <span class="typing-dot" aria-hidden="true" />
                         <span class="typing-dot" aria-hidden="true" />
-                        <span class="typing-text">思考中</span>
+                        <span class="typing-text">{{ getThinkingStatusText(m) }}</span>
                       </div>
                     </template>
                     <template v-else>
+                      <div
+                        v-if="m.role === 'assistant' && getThinkingStatusText(m)"
+                        class="thinking-summary"
+                      >
+                        {{ getThinkingStatusText(m) }}
+                      </div>
                       <div
                         v-if="m.role === 'assistant' && getWorkflowStepsForMessage(m).length > 0"
                         class="workflow-steps-shell"
@@ -3529,6 +3598,22 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: rgba(15, 23, 42, 0.7);
+}
+
+.thinking-summary {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(30, 64, 175, 0.25);
+  background:
+    linear-gradient(120deg, rgba(219, 234, 254, 0.72), rgba(199, 210, 254, 0.54)),
+    rgba(255, 255, 255, 0.88);
+  color: rgba(30, 58, 138, 0.95);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 @keyframes typingDot {
