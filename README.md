@@ -1,133 +1,89 @@
 # glyahh-ai-generate-code
 
-一个「**基于应用(App) 的 AI 代码生成平台**」：用户先创建应用并配置 `initPrompt`，再通过对话流式生成代码，系统会自动完成**解析 → 落盘 → 预览/部署**，并沉淀完整的对话历史（支持导出与自动总结）。
+面向应用（App）维度的 **对话式 AI 应用合成与制品交付平台**：以 SSE 流式管线将模型输出收敛为可版本化、可发布的端侧运行制品（单文件页面、多模块资源树、工程级脚手架）；会话记忆与持久化分层，在长对话下对上下文做窗口化与摘要压缩，控制 token 曲线与调用成本。
 
-## 功能总览
+## 项目定位
 
-- **应用(App) 作为生成单元**：为每个应用保存 `initPrompt`、生成类型、部署信息、优先级（精选）等。
-- **对话式生成代码（SSE 流式）**：`/api/chat/gen/code` 以 `text/event-stream` 推送生成片段，前端可边收边展示。
-- **代码解析器（Parser）**：将 AI 输出的原始字符串解析为结构化结果（HTML / 多文件）。
-- **代码落盘器（Saver）**：将结构化结果保存到本地目录（`temp/code_output`），并生成可预览的静态产物。
-- **应用部署/取消部署**：将产物复制到 `temp/code_deploy/{deployKey}`，返回可访问 URL；支持取消部署并清理部署信息。
-- **静态资源预览**：`/api/static/{deployKey}/**` 直接托管部署目录下的静态文件（含 `index.html` 默认页、目录重定向）。
-- **对话历史沉淀**：
-  - 保存用户/AI消息、错误消息
-  - 分页游标加载、按应用导出全量历史、统计对话轮数
-  - **超 20 轮自动摘要**（将最早两轮总结为一轮，减少上下文与 Token 消耗；合并结果写入 **Redis 对话记忆**，不直接改 MySQL）
-- **AI 上下文与 Token 优化（后端）**：
-  - **生成前触发摘要**：用户每次发起对话生成前，调用 `trySummarizeOldestRoundsIfNeeded`：当 Redis 中「用户消息轮数」超过 `ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY`（20）时，将最早两轮对话经大模型压缩为更短摘要并回写 Redis，降低后续请求的 prompt 长度。
-  - **记忆窗口**：`MessageWindowChatMemory` 使用 **`maxMessages(20)`**（与 `turnHistoryToMemory(..., 20)` 对齐），限制单次请求带入的历史条数。
-  - **生成 Prompt 精简**：`Prompt/Single_File_Prompt.txt`、`Various_File_Prompt.txt`、`Vue_File_Prompt.txt` 等已收敛冗长示例与「一步步思考」类表述，引导模型**直接输出可落盘结果**，减少 completion 与推理类 token。
-- **应用对话页 / 可视化编辑（前端）**：
-  - 预览区支持 **编辑模式**：父页在 iframe 上覆层采集指针事件，向同源预览页注入高亮与选中逻辑（`ai-generate-code-frontend/src/utils/visualWebsiteEditor.ts`）。
-  - **单击**：选中元素，信息可附加到用户提示词；**双击**：向 iframe 内目标派发穿透点击（含 `a[href]` 归一），便于 **Vue Router / SPA** 进入子页面而不被「只选中不导航」拦截。
-  - **路由切换后清除选中**：监听 iframe 内 `location.href` 变化（定时轮询 + `hashchange` / `popstate`），在子页面跳转后清除子页 outline 与父页选中框，并清空「已选中元素」提示（`onNavigateClear`）。
-  - **刷新应用**：预览区头部「刷新应用」在**任意已生成预览类型**（HTML / 多文件 / Vue）下均可显示，通过递增 iframe 版本参数强制重载预览，避免缓存导致旧页面。
-- **权限与运营能力**：
-  - 用户注册/登录/注销、会话态登录
-  - 管理员：用户管理、应用管理（列表/更新/删除）
-  - 精选应用：按 `priority >= 99` 对外展示
-  - **申请/审核流**：普通用户可提交应用/权限申请，管理员可查看待审、同意/驳回，用户可查看申请历史
+- **生成单元**：每个应用维护 `initPrompt`、合成目标类型（单页 HTML、多文件资源集、Vue 3 工程骨架）、发布标识与运营维度（如精选优先级）。
+- **交付链路**：SSE 流式输出 → Parser 结构化解析 → Saver 落盘至 `temp/code_output` → 发布阶段同步至 `temp/code_deploy/{deployKey}`，对外按 `deployKey` 提供制品的文件级访问与 MIME 感知响应。
+- **会话治理**：MySQL 承载对话审计与业务态；Redis 承载 LangChain4j Chat Memory Store、窗口裁剪与超轮次模型摘要（例如超过 20 轮时对最早两轮压缩合并，摘要回写 Redis，不直接改写历史库表）。
 
-## 关键接口（后端）
+## 已实现能力
 
-> 以 `http://localhost:8124/api` 为例（以实际 `server.port` / `context-path` 为准）
+| 域 | 说明 |
+|----|------|
+| 流式生成 | `GET /api/chat/gen/code`（`text/event-stream`），Reactor `Flux<ServerSentEvent>`，配合会话侧限流（如每用户 60s 内 5 次，以实际配置为准）。 |
+| 解析 / 落盘 | `core/parser` + `core/saver` 模板化管线，`CodeGenTypeEnum` 执行器分发，便于横向扩展新的制品形态。 |
+| AI 运行时 | LangChain4j 栈（OpenAI-Compatible 协议，可对接 DashScope 等）；多模型路由（对话、流式 completion、推理、轻量分类）；Tool 层覆盖文件读写改删、目录枚举、Vue SFC 语法校验等。 |
+| 在线发布与制品托管 | 生成唯一 `deployKey`；`DeployResourceController` 等按内容类型返回制品字节流，支撑预览与外链分发场景。 |
+| 权限与运营 | `@MyRole` + AOP 鉴权；用户 / 管理员角色；应用申请与审核闭环；精选应用（如 `priority >= 99`）。 |
+| 对话历史 | 游标分页、按应用导出、轮次统计；管理员侧审计查询。 |
 
-- **生成代码（流式 SSE）**：`GET /api/chat/gen/code?appId={id}&message={text}`
-- **应用管理**：
-  - `POST /api/app/add` 创建应用（需 `initPrompt`，默认 `MULTI_FILE`）
-  - `POST /api/app/update` 修改应用名
-  - `POST /api/app/delete` 删除应用（并尝试级联删除该应用对话历史）
-  - `POST /api/app/my/list/page/vo` 分页查询我的应用
-  - `POST /api/app/good/list/page/vo` 分页查询精选应用
-  - `POST /api/app/deploy` 部署应用（复制产物到 `temp/code_deploy` 并返回 URL）
-  - `POST /api/app/undeploy` 取消部署（删除部署目录并清空部署信息）
-  - `POST /api/app/apply` 提交申请；`/apply/list/pending` 待审；`/apply/agree` 同意；`/apply/reject` 驳回；`/apply/list/my/history` 我的申请历史
-- **对话历史**：
-  - `POST /api/chatHistory/save` 保存对话消息（需应用权限）
-  - `GET /api/chatHistory/app/{appId}?lastCreateTime=&size=10` 游标分页加载
-  - `GET /api/chatHistory/export/{appId}` 导出全量历史（用于生成本地 Markdown）
-  - `GET /api/chatHistory/roundCount/{appId}` 对话轮数
-  - `POST /api/chatHistory/admin` 管理员审计查询
-- **静态预览**：`GET /api/static/{deployKey}/`（默认 `index.html`）
-
-更完整的 OpenAPI 文档见：`docs/后端接口文档.md`。
-
-## 架构亮点（Parser & Saver）
-
-项目在 `core/parser` 与 `core/saver` 抽象出一套可扩展的“解析-落盘”管线（接口/模板/执行器三种模式复用），便于后续扩展更多代码产物类型（例如：React、Vue、SpringBoot 脚手架等）。
-
-设计总结见：`docs/ARCHITECTURE-Parser-Saver-重构模式总结.md`。
-
-## 目录结构（你最可能关心的）
-
-- **后端**：`src/main/java/com/dbts/glyahhaigeneratecode/`
-  - `controller/`：应用、对话生成、历史、静态资源、用户等接口
-  - `core/`：`AiCodeGeneratorFacade` + parser/saver 执行器
-  - `service/`：应用部署、对话历史、申请审核等业务
-  - **对话与生成串联**：`service/impl/ChatToGenCodeImpl` 在保存用户消息后、调用 AI 前触发 `ChatHistoryService.trySummarizeOldestRoundsIfNeeded`；`service/impl/ChatHistoryServiceImpl` 实现摘要与 Redis 同步；`ai/aiCodeGeneratorServiceFactory` 配置 LangChain4j `MessageWindowChatMemory`（`maxMessages(20)`）与历史预载。
-  - **资源**：`src/main/resources/Prompt/*.txt` 为各代码生成类型的系统提示词（可随产品迭代调整长度与约束）。
-- **前端**：`ai-generate-code-frontend/`（Vue3 + Vite）
-  - **应用对话页**：`src/page/App/AppChatView.vue`（预览 iframe、编辑模式开关、「刷新应用」、选中元素与提示词拼接）
-  - **可视化编辑注入**：`src/utils/visualWebsiteEditor.ts`
-- **生成产物**：
-  - `temp/code_output/`：生成并落盘后的可预览代码
-  - `temp/code_deploy/`：部署后的静态站点目录（按 `deployKey`）
+设计说明见 `docs/ARCHITECTURE-Parser-Saver-重构模式总结.md`；接口清单见 `docs/后端接口文档.md`。OpenAPI / Knife4j：`http://<host>:8124/api/doc.html`（上下文路径 `/api`）。
 
 ## 技术栈
 
-- **后端**：Spring Boot 3.5.x、Java 21、MyBatis-Flex、MySQL、Redis、Spring Session、Reactor（SSE）
-- **AI 能力**：LangChain4j（OpenAI-Compatible）、Redis Chat Memory Store（可配置 TTL）
-- **工程**：Knife4j(OpenAPI3)、Hutool、Lombok、Caffeine
-- **前端**：Vue 3 + Vite + TypeScript（见 `ai-generate-code-frontend/README.md`）
+### 运行时与工程
+
+| 类别 | 技术选型（版本以 `pom.xml` 为准） |
+|------|----------------------------------|
+| 语言与框架 | Java **21**，Spring Boot **3.5.10**（Spring Web、Spring AOP） |
+| 数据访问 | MyBatis-Flex **1.11.1**（含 `mybatis-flex-codegen`），MySQL（`mysql-connector-j`），连接池 **HikariCP 4.0.3** |
+| 缓存与会话 | **Caffeine**（本地热点缓存），**Redis**（Lettuce 等，随 Spring Boot 管理），**Spring Session Data Redis**（分布式会话） |
+| 分布式协调与锁 | **Redisson 3.50.0** |
+| 工具与规范 | **Lombok 1.18.36**，**Hutool 5.8.40** |
+| API 契约 | **Knife4j 4.4.0**（OpenAPI 3 Jakarta） |
+
+### AI 与响应式
+
+| 类别 | 技术选型 |
+|------|----------|
+| LLM 集成 | **LangChain4j 1.1.0**，`langchain4j-open-ai-spring-boot-starter` **1.1.0-beta7**（OpenAI-Compatible 接入） |
+| 记忆存储 | `langchain4j-community-redis-spring-boot-starter` **1.1.0-beta7** |
+| 流式与响应式桥接 | `langchain4j-reactor` **1.1.0-beta7**，**Project Reactor**（SSE 流） |
+| 厂商 SDK | 阿里云 **DashScope SDK 2.22.9**（与兼容协议并存，按配置选用） |
+| 工作流编排（依赖已引入） | **LangGraph4j 1.8.3**（`langgraph4j-core`） |
+
+### 对象存储与自动化
+
+| 类别 | 技术选型 |
+|------|----------|
+| 对象存储 | 阿里云 **OSS SDK 3.15.1** |
+| 浏览器端截图 / 巡检 | **Selenium Java 4.33.0**，**WebDriverManager 6.1.0** |
 
 ## 快速开始
 
-### 后端
-
-1. 准备 MySQL、Redis（用于会话与对话记忆/摘要相关能力）
-2. 配置后端 `application.yml`（数据库、Redis、大模型 key/endpoint 等）
-3. 启动：
+**服务端**（需 MySQL、Redis 及可用的大模型端点与密钥）：
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-### 前端
+默认端口 **8124**，上下文路径 **`/api`**。数据源、Redis、LangChain4j 与厂商密钥等在 `src/main/resources/application.yml` 中配置。
 
-```bash
-cd ai-generate-code-frontend
-npm install
-npm run dev
-```
+仓库内 `ai-generate-code-frontend/` 为可选配套控制台，与核心交付链路解耦，可按需启用。
 
-## Roadmap（未来开发计划）
+## 核心接口（节选）
 
-> 依据你提供的规划截图整理（可按迭代逐步勾选）
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| GET | `/api/chat/gen/code` | 流式生成 |
+| POST | `/api/app/add` | 创建应用 |
+| POST | `/api/app/deploy` | 发布应用制品 |
+| POST | `/api/app/undeploy` | 撤回发布 |
+| GET | `/api/chatHistory/app/{appId}` | 对话历史分页 |
+| GET | `/api/static/{deployKey}/**` | 已发布制品的文件访问（路径名保持与实现一致） |
 
-- [ ] **第八期：功能扩展**
-  - [ ] 应用封面图
-  - [ ] 项目下载
-  - [ ] 智能路由
-- [ ] **第九期：可视化修改**（已部分落地，持续迭代）
-  - [x] 方案设计（预览 iframe 覆层 + 同源注入 + 选中信息回传）
-  - [x] 前端开发（编辑模式、单击选中 / 双击导航、路由变更清选中、全类型「刷新应用」）
-  - [ ] 后端开发（若后续需服务端持久化选中元数据或协同编辑，可再扩展）
-- [ ] **第十期：AI 工作流**
-  - [ ] LangGraph4j 调研 / 接入
-  - [ ] 工作流开发
-- [ ] **第十一期：系统优化**
-  - [ ] 性能优化
-  - [ ] 实时性优化
-  - [ ] 安全限流
-  - [ ] Prompt 审核/治理
-  - [ ] 稳定性优化
-  - [ ] 成本优化
-- [ ] **第十二期：部署上线（公开）**
-- [ ] **第十三期：可观测性**
-  - [ ] 介绍 / 方案落地
+完整路径以前缀 `/api` 及环境 `server.port` 为准。
 
-## License
+## 演进规划（摘录）
 
-个人项目，可按需补充 License（MIT/Apache-2.0 等）。
+- **能力面扩展**：应用封面、制品打包下载、智能路由等。
+- **生成上下文增强**：请求侧扩展字段与结构化语义；元数据持久化与多会话协同。
+- **编排深化**：基于 LangGraph4j 的多步合成与工具编排落地。
+- **系统级优化**：吞吐与时延、限流与安全策略、Prompt 治理、稳定性与成本曲线。
+- **生产化与可观测**：公开环境部署与监控体系。
 
+## 许可证
+
+License 尚未声明；可按项目需要选用 MIT、Apache-2.0 等开源协议并更新本文件。
