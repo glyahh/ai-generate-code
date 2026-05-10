@@ -2919,10 +2919,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  /* 按要求向底部再扩展约 50px */
-  height: calc(100vh - 64px - 48px + 50px);
-  min-height: calc(100vh - 64px - 48px + 50px);
-  max-height: calc(100vh - 64px - 48px + 50px);
+  /* 按要求向底部再扩展，增加可视高度 */
+  height: calc(100vh - 64px - 48px + 110px);
+  min-height: calc(100vh - 64px - 48px + 110px);
+  max-height: calc(100vh - 64px - 48px + 110px);
   overflow: hidden;
 }
 
