@@ -10,6 +10,7 @@ import AdminChatManage from '@/page/Admin/AdminChatManage.vue'
 import AppChatView from '@/page/App/AppChatView.vue'
 import AppEditView from '@/page/App/AppEditView.vue'
 import CodeGenerateEntry from '@/page/App/CodeGenerateEntry.vue'
+import MainIndexView from '@/page/MainIndex/MainIndexView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -19,6 +20,12 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: HomeView,
+    },
+    {
+      path: '/main_index',
+      name: 'main-index',
+      component: MainIndexView,
+      meta: { noLayout: true },
     },
     // 用户登录界面
     {

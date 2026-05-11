@@ -114,7 +114,7 @@ async function handleLogout() {
 <template>
   <div class="global-header">
     <div class="header-left">
-      <router-link to="/" class="logo-wrap">
+      <router-link to="/main_index" class="logo-wrap">
         <span class="site-title">Ai-generate-code</span>
       </router-link>
       <a-menu mode="horizontal" :selected-keys="selectedKeys" :items="menuItemsForMenu" class="header-menu"
