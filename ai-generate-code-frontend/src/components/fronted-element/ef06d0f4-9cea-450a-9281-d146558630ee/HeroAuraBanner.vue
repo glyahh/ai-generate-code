@@ -10,7 +10,7 @@ withDefaults(
     titleText?: string;
     navItems?: NavItem[];
   }>(),
-  { 
+  {
     brandText: "Crea",
     titleText: "UNEARTH",
     navItems: () => [

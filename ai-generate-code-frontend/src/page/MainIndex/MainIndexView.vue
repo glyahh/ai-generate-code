@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import HeroAuraBannerModule from './components/HeroAuraBannerModule.vue'
+import MainIndexWebGLBackground from './components/MainIndexWebGLBackground.vue'
 import ReferenceFooterBackdropModule from './components/ReferenceFooterBackdropModule.vue'
 </script>
 
 <template>
   <main class="main-index-page">
+    <MainIndexWebGLBackground />
     <ReferenceFooterBackdropModule />
 
     <section class="main-index-content">
@@ -95,16 +97,13 @@ import ReferenceFooterBackdropModule from './components/ReferenceFooterBackdropM
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 15% 0, rgba(16, 185, 129, 0.24), transparent 44%),
-    radial-gradient(circle at 85% 12%, rgba(74, 222, 128, 0.2), transparent 40%),
-    linear-gradient(180deg, #030a08 0%, #081612 52%, #050f0c 100%);
+  background: #030a08;
   padding: 0 0 36px;
 }
 
 .main-index-content {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   width: 100%;
   margin: 0;
   display: flex;
