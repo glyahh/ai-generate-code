@@ -86,4 +86,4 @@
 
 ## 许可证
 
-**glyahh-ai-generate-code** 以 [MIT 许可证](LICENSE) 发布。允许使用、修改、商用及再分发；对外再分发时须保留原始版权声明与完整许可证全文。
+**glyahh-ai-generate-code** 以 [MIT 许可证](LICENSE) 发布。对外再分发时须保留原始版权声明与完整许可证全文。
