@@ -10,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.model.DTO.ChatHistoryQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.UserChatHistoryItemVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
@@ -38,10 +39,12 @@ import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -212,10 +215,72 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
         // 查询数据
         Page<ChatHistory> page = this.page(Page.of(1, pageSize), queryWrapper);
-        
+
         // 为 workflow AI 消息追加五阶段状态标记行
         appendWorkflowStageStatusForHistoryPage(page);
         return page;
+    }
+
+
+    @Override
+    public Page<UserChatHistoryItemVO> listMyChatHistoryByPage(ChatHistoryQueryRequest queryRequest, User loginUser) {
+        // 1. 校验查询参数和登录态，确保只在合法请求下继续执行分页查询。
+        ThrowUtils.throwIf(queryRequest == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+
+        // 2. 读取分页参数并校验分页大小，得到后续数据库分页查询所需的页码与容量。
+        int pageNum = queryRequest.getPageNum();
+        int pageSize = queryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0, ErrorCode.PARAMS_ERROR, "pageSize 必须大于 0");
+
+        // 3. 基于原始请求构造安全查询对象，并强制写入当前登录用户ID，避免越权查询他人数据。
+        ChatHistoryQueryRequest safeRequest = new ChatHistoryQueryRequest();
+        safeRequest.setPageNum(pageNum);
+        safeRequest.setPageSize(pageSize);
+        safeRequest.setMessageType(queryRequest.getMessageType());
+        safeRequest.setAppId(queryRequest.getAppId());
+        safeRequest.setUserId(loginUser.getId());
+
+        // 4. 生成查询条件并执行分页查询，得到当前页的对话历史实体数据。
+        QueryWrapper queryWrapper = buildQueryWrapper(safeRequest);
+        Page<ChatHistory> page = this.page(Page.of(pageNum, pageSize), queryWrapper);
+
+        // 5. 提取分页记录并收集其中涉及的应用ID集合，用于批量补全应用名称。
+        List<ChatHistory> records = page.getRecords() == null ? Collections.emptyList() : page.getRecords();
+        Set<Long> appIds = records.stream()
+                .map(ChatHistory::getAppId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        // 6. 批量查询应用信息并构建 appId -> appName 映射，减少逐条查库带来的性能损耗。
+        Map<Long, String> appNameMap = new HashMap<>();
+        if (!appIds.isEmpty()) {
+            List<App> apps = appService.listByIds(appIds);
+            if (apps != null && !apps.isEmpty()) {
+                for (App app : apps) {
+                    if (app == null || app.getId() == null) {
+                        continue;
+                    }
+                    appNameMap.putIfAbsent(app.getId(), app.getAppName());
+                }
+            }
+        }
+
+        // 7. 将数据库实体转换为前端展示VO，补齐应用名称并设置默认占位值。
+        List<UserChatHistoryItemVO> voList = records.stream().map(item -> {
+            UserChatHistoryItemVO vo = new UserChatHistoryItemVO();
+            vo.setMessage(item.getMessage());
+            vo.setMessageType(item.getMessageType());
+            vo.setAppId(item.getAppId());
+            vo.setCreateTime(item.getCreateTime());
+            vo.setAppName(appNameMap.getOrDefault(item.getAppId(), "-"));
+            return vo;
+        }).toList();
+
+        // 8. 组装VO分页对象并返回，保持总条数与分页参数和原始查询结果一致。
+        Page<UserChatHistoryItemVO> voPage = new Page<>(pageNum, pageSize, page.getTotalRow());
+        voPage.setRecords(voList);
+        return voPage;
     }
 
     @Override

@@ -21,3 +21,21 @@ export function chatGenCodeUsingGet({
     ...(options || {}),
   });
 }
+
+/** 此处后端没有提供注释 GET /chat/gen/workflow */
+export function chatGenWorkflowUsingGet({
+  params,
+  options,
+}: {
+  // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
+  params: API.ChatGenWorkflowUsingGetParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.ServerSentEventString[]>('/chat/gen/workflow', {
+    method: 'GET',
+    params: {
+      ...params,
+    },
+    ...(options || {}),
+  });
+}

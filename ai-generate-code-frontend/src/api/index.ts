@@ -7,4 +7,5 @@ export * from './chatHistoryController';
 export * from './appController';
 export * from './test';
 export * from './staticResourceController';
+export * from './deployResourceController';
 export * from './chatToGenCodeController';

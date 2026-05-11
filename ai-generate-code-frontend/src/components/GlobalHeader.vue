@@ -79,6 +79,11 @@ function handleSettings() {
   showUserMenu.value = false
 }
 
+// 查看历史
+function handleHistory() {
+  router.push('/user/chats')
+}
+
 // 退出登录
 async function handleLogout() {
   if (isLoggingOut.value) return
@@ -117,6 +122,7 @@ async function handleLogout() {
     </div>
     <div class="header-right">
       <div v-if="userLoginStore.userLogin.id" class="user-area-wrapper">
+        <a-button type="link" class="history-btn" @click="handleHistory">查看历史</a-button>
         <div class="user-area" @mouseenter="showUserMenu = true" @mouseleave="showUserMenu = false">
           <a-space class="user-info">
             <a-avatar :src="userLoginStore.userLogin.userAvatar" />
@@ -188,11 +194,22 @@ async function handleLogout() {
 
 .header-right {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-btn {
+  padding: 0 8px;
+  height: 32px;
 }
 
 /* 用户区域样式 */
 .user-area-wrapper {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .user-area {
@@ -239,7 +256,9 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 12px;
+  height: 34px;
+  padding: 0 12px;
+  line-height: 34px;
   cursor: pointer;
   transition: background-color 0.2s ease;
   color: rgba(0, 0, 0, 0.85);
@@ -322,7 +341,9 @@ async function handleLogout() {
   }
 
   .menu-item {
-    padding: 3px 10px;
+    height: 32px;
+    padding: 0 10px;
+    line-height: 32px;
     font-size: 13px;
   }
 }

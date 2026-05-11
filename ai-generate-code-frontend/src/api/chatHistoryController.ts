@@ -68,6 +68,24 @@ export function chatHistoryOpenApiExportAppIdUsingGet({
   );
 }
 
+/** 此处后端没有提供注释 POST /chatHistory/myChatHistory */
+export function chatHistoryMyUsingPost({
+  body,
+  options,
+}: {
+  body: API.ChatHistoryQueryRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponsePageUserChatHistoryItemVO>('/chatHistory/myChatHistory', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 GET /chatHistory/roundCount/${param0} */
 export function chatHistoryRoundCountAppIdUsingGet({
   params,

@@ -3,6 +3,7 @@ package com.dbts.glyahhaigeneratecode.service;
 import com.dbts.glyahhaigeneratecode.model.DTO.ChatHistoryQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.UserChatHistoryItemVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -54,6 +55,15 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 分页结果
      */
     Page<ChatHistory> listAppChatHistoryByPage(Long appId, int pageSize, LocalDateTime lastCreateTime, User loginUser);
+
+    /**
+     * 【用户】分页查询当前登录用户的对话历史（支持 messageType/appId 筛选，按时间降序）
+     *
+     * @param queryRequest 查询请求（忽略其中的 userId）
+     * @param loginUser    当前登录用户
+     * @return 分页结果（带应用名称）
+     */
+    Page<UserChatHistoryItemVO> listMyChatHistoryByPage(ChatHistoryQueryRequest queryRequest, User loginUser);
 
     /**
      * 根据应用 id 删除所有对话历史（逻辑删除）

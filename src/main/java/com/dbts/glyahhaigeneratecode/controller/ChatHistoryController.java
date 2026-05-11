@@ -11,6 +11,7 @@ import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
+import com.dbts.glyahhaigeneratecode.model.VO.UserChatHistoryItemVO;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
@@ -151,5 +152,21 @@ public class ChatHistoryController {
         Page<ChatHistory> voPage = chatHistoryService.page(Page.of(pageNum, pageSize), queryWrapper);
 
         return ResultUtils.success(voPage);
+    }
+
+    /**
+     * 【用户】分页查询当前登录用户的对话历史（仅返回自己的记录）
+     */
+    @PostMapping("/myChatHistory")
+    public BaseResponse<Page<UserChatHistoryItemVO>> listMyChatHistoryByPage(
+            @RequestBody ChatHistoryQueryRequest chatHistoryQueryRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(chatHistoryQueryRequest == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        int pageSize = chatHistoryQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0, ErrorCode.PARAMS_ERROR, "pageSize 必须大于 0");
+
+        User loginUser = userService.getUserInSession(request);
+        Page<UserChatHistoryItemVO> page = chatHistoryService.listMyChatHistoryByPage(chatHistoryQueryRequest, loginUser);
+        return ResultUtils.success(page);
     }
 }

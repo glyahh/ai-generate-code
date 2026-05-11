@@ -285,6 +285,12 @@ export type BaseResponsePageChatHistory = {
   message?: string;
 };
 
+export type BaseResponsePageUserChatHistoryItemVO = {
+  code?: number;
+  data?: PageUserChatHistoryItemVO;
+  message?: string;
+};
+
 export type BaseResponsePageUserVO = {
   code?: number;
   data?: PageUserVO;
@@ -321,12 +327,26 @@ export type ChatGenCodeUsingGetResponses = {
   200: ServerSentEventString[];
 };
 
+export type ChatGenWorkflowUsingGetParams = {
+  appId: number;
+  message: string;
+};
+
+export type ChatGenWorkflowUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: ServerSentEventString[];
+};
+
 export type ChatHistory = {
   id?: number;
   message?: string;
   messageType?: string;
   appId?: number;
   userId?: number;
+  auditAction?: string;
+  auditHitRule?: string;
   createTime?: string;
   updateTime?: string;
   isDelete?: number;
@@ -350,6 +370,13 @@ export type ChatHistoryAppAppIdUsingGetResponses = {
    * OK
    */
   200: BaseResponsePageChatHistory;
+};
+
+export type ChatHistoryMyUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponsePageUserChatHistoryItemVO;
 };
 
 export type ChatHistoryOpenApiExportAppIdUsingGetParams = {
@@ -400,12 +427,25 @@ export type ChatHistoryVO = {
   messageType?: string;
   appId?: number;
   userId?: number;
+  auditAction?: string;
+  auditHitRule?: string;
   createTime?: string;
   updateTime?: string;
 };
 
 export type DeleteRequest = {
   id?: number;
+};
+
+export type DeployDeployKeyUsingGetParams = {
+  deployKey: string;
+};
+
+export type DeployDeployKeyUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: string;
 };
 
 export type LoginUserVO = {
@@ -439,6 +479,15 @@ export type PageChatHistory = {
 
 export type PageUser = {
   records?: User[];
+  pageNumber?: number;
+  pageSize?: number;
+  totalPage?: number;
+  totalRow?: number;
+  optimizeCountQuery?: boolean;
+};
+
+export type PageUserChatHistoryItemVO = {
+  records?: UserChatHistoryItemVO[];
   pageNumber?: number;
   pageSize?: number;
   totalPage?: number;
@@ -515,6 +564,14 @@ export type UserAppApplyRequest = {
   appPropriety?: number;
   operate?: number;
   applyReason?: string;
+};
+
+export type UserChatHistoryItemVO = {
+  message?: string;
+  messageType?: string;
+  appId?: number;
+  appName?: string;
+  createTime?: string;
 };
 
 export type UserGetInfoIdUsingGetParams = {

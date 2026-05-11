@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../page/HomeView.vue'
 import UserLogin from '../page/User/UserLogin.vue'
 import UserSettings from '../page/User/UserSettings.vue'
+import UserChatHistory from '../page/User/UserChatHistory.vue'
 import AdminHome from '@/page/Admin/AdminHome.vue'
 import AdminAppManage from '@/page/Admin/AdminAppManage.vue'
 import AdminApplyManage from '@/page/Admin/AdminApplyManage.vue'
@@ -30,6 +31,12 @@ const router = createRouter({
       path: '/user/settings',
       name: 'user-settings',
       component: UserSettings,
+    },
+    // 用户查看历史对话
+    {
+      path: '/user/chats',
+      name: 'user-chats',
+      component: UserChatHistory,
     },
     // 管理员管理用户界面
     {
