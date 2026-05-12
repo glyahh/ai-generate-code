@@ -146,6 +146,16 @@ public class AiCodeGeneratorFacade {
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.MULTI_FILE, false, compactMemoryOnCacheHit);
         String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.MULTI_FILE, appId);
         Flux<String> result = aiCodeGeneratorService.generateCodeMultiFileStream(finalPrompt);
+        // 修改意图：优先走“工具化增量编辑”（工具会直接改落盘文件），避免每次整段重写并且避免聚合解析失败。
+        
+        // 如果有修改意图
+        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
+                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.MULTI_FILE, appId);
+        if (editIntent) {
+            // 走工具化增量编辑
+            return result;
+        }
+        // 非修改意图：维持原行为（聚合→解析→保存）。
         return processCodeStream(CodeGenTypeEnum.MULTI_FILE, result, appId);
     }
 
@@ -154,6 +164,11 @@ public class AiCodeGeneratorFacade {
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.HTML, false, compactMemoryOnCacheHit);
         String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.HTML, appId);
         Flux<String> result = aiCodeGeneratorService.generateCodeHTMLStream(finalPrompt);
+        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
+                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.HTML, appId);
+        if (editIntent) {
+            return result;
+        }
         return processCodeStream(CodeGenTypeEnum.HTML, result, appId);
     }
 

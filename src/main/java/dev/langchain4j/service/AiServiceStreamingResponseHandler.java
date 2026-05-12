@@ -107,7 +107,9 @@ class AiServiceStreamingResponseHandler implements StreamingChatResponseHandler 
 
     @Override
     public void onPartialToolExecutionRequest(int index, ToolExecutionRequest partialToolExecutionRequest) {
-        // If we're using output guardrails, then buffer the partial response until the guardrails have completed
+        if (partialToolExecutionRequestHandler == null) {
+            return;
+        }
         partialToolExecutionRequestHandler.accept(index, partialToolExecutionRequest);
     }
 

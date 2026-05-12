@@ -2,10 +2,11 @@ package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,9 @@ import java.nio.file.Paths;
 @Component
 public class FileDeleteTool extends BaseTool {
 
+    @Resource
+    private AppService appService;
+
     @Tool("删除指定路径的文件")
     public String deleteFile(
             @P("文件的相对路径")
@@ -35,20 +39,16 @@ public class FileDeleteTool extends BaseTool {
             @ToolMemoryId Long appId
     ) {
         try {
-            Path path = Paths.get(relativeFilePath);
-            Path projectRoot = null;
-            // 如果相对路径不是绝对路径，则手动将其转换为绝对路径
-            if (!path.isAbsolute()) {
-                String projectDirName = "vue_project_" + appId;
-                // 在/output_code里寻找文件并返回路径
-                projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName).normalize().toAbsolutePath();
-                // 将项目根目录和传入的相对路径拼接，得到完整的路径
-                path = projectRoot.resolve(relativeFilePath);
+            Path projectRoot = resolveNormalizedProjectRoot(appId, appService);
+            if (projectRoot == null) {
+                return "错误：无效的应用 ID，无法解析项目目录 - " + relativeFilePath;
             }
-            path = path.normalize().toAbsolutePath();
+            Path raw = Paths.get(relativeFilePath);
+            Path path = raw.isAbsolute()
+                    ? raw.normalize().toAbsolutePath()
+                    : projectRoot.resolve(raw).normalize().toAbsolutePath();
 
-            // 安全检查：相对路径只能在项目根目录下删除，避免 ../ 越界
-            if (projectRoot != null && !path.startsWith(projectRoot)) {
+            if (!path.startsWith(projectRoot)) {
                 return "错误：禁止删除项目目录外的文件 - " + relativeFilePath;
             }
 
@@ -100,7 +100,6 @@ public class FileDeleteTool extends BaseTool {
     public String getDisplayName() {
         return "删除文件";
     }
-
 
     // 此处JSONObject arguments作为ai调用工具类自动传入的参数的json,使用string取出key的值
     @Override

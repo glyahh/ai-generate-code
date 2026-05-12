@@ -79,6 +79,24 @@ public class HtmlMultiFileEditContextBuilder {
         return userMessage + "\n\n" + context;
     }
 
+    /**
+     * 对外暴露的“修改意图”判定（用于在门面层决定是否走工具化编辑链路）。
+     */
+    public boolean isEditIntentMessage(String userMessage) {
+        // 判断用户提示词中是否有需要修改的字眼
+        return isEditIntent(userMessage);
+    }
+
+    /**
+     * 判断当前 app 输出目录下是否存在可编辑的历史文件。
+     */
+    public boolean hasExistingEditableFiles(CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+        if (codeGenTypeEnum == null || appId == null || appId <= 0) {
+            return false;
+        }
+        return !loadExistingFiles(codeGenTypeEnum, appId).isEmpty();
+    }
+
     private boolean isEditIntent(String userMessage) {
         String lower = userMessage.toLowerCase(Locale.ROOT);
         for (String word : EDIT_INTENT_WORDS) {

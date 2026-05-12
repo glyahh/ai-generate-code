@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class WorkflowTextStreamHandler {
     // 历史会话记录
-    private static final int WORKFLOW_HISTORY_MAX_LENGTH = 80_000;
+    // 历史会话记录不再做硬截断：避免超长代码在入库阶段丢失，导致后续“修改/增量编辑”无法基于完整原文进行。
 
     public Flux<String> handle(Flux<String> originFlux,
                                ChatHistoryService chatHistoryService,
@@ -100,13 +100,8 @@ public class WorkflowTextStreamHandler {
             cleaned.append(line == null ? "" : line);
         }
 
-        // 4.1 如果不超过长度限制,则返回拼接结果
+        // 4.1 返回拼接结果（不再做硬截断，避免丢失超长代码）
         String result = cleaned.toString().trim();
-        if (result.length() <= WORKFLOW_HISTORY_MAX_LENGTH) {
-            return result;
-        }
-
-        // 4.2 如果超过长度限制,则截断并添加截断标记
-        return result.substring(0, WORKFLOW_HISTORY_MAX_LENGTH) + "\n...[workflow message truncated]";
+        return result;
     }
 }

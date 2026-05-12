@@ -3,10 +3,11 @@ package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -24,6 +25,9 @@ import java.nio.file.StandardOpenOption;
 @Component
 public class FileWriteTool extends BaseTool {
 
+    @Resource
+    private AppService appService;
+
     @Tool("写入文件到指定路径")
     public String writeFile(
             @P("文件的相对路径")
@@ -33,11 +37,17 @@ public class FileWriteTool extends BaseTool {
             @ToolMemoryId Long appId
     ) {
         try {
-            Path path = Paths.get(relativeFilePath);
-            if (!path.isAbsolute()) {
-                String projectDirName = "vue_project_" + appId;
-                Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName);
-                path = projectRoot.resolve(relativeFilePath);
+            Path projectRoot = resolveNormalizedProjectRoot(appId, appService);
+            if (projectRoot == null) {
+                return "错误：无效的应用 ID，无法解析项目目录 - " + relativeFilePath;
+            }
+            Path raw = Paths.get(relativeFilePath);
+            Path path = raw.isAbsolute()
+                    ? raw.normalize().toAbsolutePath()
+                    : projectRoot.resolve(raw).normalize().toAbsolutePath();
+
+            if (!path.startsWith(projectRoot)) {
+                return "错误：禁止写入项目目录外的文件 - " + relativeFilePath;
             }
 
             Path parentDir = path.getParent();

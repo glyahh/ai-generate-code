@@ -203,6 +203,13 @@ public class aiCodeGeneratorServiceFactory {
                     .chatModel(chatModel)
                     .streamingChatModel(prototypeStreamingChatModel)
                     .chatMemory(build)
+                    // 允许 HTML / MULTI_FILE 在“修改/可视化编辑”场景通过工具增量改文件
+                    // （不改变默认输出规则，是否调用工具由 system prompt + 用户意图决定）
+                    .tools((Object[]) toolManager.getAllTools())
+                    .maxSequentialToolsInvocations(20)
+                    .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
+                            ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())
+                    )
                     .inputGuardrails(new PromptSafetyInputGuardrail())
                     // .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries())) 为了能够流式输出,先注释
                     .build();

@@ -2,7 +2,7 @@ package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+
+import jakarta.annotation.Resource;
 
 /**
  * 文件读取工具
@@ -27,6 +29,9 @@ import java.nio.file.Paths;
 @Component
 public class FileReadTool extends BaseTool {
 
+    @Resource
+    private AppService appService;
+
     @Tool("读取指定路径的文件内容")
     public String readFile(
             @P("文件的相对路径")
@@ -34,19 +39,16 @@ public class FileReadTool extends BaseTool {
             @ToolMemoryId Long appId
     ) {
         try {
-            Path path = Paths.get(relativeFilePath);
-            Path projectRoot = null;
-            if (!path.isAbsolute()) {
-                String projectDirName = "vue_project_" + appId;
-                projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName)
-                        .normalize()
-                        .toAbsolutePath();
-                path = projectRoot.resolve(relativeFilePath);
+            Path projectRoot = resolveNormalizedProjectRoot(appId, appService);
+            if (projectRoot == null) {
+                return "错误：无效的应用 ID，无法解析项目目录 - " + relativeFilePath;
             }
-            path = path.normalize().toAbsolutePath();
+            Path raw = Paths.get(relativeFilePath);
+            Path path = raw.isAbsolute()
+                    ? raw.normalize().toAbsolutePath()
+                    : projectRoot.resolve(raw).normalize().toAbsolutePath();
 
-            // 安全检查：相对路径只能在项目根目录下，避免 ../ 越界读取项目外文件
-            if (projectRoot != null && !path.startsWith(projectRoot)) {
+            if (!path.startsWith(projectRoot)) {
                 return "错误：禁止读取项目目录外的文件 - " + relativeFilePath;
             }
 

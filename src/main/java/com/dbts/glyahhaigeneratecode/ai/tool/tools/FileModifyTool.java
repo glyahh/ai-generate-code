@@ -2,10 +2,13 @@ package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.model.Entity.App;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +32,9 @@ import java.nio.file.StandardOpenOption;
 @Component
 public class FileModifyTool extends BaseTool {
 
+    @Resource
+    private AppService appService;
+
     @Tool("修改文件内容，用新内容替换指定旧内容")
     public String modifyFile(
             @P("文件的相对路径")
@@ -40,19 +46,16 @@ public class FileModifyTool extends BaseTool {
             @ToolMemoryId Long appId
     ) {
         try {
-            Path path = Paths.get(relativeFilePath);
-            Path projectRoot = null;
-            if (!path.isAbsolute()) {
-                String projectDirName = "vue_project_" + appId;
-                projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName)
-                        .normalize()
-                        .toAbsolutePath();
-                path = projectRoot.resolve(relativeFilePath);
+            Path projectRoot = resolveNormalizedProjectRoot(appId, appService);
+            if (projectRoot == null) {
+                return "错误：无效的应用 ID，无法解析项目目录 - " + relativeFilePath;
             }
-            path = path.normalize().toAbsolutePath();
+            Path raw = Paths.get(relativeFilePath);
+            Path path = raw.isAbsolute()
+                    ? raw.normalize().toAbsolutePath()
+                    : projectRoot.resolve(raw).normalize().toAbsolutePath();
 
-            // 安全检查：相对路径只能在项目根目录下，避免 ../ 越界修改到项目外
-            if (projectRoot != null && !path.startsWith(projectRoot)) {
+            if (!path.startsWith(projectRoot)) {
                 return "错误：禁止修改项目目录外的文件 - " + relativeFilePath;
             }
 
@@ -63,7 +66,13 @@ public class FileModifyTool extends BaseTool {
             // 避免直接修改关键配置/入口文件
             String fileName = path.getFileName().toString();
             if (isImportantFile(fileName)) {
-                return "错误：不允许直接修改重要文件 - " + fileName;
+                // 对 HTML / MULTI_FILE：允许修改核心产物文件（否则“增量编辑”无法落地）
+                // 对 vue 无法修改核心产物文件
+                CodeGenTypeEnum codeGenType = resolveCodeGenType(appId);
+                if (!(codeGenType == CodeGenTypeEnum.HTML || codeGenType == CodeGenTypeEnum.MULTI_FILE)
+                        || !isCoreWebOutputFile(fileName)) {
+                    return "错误：不允许直接修改重要文件 - " + fileName;
+                }
             }
 
             String originalContent = Files.readString(path);
@@ -109,6 +118,27 @@ public class FileModifyTool extends BaseTool {
             }
         }
         return false;
+    }
+
+    private boolean isCoreWebOutputFile(String fileName) {
+        if (fileName == null) {
+            return false;
+        }
+        return "index.html".equalsIgnoreCase(fileName)
+                || "style.css".equalsIgnoreCase(fileName)
+                || "script.js".equalsIgnoreCase(fileName);
+    }
+
+    private CodeGenTypeEnum resolveCodeGenType(Long appId) {
+        if (appId == null || appId <= 0) {
+            return null;
+        }
+        try {
+            App app = appService == null ? null : appService.getById(appId);
+            return app == null ? null : CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override

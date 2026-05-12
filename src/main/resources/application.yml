@@ -41,7 +41,9 @@ langchain4j:
   open-ai:
     # 最普通的模型
     chat-model:
-      # 使用的模型名称，例如 qwen3.5-plus
+      # 1. 对话记忆压缩/总结
+      # 2. 工作流图片相关
+      # 3. 代码生成主链路里的「非流式 / 工具侧」模型(几乎不用)
       model-name: ${langchain4j.open-ai.chat-model.model-name}
       # Qwen3.5-Plus 的兼容模式地址，以阿里云百炼为例
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -59,9 +61,10 @@ langchain4j:
 #      strict-json-schema: true
 #      response-format: json_object
 
-    # 普通流式输出模型
-    streaming-chat-model:       # 使用的模型名称，例如 qwen3.5-plus
-      model-name: qwen3.6-plus
+
+    # 1. 单页 HTML、多文件（HTML / MULTI_FILE）的流式生成
+    streaming-chat-model:
+      model-name: glm-5 # qwen3.6-plus
       # Qwen3.5-Plus 的兼容模式地址，以阿里云百炼为例
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       # 你的 Qwen API Key
@@ -75,7 +78,7 @@ langchain4j:
       max-retries: 2
 
 
-    # 推理 AI 模型配置（用于复杂的推理任务）
+    # 1. Vue 工程（VUE）的流式生成
     reasoning-streaming-chat-model:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${langchain4j.open-ai.chat-model.api-key}
@@ -85,7 +88,7 @@ langchain4j:
       log-requests: true
       log-responses: true
 
-    # 智能路由 AI 模型配置（用于简单的分类任务）
+    # 1. 轻量「分类/路由」——决定代码生成类型枚举 CodeGenTypeEnum
     routing-chat-model:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${langchain4j.open-ai.chat-model.api-key}
@@ -93,7 +96,7 @@ langchain4j:
       log-requests: true
       log-responses: true
 
-    # 工作流代码质检（结构化 JSON、短输出；与主 chat-model 分离以降低延迟与费用）
+    # 1. 工作流里的「代码质检」
     code-exam-chat-model:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${langchain4j.open-ai.chat-model.api-key}

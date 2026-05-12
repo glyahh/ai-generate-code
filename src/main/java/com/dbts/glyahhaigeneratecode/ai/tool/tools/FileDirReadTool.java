@@ -4,10 +4,11 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -32,6 +33,9 @@ import java.util.Set;
 @Component
 public class FileDirReadTool extends BaseTool {
 
+    @Resource
+    private AppService appService;
+
     /**
      * 需要忽略的文件和目录
      */
@@ -55,19 +59,16 @@ public class FileDirReadTool extends BaseTool {
     ) {
         try {
             String safeRelative = relativeDirPath == null ? "" : relativeDirPath;
-            Path path = Paths.get(safeRelative);
-            Path projectRoot = null;
-            if (!path.isAbsolute()) {
-                String projectDirName = "vue_project_" + appId;
-                projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName)
-                        .normalize()
-                        .toAbsolutePath();
-                path = projectRoot.resolve(safeRelative);
+            Path projectRoot = resolveNormalizedProjectRoot(appId, appService);
+            if (projectRoot == null) {
+                return "错误：无效的应用 ID，无法解析项目目录 - " + safeRelative;
             }
-            path = path.normalize().toAbsolutePath();
+            Path raw = Paths.get(safeRelative);
+            Path path = raw.isAbsolute()
+                    ? raw.normalize().toAbsolutePath()
+                    : projectRoot.resolve(raw).normalize().toAbsolutePath();
 
-            // 相对路径时，限制在项目根目录下，避免越界访问
-            if (projectRoot != null && !path.startsWith(projectRoot)) {
+            if (!path.startsWith(projectRoot)) {
                 return "错误：禁止读取项目目录外的内容 - " + safeRelative;
             }
 
