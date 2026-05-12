@@ -52,9 +52,9 @@ import java.util.stream.Collectors;
 /**
  * 对话历史 服务层实现。
  * <p>
- * 当对话轮数超过 {@link ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，会通过
- * {@link #trySummarizeOldestRoundsIfNeeded} 将最早两轮用 AI 总结为一轮并同步到 Redis，
- * 既不超过 Redis 配置条数限制，又保留有效记忆、节省 Token。
+ * 当 Redis 中用户轮数超过 {@link ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，会通过
+ * {@link #trySummarizeOldestRoundsIfNeeded} 将最早两轮用 AI 总结为一轮并同步到 Redis（不写 DB），
+ * 控制上下文长度；HTML/MULTI_FILE 下更早的 AI 长文仍会做片段压缩，但保留「时间线上最后一条 AI」全文以便承接上一轮代码。
  * </p>
  *
  * @author <a href="https://github.com/glyahh">glyahh</a>
@@ -536,9 +536,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             log.debug("读取系统提示词用于过滤失败，appId={}", addId, e);
         }
 
+        int lastAiRowIndex = indexOfLastAiChatHistoryRow(historyList);
         // 一次添加进入缓存
         int restoredCount = 0;
-        for (ChatHistory history : historyList) {
+        for (int row = 0; row < historyList.size(); row++) {
+            ChatHistory history = historyList.get(row);
             ChatHistoryMessageTypeEnum typeEnum = ChatHistoryMessageTypeEnum.getEnumByValue(history.getMessageType());
             if (typeEnum == null) {
                 continue;
@@ -556,8 +558,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                         log.debug("跳过写入 Redis：MySQL 中该条 AI 消息为系统提示词，appId={}", addId);
                         break;
                     }
-                    // 仅对 HTML / MULTI_FILE 的超长历史 AI 代码做内存压缩，降低后续请求 token 消耗
-                    String aiMessageForMemory = compactAiMessageForMemory(history.getMessage(), appCodeGenTypeEnum);
+                    // 仅对 HTML / MULTI_FILE 的「非最近一轮」超长 AI 做内存压缩；最近一条 AI 保持全文（承接上一轮完整代码）
+                    boolean keepLastAiFull = row == lastAiRowIndex;
+                    String aiMessageForMemory = keepLastAiFull
+                            ? history.getMessage()
+                            : compactAiMessageForMemory(history.getMessage(), appCodeGenTypeEnum);
                     messageWindowChatMemory.add(new AiMessage(aiMessageForMemory));
                     restoredCount++;
                     break;
@@ -576,10 +581,15 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     /**
-     * 将历史 AI 长消息压缩后写入 ChatMemory（仅影响后续发给模型的上下文，不改 DB 原文）：
-     * - 仅 HTML / MULTI_FILE 生效
-     * - 优先保留 html/css/js 三个代码块的前缀片段
-     * - 其余类型或短消息保持原样，避免影响现有行为
+     * 在「从 DB 灌 Redis」或「在线压缩 Redis」时，对单条 AI 长文做摘要（仅影响发给模型的上下文，不改 DB 原文）。
+     * <p>
+     * 时间线上<strong>最后一条</strong> AI 消息由调用方跳过本方法，保留全文，用于「上一轮完整代码 + 更早摘要」策略。
+     * </p>
+     * <ul>
+     *   <li>仅 HTML / MULTI_FILE 生效</li>
+     *   <li>优先保留 html/css/js 三个代码块的前缀片段</li>
+     *   <li>其余类型或短消息保持原样</li>
+     * </ul>
      */
     private String compactAiMessageForMemory(String rawMessage, CodeGenTypeEnum codeGenTypeEnum) {
         if (StrUtil.isBlank(rawMessage)) {
@@ -630,6 +640,31 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         return safePrefix + code.substring(0, maxLen) + "\n// ...历史代码片段已截断";
     }
 
+    /**
+     * 在按时间正序排列的 chat_history 行中，定位最后一条 AI 记录的索引（用于保留「上一轮」完整 AI 输出）。
+     */
+    private static int indexOfLastAiChatHistoryRow(List<ChatHistory> chronologicalOldToNew) {
+        for (int i = chronologicalOldToNew.size() - 1; i >= 0; i--) {
+            ChatHistoryMessageTypeEnum typeEnum = ChatHistoryMessageTypeEnum.getEnumByValue(
+                    chronologicalOldToNew.get(i).getMessageType());
+            if (typeEnum == ChatHistoryMessageTypeEnum.AI) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 在 Redis ChatMemory 消息序列中，定位最后一条 {@link AiMessage} 的下标（与 {@link #indexOfLastAiChatHistoryRow} 语义一致）。
+     */
+    private static int indexOfLastAiChatMessage(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i) instanceof AiMessage) {
+                return i;
+            }
+        }
+        return -1;
+    }
 
     /**
      * 根据应用的代码生成类型，将对应的系统 Prompt 追加到 Redis 管理的对话内存中。
@@ -925,10 +960,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             boolean changed = false;
             List<ChatMessage> newList = new ArrayList<>(messages.size());
             int beforeCount = messages.size();
-            for (ChatMessage message : messages) {
+            int lastAiIdx = indexOfLastAiChatMessage(messages);
+            for (int i = 0; i < messages.size(); i++) {
+                ChatMessage message = messages.get(i);
                 if (message instanceof AiMessage aiMessage) {
                     String raw = aiMessage.text();
-                    String compacted = compactAiMessageForMemory(raw, codeGenTypeEnum);
+                    boolean keepLastAiFull = i == lastAiIdx;
+                    String compacted = keepLastAiFull ? raw : compactAiMessageForMemory(raw, codeGenTypeEnum);
                     if (!Objects.equals(raw, compacted)) {
                         changed = true;
                     }

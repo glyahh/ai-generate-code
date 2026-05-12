@@ -6,10 +6,10 @@ package com.dbts.glyahhaigeneratecode.constant;
 public interface ChatHistoryConstant {
 
     /**
-     * 超过该轮数后启动「前两轮合并为一轮」的压缩机制，避免 Redis 超限并节省 Token。
-     * 与 Redis maxMessages(20) 配合：预留系统提示词等空间，实际有效轮数控制在此以内。
+     * Redis 中用户消息条数（轮数）超过该阈值后，启动「最早两轮合并为一轮摘要」并写回 Redis（不删 DB 原文）。
+     * 与 {@code MessageWindowChatMemory#maxMessages(80)} 配合：控制上下文膨胀；阈值 3 表示最多保留约 3 轮用户发问后再触发合并。
      */
-    int MAX_ROUNDS_BEFORE_SUMMARY = 8;
+    int MAX_ROUNDS_BEFORE_SUMMARY = 3;
 
     /**
      * 每次压缩时，将最早几轮合并为一轮（2 轮 → 1 轮，即 4 条消息 → 2 条）。
