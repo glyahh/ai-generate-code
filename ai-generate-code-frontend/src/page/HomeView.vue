@@ -570,6 +570,7 @@ onMounted(() => {
         </div>
 
         <div class="prompt-card-border">
+          <div class="prompt-card-beam" aria-hidden="true" />
           <div class="prompt-card">
             <AInput.TextArea v-model:value="prompt" class="prompt-input" :rows="3"
               placeholder="使用 glyahh-generate-code 创建一个高效的小工具，例如：帮我做一个旅行计划记录网站……" />
@@ -896,25 +897,169 @@ onMounted(() => {
   animation: heroFloat 3s ease-in-out infinite;
 }
 
+/* 两阶段：Phase A = 改版前 borderFlow 快速一整圈并淡出；Phase B = 窄弧霓虹 + bloom + 慢转（抗压 8s/圈） */
 .prompt-card-border {
+  --beam-duration: 8s;
+  --beam-intro-duration: 1.15s;
+  --beam-strength: 0.7;
+  --beam-ring: 2px;
+
   margin-top: 8px;
-  padding: 1px;
-  border-radius: 22px;
   max-width: 780px;
   margin-left: auto;
   margin-right: auto;
+  position: relative;
+  isolation: isolate;
+  padding: var(--beam-ring);
+  border-radius: 22px;
+  overflow: visible;
+  background: transparent;
+}
+
+/* 单独一层裁剪光束，beam 层的 overflow:hidden 不升到 border，下拉可用 */
+.prompt-card-beam {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* Phase B：霓虹窄弧（::after 盖在上面播 intro） */
+.prompt-card-beam::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: 175%;
+  height: 175%;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(0deg);
+  transform-origin: center center;
+  /* Colorful（贴图）：绿 → 青 → 紫 → 洋红 → 柔黄 */
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg 300deg,
+    rgba(57, 255, 20, 0.92) 302deg,
+    rgba(0, 242, 255, 0.92) 310deg,
+    rgba(112, 0, 255, 0.88) 318deg,
+    rgba(200, 0, 255, 0.85) 326deg,
+    rgba(255, 235, 120, 0.82) 334deg,
+    transparent 340deg,
+    transparent 360deg
+  );
+  box-shadow:
+    0 0 12px rgba(0, 242, 255, calc(0.32 * var(--beam-strength, 1))),
+    0 0 28px rgba(200, 0, 255, calc(0.2 * var(--beam-strength, 1))),
+    0 0 44px rgba(57, 255, 20, calc(0.18 * var(--beam-strength, 1))),
+    0 0 64px rgba(255, 235, 120, calc(0.06 * var(--beam-strength, 1)));
+  animation:
+    neonBeamReveal 0.4s ease-out var(--beam-intro-duration) forwards,
+    neonBeamRotate var(--beam-duration) linear var(--beam-intro-duration) infinite;
+}
+
+@keyframes neonBeamReveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: var(--beam-strength);
+  }
+}
+
+@keyframes neonBeamRotate {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+/* Phase A：改版前整环柔色流光（单层平移对标旧 borderFlow） */
+.prompt-card-beam::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
   background:
-    linear-gradient(120deg,
-      rgba(59, 130, 246, 0.25),
-      rgba(45, 212, 191, 0.25),
-      rgba(244, 114, 182, 0.25),
-      rgba(129, 140, 248, 0.25),
-      rgba(59, 130, 246, 0.25));
+    linear-gradient(
+      120deg,
+      rgba(59, 130, 246, 0.42),
+      rgba(45, 212, 191, 0.42),
+      rgba(244, 114, 182, 0.42),
+      rgba(129, 140, 248, 0.42),
+      rgba(59, 130, 246, 0.42)
+    );
   background-size: 300% 300%;
-  animation: borderFlow 12s linear infinite;
+  background-position: 0% 50%;
+  opacity: 1;
+  animation:
+    beamIntroBorderFlow var(--beam-intro-duration) linear forwards,
+    beamIntroFadeOut 0.38s ease-out calc(var(--beam-intro-duration) - 0.38s)
+      forwards;
+}
+
+@keyframes beamIntroBorderFlow {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes beamIntroFadeOut {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-card-beam::after {
+    animation: none;
+    opacity: 0;
+  }
+
+  .prompt-card-beam::before {
+    animation: none;
+    opacity: calc(var(--beam-strength, 1) * 0.42);
+    box-shadow:
+      0 0 8px rgba(0, 242, 255, 0.12),
+      0 0 18px rgba(200, 0, 255, 0.1);
+    transform: translate(-50%, -50%) rotate(28deg);
+  }
+}
+
+/* 焦点内略减压：稍加长时间、略降强度（不改变布局） */
+.prompt-card-border:focus-within {
+  --beam-duration: 10s;
+}
+
+.prompt-card-border:focus-within .prompt-card-beam::before {
+  filter: saturate(0.92);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-card-border:focus-within {
+    --beam-duration: 8s;
+  }
 }
 
 .prompt-card {
+  position: relative;
+  z-index: 1;
   padding: 16px 16px 12px;
   border-radius: 21px;
   background: rgba(255, 255, 255, 0.96);
@@ -927,15 +1072,6 @@ onMounted(() => {
   background: transparent;
   resize: none;
   box-shadow: none;
-}
-
-@keyframes borderFlow {
-  0% {
-    background-position: 0% 50%;
-  }
-  100% {
-    background-position: 100% 50%;
-  }
 }
 
 .prompt-quick-row {
