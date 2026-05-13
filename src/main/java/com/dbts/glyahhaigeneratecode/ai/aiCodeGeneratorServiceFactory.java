@@ -5,6 +5,7 @@ import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.config.OpenAiOutputGuardrailsConfig;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.guardrail.PromptSafetyInputGuardrail;
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -156,7 +157,7 @@ public class aiCodeGeneratorServiceFactory {
                 .builder()
                 .id(appId)
                 .chatMemoryStore(chatMemoryStore)
-                .maxMessages(80)
+                .maxMessages(ChatHistoryConstant.CHAT_MEMORY_MAX_MESSAGES)
                 .build();
 
         // 预加载历史对话到内存（抛开用户刚发送的那条）
@@ -165,7 +166,7 @@ public class aiCodeGeneratorServiceFactory {
         if (appId != null && appId > 0) {
             try {
                 //
-                int loadedCount = chatHistoryService.turnHistoryToMemory(appId, build, 20);
+                int loadedCount = chatHistoryService.turnHistoryToMemory(appId, build, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS);
                 log.info("为应用预加载历史对话到内存，appId={}, loadedCount={}", appId, loadedCount);
             } catch (Exception e) {
                 log.error("预加载历史对话到内存失败，appId={}", appId, e);

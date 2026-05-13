@@ -127,9 +127,9 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     int countRoundsByAppId(Long appId, User loginUser);
 
     /**
-     * 当对话轮数超过 {@link com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，
-     * 将最早的两轮用 AI 总结为一轮，并仅在 Redis 中用 2 条摘要消息替换前 4 条原始消息，用于压缩上下文（不修改 DB）。
-     * 由对话完成后（如流式回复 doOnComplete）调用，无需权限校验（内部按 appId 操作）。
+     * 当 DB 中用户轮数超过 {@link com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，
+     * 将最早两轮（4 条）用 AI 总结为 1 轮摘要：逻辑删除原文、插入 2 条带 audit 的摘要行，并在全部合并完成后按 DB 重建 Redis ChatMemory。
+     * 由对话入口或流式完成后调用，无需权限校验（内部按 appId 操作）。
      *
      * @param appId  应用 id
      * @param userId 用户 id（用于写入总结记录的 userId）

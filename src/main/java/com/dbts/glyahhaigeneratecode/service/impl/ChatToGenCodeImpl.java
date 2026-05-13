@@ -156,11 +156,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             lock.unlock();
         }
 
-        if (!firstRound && chatHistoryService.shouldSummarizeBeforeWorkflowGeneration(appId)) {
-            chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_workflow_after_success");
-        } else {
-            log.info("workflow 入口跳过会话级总结，appId={}, firstRound={}", appId, firstRound);
-        }
+        // 生成前触发「旧轮次总结压缩」检查：与普通链路一致，每轮用户消息入库并通过审查后都执行；是否合并仍由阈值策略决定
+        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_workflow");
 
         // 获取一手流式string代码
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
