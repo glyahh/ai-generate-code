@@ -1,20 +1,20 @@
 package com.dbts.glyahhaigeneratecode.config;
 
+import com.dbts.glyahhaigeneratecode.mapper.SchemaMetadataMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
  * 启动时校验关键表结构。
- * 若缺少必要字段则直接阻断启动，避免运行期在业务接口中才暴露 SQL 错误。
+ * 若缺少必要字段则直接阻断启动
  */
 @Component
 @RequiredArgsConstructor
 public class DbSchemaGuardRunner implements ApplicationRunner {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final SchemaMetadataMapper schemaMetadataMapper;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -22,11 +22,7 @@ public class DbSchemaGuardRunner implements ApplicationRunner {
     }
 
     private void ensureAppIsBetaColumnExists() {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.COLUMNS " +
-                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app' AND COLUMN_NAME = 'is_beta'",
-                Integer.class
-        );
+        Long count = schemaMetadataMapper.countColumn("app", "is_beta");
         if (count != null && count > 0) {
             return;
         }

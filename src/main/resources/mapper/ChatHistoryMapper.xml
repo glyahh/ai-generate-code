@@ -3,5 +3,8 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper">
-
+    <!--
+      本 XML 未声明 SQL 片段：information_schema 列检测与 ALTER TABLE 迁移语句
+      均定义在 ChatHistoryMapper.java 的 @Select / @Update 注解中。
+    -->
 </mapper>

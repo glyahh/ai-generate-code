@@ -82,6 +82,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         // 4.5 首轮判定：同一 appId 串行判定 + 入库，避免并发下都读到 rounds=0
         final boolean firstRound;
+        final Long roundId;
         ReentrantLock lock = getFirstRoundLock(appId);
         lock.lock();
         try {
@@ -92,7 +93,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
             log.info("prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
                     appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
-            chatHistoryService.addChatMessage(
+            roundId = chatHistoryService.addChatMessageAndReturnId(
                     appId,
                     message,
                     ChatHistoryMessageTypeEnum.USER.getValue(),
@@ -100,6 +101,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
                     auditResult.getAction(),
                     auditResult.getHitRule()
             );
+            ThrowUtils.throwIf(roundId == null || roundId <= 0, ErrorCode.SYSTEM_ERROR, "用户消息入库失败");
             ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
         } finally {
             lock.unlock();
@@ -113,7 +115,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
 
         // 7. 添加 AI 回复到对话历史,转换格式并返回给前端
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message);
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message, roundId);
     }
 
     @Override
@@ -134,6 +136,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         assertRequestNotDuplicate(appId, user.getId(), message, "workflow");
 
         final boolean firstRound;
+        final Long roundId;
         ReentrantLock lock = getFirstRoundLock(appId);
         lock.lock();
         try {
@@ -143,7 +146,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
             log.info("workflow prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",
                     appId, user.getId(), auditResult.isBlocked(), auditResult.getHitRule(), auditResult.getAction());
-            chatHistoryService.addChatMessage(
+            roundId = chatHistoryService.addChatMessageAndReturnId(
                     appId,
                     message,
                     ChatHistoryMessageTypeEnum.USER.getValue(),
@@ -151,6 +154,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
                     auditResult.getAction(),
                     auditResult.getHitRule()
             );
+            ThrowUtils.throwIf(roundId == null || roundId <= 0, ErrorCode.SYSTEM_ERROR, "用户消息入库失败");
             ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
         } finally {
             lock.unlock();
@@ -165,7 +169,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         // 将代码转化成想要的格式,持久化到数据库
         // 解析一下,准备给前端了
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message)
+        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message, roundId)
                 .doOnError(InputGuardrailException.class, e -> {
                     chatHistoryService.removeUserMessageByContent(appId, user.getId(), originalPrompt);
                     log.warn("Guardrail 拒绝，已回滚 DB user 消息，appId={}", appId);

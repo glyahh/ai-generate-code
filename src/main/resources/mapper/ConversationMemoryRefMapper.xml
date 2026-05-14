@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.dbts.glyahhaigeneratecode.mapper.ConversationMemoryRefMapper">
+    <!--
+      会话记忆归档引用表 conversation_memory_ref 的清理与统计 SQL；
+      与 ConversationMemoryRefMapper.java 中方法 id 一一对应。
+    -->
+
+    <!-- 按「存活天数」硬删：createdAt 早于 NOW()-#{days} 天的 ref 一律删除（对应 conversation.memory.refKeepDaysPerApp） -->
+    <delete id="deleteByCreatedBeforeDays">
+        DELETE FROM conversation_memory_ref
+        <!-- 时间窗口：早于当前时间减去 days 天 -->
+        WHERE createdAt &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+    </delete>
+
+    <!-- 按 app 维度保留条数：每个 appId 内按 createdAt、id 倒序编号，rn>#{keepCount} 的旧行删除（对应 refKeepCountPerApp） -->
+    <delete id="deleteExcessRowsPerApp">
+        <!-- 主表别名 r1，与待删 id 子查询 JOIN -->
+        DELETE r1 FROM conversation_memory_ref r1
+        JOIN (
+            SELECT id FROM (
+                <!-- 分区内从新到旧编号，超出保留条数的为待删 -->
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY appId ORDER BY createdAt DESC, id DESC) rn
+                FROM conversation_memory_ref
+            ) t
+            WHERE t.rn > #{keepCount}
+        ) old ON old.id = r1.id
+    </delete>
+
+    <!-- 供「按 app 总字节上限」清理：先列出仍存有 ref 的 appId，避免全表无差别扫描 -->
+    <select id="selectDistinctAppIds" resultType="long">
+        <!-- 去重 appId，供逐 app 字节合计与裁剪 -->
+        SELECT DISTINCT appId FROM conversation_memory_ref
+    </select>
+
+    <!-- 单 app 下 ref 的 contentBytes 合计，用于与 refKeepBytesPerApp 比较是否超限 -->
+    <select id="sumContentBytesByAppId" resultType="long">
+        SELECT COALESCE(SUM(contentBytes), 0) FROM conversation_memory_ref
+        <!-- 限定当前应用 -->
+        WHERE appId = #{appId}
+    </select>
+
+    <!--
+      单 app 超总字节后的裁剪：按 createdAt、id 升序累加 contentBytes，删除 rollingBytes<=#{overflow} 的最旧若干行，
+      即从最旧开始删，直到删掉约 overflow 字节的归档量（overflow = 当前合计 - 上限）。
+    -->
+    <delete id="deleteOldestUntilBytesRemoved">
+        DELETE FROM conversation_memory_ref
+        WHERE id IN (
+            SELECT id FROM (
+                <!-- 按时间正序累加字节，rollingBytes 不超过 overflow 的为本次删除集合 -->
+                SELECT id, contentBytes,
+                       SUM(contentBytes) OVER (ORDER BY createdAt ASC, id ASC) AS rollingBytes
+                FROM conversation_memory_ref
+                WHERE appId = #{appId}
+            ) t
+            WHERE t.rollingBytes &lt;= #{overflow}
+        )
+    </delete>
+</mapper>

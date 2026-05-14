@@ -27,6 +27,33 @@ spring:
     store-type: redis
     timeout: 2592000 # 30天过期
 
+# ---------------------------------------------------------------------------
+# 会话记忆（V4）：MySQL 为真相源，以下为 Redis 热缓存 TTL + 治理与 manifest 重试
+# 绑定前缀见 ConversationMemoryProperties：conversation.memory.*
+# ---------------------------------------------------------------------------
+conversation:
+  memory:
+    # Redis key：cm:state:{appId}。缓存 conversation_memory_state 摘要/索引等，过期后从 DB 回填。
+    # 默认 14 天（秒）
+    state-ttl-seconds: 1209600
+    # Redis key：cm:ref:{refId}。超长归档片段热缓存，过期后从 conversation_memory_ref 表回源。
+    # 默认 3 天（秒）
+    ref-ttl-seconds: 259200
+    # Redis key：cm:page:*。readFile/大 ref 分页切片缓存，短 TTL 减轻重复读盘。
+    # 默认 12 小时（秒）
+    page-ttl-seconds: 43200
+    # --- G 数据治理：定时任务清理 conversation_memory_ref，多条件任一超限则删最旧 ---
+    # 单 app 最多保留 ref 行数（超出删旧）
+    ref-keep-count-per-app: 500
+    # 单 app ref 超过该创建天数的记录删除
+    ref-keep-days-per-app: 30
+    # 单 app ref 内容总字节上限（约 200MB，超出按滚动字节删旧）
+    ref-keep-bytes-per-app: 209715200
+    # onRoundCompleted 扫盘前：目录文件数/mtime 连续一致才认为落盘稳定；最大轮询次数
+    manifest-stable-retry-times: 3
+    # 每轮稳定性检查间隔（毫秒），与 retry-times 配合约覆盖「短暂落盘延迟」
+    manifest-stable-retry-sleep-ms: 150
+
 
 server:
   port: 8124

@@ -166,7 +166,7 @@ public class aiCodeGeneratorServiceFactory {
         if (appId != null && appId > 0) {
             try {
                 //
-                int loadedCount = chatHistoryService.turnHistoryToMemory(appId, build, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS);
+                int loadedCount = chatHistoryService.loadConversationMemoryStateAndInject(appId, build, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS, codeGenTypeEnum);
                 log.info("为应用预加载历史对话到内存，appId={}, loadedCount={}", appId, loadedCount);
             } catch (Exception e) {
                 log.error("预加载历史对话到内存失败，appId={}", appId, e);

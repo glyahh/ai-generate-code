@@ -19,6 +19,7 @@ import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
+import com.dbts.glyahhaigeneratecode.service.ConversationMemoryStateService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
@@ -31,7 +32,6 @@ import dev.langchain4j.model.chat.ChatModel;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,7 +75,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     private ChatMemoryStore chatMemoryStore;
 
     @Resource
-    private JdbcTemplate jdbcTemplate;
+    private ConversationMemoryStateService conversationMemoryStateService;
 
     private static final int MEMORY_AI_MESSAGE_MAX_LENGTH = 2400;
     /**
@@ -105,11 +105,42 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
-        return addChatMessage(appId, message, messageType, userId, "SKIP", "NONE");
+        return addChatMessageAndReturnId(appId, message, messageType, userId) != null;
+    }
+
+    /**
+     * 添加一条对话消息并返回主键 id。
+     *
+     * @param appId 应用 id
+     * @param message 消息内容
+     * @param messageType 消息类型
+     * @param userId 用户 id
+     * @return 保存后的主键 id；失败返回 null
+     */
+    @Override
+    public Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId) {
+        return addChatMessageAndReturnId(appId, message, messageType, userId, "SKIP", "NONE");
     }
 
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule) {
+        return addChatMessageAndReturnId(appId, message, messageType, userId, auditAction, auditHitRule) != null;
+    }
+
+
+    /**
+     * 添加一条带审查字段的对话消息并返回主键 id。
+     *
+     * @param appId 应用 id
+     * @param message 消息内容
+     * @param messageType 消息类型
+     * @param userId 用户 id
+     * @param auditAction 审查动作
+     * @param auditHitRule 命中规则
+     * @return 保存后的主键 id；失败返回 null
+     */
+    @Override
+    public Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "消息内容不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(messageType), ErrorCode.PARAMS_ERROR, "消息类型不能为空");
@@ -129,7 +160,12 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 .auditAction(auditAction)
                 .auditHitRule(auditHitRule)
                 .build();
-        return this.save(chatHistory);
+        // 1. 先落库，再从实体回填的雪花 id 作为 roundId 来源。
+        boolean saved = this.save(chatHistory);
+        if (!saved || chatHistory.getId() == null || chatHistory.getId() <= 0) {
+            return null;
+        }
+        return chatHistory.getId();
     }
 
     private void ensureAuditColumnsIfMissing(Long appId) {
@@ -137,13 +173,13 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         boolean hitRuleExists = isColumnExists("auditHitRule");
         boolean messageIsLongText = isMessageColumnLongText();
         if (!actionExists) {
-            jdbcTemplate.execute("ALTER TABLE chat_history ADD COLUMN auditAction varchar(16) NOT NULL DEFAULT 'SKIP' COMMENT '审查动作：ALLOW/REJECT/SKIP' AFTER userId");
+            this.getMapper().alterChatHistoryAddAuditAction();
         }
         if (!hitRuleExists) {
-            jdbcTemplate.execute("ALTER TABLE chat_history ADD COLUMN auditHitRule varchar(64) NOT NULL DEFAULT 'NONE' COMMENT '命中审查规则编码' AFTER auditAction");
+            this.getMapper().alterChatHistoryAddAuditHitRule();
         }
         if (!messageIsLongText) {
-            jdbcTemplate.execute("ALTER TABLE chat_history MODIFY COLUMN message LONGTEXT NOT NULL COMMENT '消息'");
+            this.getMapper().alterChatHistoryMessageToLongText();
         }
     }
 
@@ -169,27 +205,17 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     private boolean isColumnExists(String columnName) {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = ?",
-                Integer.class,
-                columnName
-        );
+        Integer count = this.getMapper().countChatHistoryInformationSchemaColumn(columnName);
         return count != null && count > 0;
     }
 
     private boolean isMessageColumnLongText() {
-        String dataType = jdbcTemplate.queryForObject(
-                "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = 'message'",
-                String.class
-        );
+        String dataType = this.getMapper().selectChatHistoryMessageDataType();
         return "longtext".equalsIgnoreCase(StrUtil.blankToDefault(dataType, ""));
     }
 
     private long getMessageColumnCharacterLimit() {
-        Long maxLength = jdbcTemplate.queryForObject(
-                "SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = 'message'",
-                Long.class
-        );
+        Long maxLength = this.getMapper().selectChatHistoryMessageCharMaxLength();
         return maxLength == null ? DEFAULT_SAFE_MESSAGE_LENGTH : maxLength;
     }
 
@@ -580,6 +606,41 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
         return restoredCount;
     }
+
+    /**
+     * 加载 memory_state 并按需注入文件内容到 Redis ChatMemory。
+     *
+     * @param appId 应用 id
+     * @param messageWindowChatMemory 聊天内存
+     * @param maxCount 最大历史条数
+     * @param codeGenTypeEnum 代码生成类型
+     * @return 注入后的内存消息条数,用户+ai对话的总轮数
+     */
+    @Override
+    public int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum) {
+        // 1. 先按既有链路把 DB 历史恢复到 Redis，保持与旧行为一致。
+        int restored = turnHistoryToMemory(appId, messageWindowChatMemory, maxCount);
+        // 注入数量
+        int injectedCount = 0;
+
+        // 2. 再执行新链路 memory_state 注入；该步骤失败不影响主生成链路。
+        try {
+            injectedCount = conversationMemoryStateService
+                    // 读取 memory_state（Redis 未命中则 DB），按字符/token 预算将候选文件分页内容以 SystemMessage 注入同一 ChatMemory
+                    .loadConversationMemoryStateAndInject(appId, messageWindowChatMemory, codeGenTypeEnum, maxCount)
+                    // 取本次注入条数，与上方 restored 相加得到 finalCount
+                    .getInjectedMessageCount();
+        } catch (Exception e) {
+            log.warn("loadConversationMemoryStateAndInject 执行失败，已降级为仅历史恢复，appId={}", appId, e);
+        }
+
+        // 3. 返回“注入后总条数”，避免和注释语义不一致。
+        int finalCount = restored + Math.max(0, injectedCount);
+        log.info("会话记忆预加载完成，appId={}, restoredCount={}, injectedCount={}, finalCount={}",
+                appId, restored, injectedCount, finalCount);
+        return finalCount;
+    }
+
 
     /**
      * 在「从 DB 灌 Redis」或「在线压缩 Redis」时，对单条 AI 长文做摘要（仅影响发给模型的上下文，不改 DB 原文）。
@@ -1135,6 +1196,47 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         } catch (Exception e) {
             log.warn("按内容回滚用户消息失败, appId={}, userId={}", appId, userId, e);
             return false;
+        }
+    }
+
+    /**
+     * 对话轮次完成后的统一收口。
+     *
+     * @param appId 应用 id
+     * @param roundId 本轮 roundId（chat_history.id）
+     * @param userId 用户 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param workflowMode 是否 workflow 模式
+     * @return 无
+     */
+    @Override
+    public void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum, boolean workflowMode) {
+        onRoundCompleted(appId, roundId, userId, codeGenTypeEnum, workflowMode, 0, 0L);
+    }
+
+    /**
+     * 对话轮次完成后的统一收口（带可观测指标参数）如果没有抛异常就说明成功了
+     *
+     * @param appId 应用 id
+     * @param roundId 本轮 roundId（chat_history.id）
+     * @param userId 用户 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param workflowMode 是否 workflow 模式
+     * @param bufferChars 本轮输出字符数
+     * @param elapsedMs 本轮耗时
+     * @return 无
+     */
+    public void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum, boolean workflowMode, int bufferChars, long elapsedMs) {
+        if (appId == null || appId <= 0 || roundId == null || roundId <= 0 || userId == null || userId <= 0) {
+            return;
+        }
+        try {
+            // 1. 收口逻辑委托给独立 memory_state 服务，隔离主会话入库与 SSE 输出。
+            // 2. 透传执行器采集的真实 bufferChars/elapsedMs，满足 E 指标口径。
+            conversationMemoryStateService.onRoundCompleted(appId, roundId, userId, codeGenTypeEnum, workflowMode, bufferChars, elapsedMs);
+        } catch (Exception e) {
+            // 3. 失败自吞：严格遵循主链路隔离原则。
+            log.warn("onRoundCompleted 执行失败已忽略，appId={}, roundId={}", appId, roundId, e);
         }
     }
 

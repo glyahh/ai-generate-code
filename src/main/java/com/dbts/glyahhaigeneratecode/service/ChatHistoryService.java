@@ -33,6 +33,17 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     boolean addChatMessage(Long appId, String message, String messageType, Long userId);
 
     /**
+     * 添加一条对话消息并返回主键 id（roundId 来源）
+     *
+     * @param appId       应用 id
+     * @param message     消息内容
+     * @param messageType 消息类型（user/ai/error）
+     * @param userId      用户 id
+     * @return 保存后的消息主键 id，失败返回 null
+     */
+    Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId);
+
+    /**
      * 添加一条带审查字段的对话消息
      *
      * @param appId        应用 id
@@ -44,6 +55,19 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 是否保存成功
      */
     boolean addChatMessage(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule);
+
+    /**
+     * 添加一条带审查字段的对话消息并返回主键 id（roundId 来源）
+     *
+     * @param appId        应用 id
+     * @param message      消息内容
+     * @param messageType  消息类型（user/ai/error）
+     * @param userId       用户 id
+     * @param auditAction  审查动作（ALLOW / REJECT / SKIP）
+     * @param auditHitRule 命中的规则编码（如 NONE / SENSITIVE_WORD）
+     * @return 保存后的消息主键 id，失败返回 null
+     */
+    Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule);
 
     /**
      * 分页查询某个应用的对话历史（基于时间游标，向前加载）
@@ -106,6 +130,17 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 转换后的数量
      */
     int turnHistoryToMemory (Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount);
+
+    /**
+     * 加载会话 memory_state 并按需注入文件内容到 Redis ChatMemory
+     *
+     * @param appId                   应用 id
+     * @param messageWindowChatMemory 聊天内存
+     * @param maxCount                最大历史条数
+     * @param codeGenTypeEnum         代码生成类型
+     * @return 注入后的内存消息条数
+     */
+    int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum);
 
     /**
      * 查询某应用全部对话历史（用于导出到本地，仅应用创建者或管理员可调用）
@@ -197,6 +232,36 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 是否删除成功
      */
     boolean removeUserMessageByContent(Long appId, Long userId, String message);
+
+    /**
+     * 对话轮次结束后的收口：快照、差异、摘要状态、ref 归档与缓存回填
+     *
+     * @param appId           应用 id
+     * @param roundId         本轮 roundId（即用户消息 chat_history.id）
+     * @param userId          用户 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param workflowMode    是否 workflow 模式
+     * @return 无
+     */
+    void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum, boolean workflowMode);
+
+
+    /**
+     * 对话轮次结束后的收口（带实时指标）。
+     *
+     * @param appId           应用 id
+     * @param roundId         本轮 roundId（即用户消息 chat_history.id）
+     * @param userId          用户 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param workflowMode    是否 workflow 模式
+     * @param bufferChars     本轮输出字符数
+     * @param elapsedMs       本轮耗时（毫秒）
+     * @return 无
+     */
+    default void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum,
+                                  boolean workflowMode, int bufferChars, long elapsedMs) {
+        onRoundCompleted(appId, roundId, userId, codeGenTypeEnum, workflowMode);
+    }
 
     /**
      * workflow 入口是否应触发会话级总结压缩。

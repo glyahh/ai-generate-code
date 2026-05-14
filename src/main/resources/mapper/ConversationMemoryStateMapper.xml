@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.dbts.glyahhaigeneratecode.mapper.ConversationMemoryStateMapper">
+    <!--
+      无 XML 片段：按 appId 的 INSERT … ON DUPLICATE KEY UPDATE（upsert）
+      定义在 ConversationMemoryStateMapper.java 的 @Insert 注解中。
+    -->
+</mapper>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.dbts.glyahhaigeneratecode.mapper.SchemaMetadataMapper">
+    <!--
+      无 XML 片段：按库表列统计 information_schema.COLUMNS 行数（DDL 守卫等）
+      定义在 SchemaMetadataMapper.java 的 @Select 注解中。
+    -->
+</mapper>

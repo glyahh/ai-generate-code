@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.dbts.glyahhaigeneratecode.mapper.SnapshotHistoryMapper">
+    <!--
+      无 XML 片段：删除 30 天前快照记录的 DELETE
+      定义在 SnapshotHistoryMapper.java 的 @Delete 注解中。
+    -->
+</mapper>

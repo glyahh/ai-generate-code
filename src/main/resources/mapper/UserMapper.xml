@@ -3,5 +3,5 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.dbts.glyahhaigeneratecode.mapper.UserMapper">
-
+    <!-- 无自定义 SQL：CRUD 由 MyBatis-Flex BaseMapper 默认生成。 -->
 </mapper>
