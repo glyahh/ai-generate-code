@@ -217,6 +217,25 @@ export type AppVO = {
   updateTime?: string;
   userVO?: UserVO;
   hasGeneratedCode?: boolean;
+  /** 是否 workflow beta 应用：0-否，1-是 */
+  isBeta?: number;
+};
+
+/** 应用对话历史分页（含 isBeta，用于工作流进度卡片展示判定） */
+export type AppChatHistoryPage = {
+  records?: ChatHistory[];
+  pageNumber?: number;
+  pageSize?: number;
+  totalPage?: number;
+  totalRow?: number;
+  optimizeCountQuery?: boolean;
+  isBeta?: number;
+};
+
+export type BaseResponseAppChatHistoryPage = {
+  code?: number;
+  data?: AppChatHistoryPage;
+  message?: string;
 };
 
 export type BaseResponseAppVO = {
@@ -369,7 +388,7 @@ export type ChatHistoryAppAppIdUsingGetResponses = {
   /**
    * OK
    */
-  200: BaseResponsePageChatHistory;
+  200: BaseResponseAppChatHistoryPage;
 };
 
 export type ChatHistoryMyUsingPostResponses = {

@@ -10,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.model.DTO.ChatHistoryQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.AppChatHistoryPageVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.VO.UserChatHistoryItemVO;
 import com.dbts.glyahhaigeneratecode.service.AppService;
@@ -119,7 +120,7 @@ public class ChatHistoryController {
     }
 
     @GetMapping("/app/{appId}")
-    public BaseResponse<Page<ChatHistory>> listChatHistory(
+    public BaseResponse<AppChatHistoryPageVO> listChatHistory(
             @PathVariable Long appId,
             @RequestParam(required = false)
             @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime lastCreateTime,
@@ -127,7 +128,7 @@ public class ChatHistoryController {
             HttpServletRequest request) {
 
         User loginUser = userService.getUserInSession(request);
-        Page<ChatHistory> page = chatHistoryService.listAppChatHistoryByPage(appId, size, lastCreateTime, loginUser);
+        AppChatHistoryPageVO page = chatHistoryService.listAppChatHistoryByPage(appId, size, lastCreateTime, loginUser);
         return ResultUtils.success(page);
     }
 

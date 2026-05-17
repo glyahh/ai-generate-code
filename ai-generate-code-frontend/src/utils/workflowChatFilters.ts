@@ -78,6 +78,8 @@ function classifyWorkflowStage(rawLabel: string): WorkflowStageKey | null {
   return null
 }
 
+const WORKFLOW_MARKER_RE = /\[(?:workflow(?:_stage_status|_notice)?)\]/i
+
 const WORKFLOW_HISTORY_SUCCESS_RE = /(代码生成完成|工作流结束|构建成功|生成完成|ready)/i
 const WORKFLOW_HISTORY_FAILED_RE = /(失败|异常|error|中断|出现问题|超时)/i
 const WORKFLOW_STAGE_FAILED_RE: Record<WorkflowStageKey, RegExp> = {
@@ -86,6 +88,16 @@ const WORKFLOW_STAGE_FAILED_RE: Record<WorkflowStageKey, RegExp> = {
   code_generating: /(代码生成|项目构建|智能路由|生成代码|生成)/i,
   code_checking: /(代码质量检查|质量检查|质检|检查)/i,
   ready: /(就绪|完成|结束)/i,
+}
+
+/**
+ * 判断消息正文是否包含工作流埋点（用于区分 legacy / workflow 应用，避免误解析普通文案）。
+ */
+export function messageHasWorkflowMarkers(rawContent: string): boolean {
+  const text = rawContent ?? ''
+  if (!text) return false
+  if (WORKFLOW_MARKER_RE.test(text)) return true
+  return parseWorkflowStepsFromText(text).length > 0
 }
 
 /**

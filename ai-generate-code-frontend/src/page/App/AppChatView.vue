@@ -81,7 +81,17 @@ function syncGenMode() {
 }
 
 const appInfo = ref<AppVO | null>(null)
+/** 是否 workflow beta 应用（仅 is_beta=1 时展示首轮工作流进度卡片） */
+const appIsBeta = ref(0)
 const loadingApp = ref(false)
+
+function syncAppIsBeta(isBeta?: number | null) {
+  appIsBeta.value = isBeta === 1 ? 1 : 0
+}
+
+function isAppWorkflowBeta(): boolean {
+  return appIsBeta.value === 1
+}
 
 // 是否为该应用创建者 / 管理员，用于控制是否允许继续对话生成
 const isOwner = computed(() => {
@@ -1689,6 +1699,27 @@ function isFirstSessionAssistantMessage(m: ChatMessage): boolean {
   return firstAssistant?.id === m.id
 }
 
+/** 应用生命周期内最早的一条助手消息（首轮创建应用时的 AI 回复） */
+function isFirstAppAssistantMessage(m: ChatMessage): boolean {
+  if (m.role !== 'assistant') return false
+  const firstAssistant = displayMessages.value.find((item) => item.role === 'assistant')
+  if (!firstAssistant) return false
+  return firstAssistant.id === m.id && firstAssistant.createTime === m.createTime
+}
+
+/** 当前是否已有历史/会话中的助手回复（用于判断是否为首轮生成） */
+function hasExistingAssistantMessages(): boolean {
+  return displayMessages.value.some((item) => item.role === 'assistant')
+}
+
+/** 是否展示工作流进度卡片：仅 is_beta=1 的工作流应用 + 全应用首条助手消息 */
+function shouldShowWorkflowCard(m: ChatMessage): boolean {
+  if (m.role !== 'assistant') return false
+  if (!isAppWorkflowBeta()) return false
+  if (!isFirstAppAssistantMessage(m)) return false
+  return computeWorkflowStepsForMessage(m).length > 0
+}
+
 function normalizeFirstRoundMarkdownText(text: string): string {
   if (!text) return ''
   let normalized = text.replace(/\r\n/g, '\n')
@@ -1732,7 +1763,7 @@ function stripVisualEditModelOnlyHint(text: string): string {
   return t
 }
 
-function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
+function computeWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
   if (m.role !== 'assistant') return []
   const historyMode = isHistoryMessage(m)
   const streaming = isStreamActiveForMessage(m)
@@ -1760,6 +1791,11 @@ function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
     m.cachedWorkflowSteps = normalized
   }
   return normalized
+}
+
+function getWorkflowStepsForMessage(m: ChatMessage): WorkflowStepRow[] {
+  if (!shouldShowWorkflowCard(m)) return []
+  return computeWorkflowStepsForMessage(m)
 }
 
 function getWorkflowLatestStepForMessage(m: ChatMessage): WorkflowStepRow | null {
@@ -2005,7 +2041,7 @@ function stopStream(streamId?: string) {
       const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
       if (msg?.uiState && meta.sseCarry) {
         const { uiText, newSteps, mermaidErrorNotice } = flushAssistantSseCarry(meta.sseCarry)
-        if (newSteps.length) {
+        if (newSteps.length && isFirstAppAssistantMessage(msg)) {
           msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, newSteps)
         }
         if (mermaidErrorNotice) {
@@ -2047,7 +2083,7 @@ function stopStream(streamId?: string) {
         const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
         if (msg?.uiState && meta.sseCarry) {
           const { uiText, newSteps, mermaidErrorNotice } = flushAssistantSseCarry(meta.sseCarry)
-          if (newSteps.length) {
+          if (newSteps.length && isFirstAppAssistantMessage(msg)) {
             msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, newSteps)
           }
           if (mermaidErrorNotice) {
@@ -2138,7 +2174,7 @@ function appendAssistantChunkToStream(streamId: string, chunk: string) {
     }
     const filtered = filterAssistantSseChunkForUi(meta.sseCarry, chunk)
     uiText = filtered.uiText
-    if (filtered.newSteps.length) {
+    if (filtered.newSteps.length && isFirstAppAssistantMessage(msg)) {
       msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, filtered.newSteps)
     }
     if (filtered.mermaidErrorNotice) {
@@ -2210,6 +2246,7 @@ async function sendMessage(text?: string) {
   appendUserMessage(visibleUserContent)
   const streamId = createStreamId()
   const assistantMessageId = nextMessageId++
+  const enableWorkflowCard = isAppWorkflowBeta() && !hasExistingAssistantMessages()
   sessionMessages.value.push({
     id: assistantMessageId,
     role: 'assistant',
@@ -2217,16 +2254,16 @@ async function sendMessage(text?: string) {
     streamStartedAt: Date.now(),
     uiState: createAssistantUiState(),
     streamId,
-    workflowStreamStartedAt: genMode.value === 'workflow' ? Date.now() : undefined,
-    // workflow 模式下先放入“初始化”占位步骤，避免首个工作流卡片延迟到首条 [workflow] SSE 后才出现。
-    workflowSteps: genMode.value === 'workflow' ? [{ step: 1, label: '初始化' }] : [],
+    workflowStreamStartedAt: enableWorkflowCard ? Date.now() : undefined,
+    // 仅首轮工作流生成展示进度卡片：先放入“初始化”占位，避免首条 [workflow] SSE 到达前空白。
+    workflowSteps: enableWorkflowCard ? [{ step: 1, label: '初始化' }] : [],
   })
   activeStreamMeta.value = {
     ...activeStreamMeta.value,
     [streamId]: {
       assistantMessageId,
       sseCarry: { carry: '' },
-      mode: genMode.value === 'workflow' ? 'workflow' : 'legacy',
+      mode: isAppWorkflowBeta() ? 'workflow' : 'legacy',
     },
   }
   activeStreamOrder.value = [...activeStreamOrder.value, streamId]
@@ -2253,7 +2290,7 @@ async function sendMessage(text?: string) {
       message: prompt,
     })
     const apiBase = API_BASE_URL.replace(/\/$/, '')
-    const endpoint = genMode.value === 'workflow' ? '/chat/gen/workflow' : '/chat/gen/code'
+    const endpoint = isAppWorkflowBeta() ? '/chat/gen/workflow' : '/chat/gen/code'
     const url = `${apiBase}${endpoint}?${query.toString()}`
 
     const es = new EventSource(url, { withCredentials: true })
@@ -2269,6 +2306,7 @@ async function sendMessage(text?: string) {
         const step = Number(payload?.step)
         const label = String(payload?.label ?? '').trim()
         if (!Number.isFinite(step) || !label) return
+        if (!isFirstAppAssistantMessage(msg)) return
         msg.workflowSteps = mergeWorkflowSteps(msg.workflowSteps, [{ step, label }])
       } catch {
         // ignore malformed workflow-step payload
@@ -2403,6 +2441,7 @@ async function loadChatHistory(lastCreateTime?: string) {
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
       const page = res.data.data
+      syncAppIsBeta(page?.isBeta)
       const records = page?.records ?? []
       if (isLoadMore) {
         loadedHistoryRecords.value = dedupHistoryRecords([...records, ...loadedHistoryRecords.value])
@@ -2454,6 +2493,7 @@ async function loadAppInfo() {
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
       appInfo.value = res.data.data
+      syncAppIsBeta(appInfo.value.isBeta)
       if (appInfo.value.hasGeneratedCode) {
         hasGenerated.value = true
       }
@@ -2698,7 +2738,7 @@ onBeforeUnmount(() => {
                         {{ getThinkingStatusText(m) }}
                       </div>
                       <div
-                        v-if="m.role === 'assistant' && getWorkflowStepsForMessage(m).length > 0"
+                        v-if="shouldShowWorkflowCard(m)"
                         class="workflow-steps-shell"
                         :class="{ 'workflow-steps-shell--collapsed': isWorkflowCollapsed(m) }"
                       >

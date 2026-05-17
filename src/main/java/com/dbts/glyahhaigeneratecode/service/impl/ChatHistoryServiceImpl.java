@@ -10,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.model.DTO.ChatHistoryQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
+import com.dbts.glyahhaigeneratecode.model.VO.AppChatHistoryPageVO;
 import com.dbts.glyahhaigeneratecode.model.VO.UserChatHistoryItemVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ChatHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
@@ -152,7 +153,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
 
     @Override
-    public Page<ChatHistory> listAppChatHistoryByPage(Long appId, int pageSize,
+    public AppChatHistoryPageVO listAppChatHistoryByPage(Long appId, int pageSize,
                                                       LocalDateTime lastCreateTime,
                                                       User loginUser) {
         // 1. 校验应用 id、分页大小与登录态,得到可继续鉴权与查库的前置条件
@@ -181,7 +182,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 4. 为 workflow AI 行追加阶段状态标记,得到前端可直接渲染绿红灰态的回显文本
         // 从数据库中查到workflow生成的AI message,删掉给后面加上状态
         ChatHistorySchemaMigrationSupport.appendWorkflowStageStatusForHistoryPage(page);
-        return page;
+        return AppChatHistoryPageVO.from(page, app.getIsBeta());
     }
 
 

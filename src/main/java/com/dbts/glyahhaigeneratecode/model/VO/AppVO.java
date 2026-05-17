@@ -81,6 +81,11 @@ public class AppVO implements Serializable {
      */
     private Boolean hasGeneratedCode;
 
+    /**
+     * 是否 beta 应用（workflow）：0-否，1-是
+     */
+    private Integer isBeta;
+
     private static final long serialVersionUID = 1L;
 }
 

@@ -23,6 +23,8 @@ import {
 import { UserLoginStore } from '@/stores/UserLogin'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 import { normalizeDeployUrl } from '@/utils/deployUrl'
+import AppGenPipelineBadge from '@/components/app/AppGenPipelineBadge.vue'
+import { isAppWorkflowBetaFromApp, syncGenModeStorageForApp } from '@/utils/appGenPipeline'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -396,7 +398,12 @@ function handleGoodPageChange(page: number, pageSize: number) {
 
 function goChat(app: AppVO) {
   if (!app.id) return
-  router.push({ name: 'app-chat', params: { id: app.id } })
+  syncGenModeStorageForApp(app.id, app.isBeta)
+  router.push({
+    name: 'app-chat',
+    params: { id: app.id },
+    query: isAppWorkflowBetaFromApp(app) ? { genMode: 'workflow' } : {},
+  })
 }
 
 function goEdit(app: AppVO) {
@@ -767,9 +774,14 @@ onMounted(() => {
                   @error="(e) => ((e.target as HTMLImageElement).src = defaultBgUrl)"
                 />
               </div>
+              <AppGenPipelineBadge
+                class="app-gen-pipeline-badge"
+                size="compact"
+                :is-beta="app.isBeta"
+              />
               <div
                 v-if="isAppDeployed(app)"
-                class="app-deployed-mark"
+                class="app-deployed-mark app-deployed-mark--stacked"
                 aria-label="已部署"
               >
                 <span class="app-deployed-mark__glow" aria-hidden="true" />
@@ -785,14 +797,15 @@ onMounted(() => {
                   <span class="meta-value">{{ formatDateTime(app.updateTime) }}</span>
                 </div>
               </div>
-              <div class="app-info">
-                <div class="app-name-line">
-                  <span class="app-name">{{ app.appName || '未命名应用' }}</span>
-                  <ATag v-if="app.priority && app.priority >= 99" color="gold" size="small">
-                    精选
-                  </ATag>
-                </div>
-                <div class="app-meta">
+              <div class="my-app-card__footer">
+                <div class="app-info">
+                  <div class="app-name-line">
+                    <span class="app-name">{{ app.appName || '未命名应用' }}</span>
+                    <ATag v-if="app.priority && app.priority >= 99" color="gold" size="small">
+                      精选
+                    </ATag>
+                  </div>
+                  <div class="app-meta">
                   <div class="app-meta-type">
                     <span class="app-meta-type-label">生成类型</span>
                     <span class="app-meta-type-tag">
@@ -814,6 +827,7 @@ onMounted(() => {
                 <AButton size="small" type="link" @click="handleUndeploy(app)">
                   下线
                 </AButton>
+              </div>
               </div>
             </ACard>
           </template>
@@ -1696,6 +1710,48 @@ onMounted(() => {
   box-shadow:
     0 14px 34px rgba(15, 23, 42, 0.12),
     0 0 0 1px rgba(13, 148, 136, 0.16) inset;
+}
+
+
+.app-gen-pipeline-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+}
+
+.my-app-card {
+  display: flex;
+  flex-direction: column;
+  padding-top: 0;
+}
+
+.my-app-card :deep(.ant-card-body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 248px;
+  padding: 10px 12px 12px;
+}
+
+.my-app-card__footer {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  width: 100%;
+}
+
+.my-app-card .app-info {
+  flex: 0 0 auto;
+}
+
+.my-app-card .app-actions {
+  margin-top: 8px;
+  padding-bottom: 0;
+}
+
+.app-deployed-mark--stacked {
+  top: 42px;
 }
 
 .app-deployed-mark {

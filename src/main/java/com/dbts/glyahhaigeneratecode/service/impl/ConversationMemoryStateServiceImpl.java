@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -447,6 +448,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
                     .roundId(roundId)
                     .manifestJson(json)
                     .filesCount(manifest.items().size())
+                    .createdAt(LocalDateTime.now())
                     .build();
             snapshotHistoryMapper.insert(row);
             Long id = row.getId();

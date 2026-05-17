@@ -33,7 +33,7 @@ export function chatHistoryAppAppIdUsingGet({
 }) {
   const { appId: param0, ...queryParams } = params;
 
-  return request<API.BaseResponsePageChatHistory>(
+  return request<API.BaseResponseAppChatHistoryPage>(
     `/chatHistory/app/${param0}`,
     {
       method: 'GET',
