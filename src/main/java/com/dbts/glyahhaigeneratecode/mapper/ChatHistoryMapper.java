@@ -25,12 +25,6 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
             """)
     String selectChatHistoryMessageDataType();
 
-    @Select("""
-            SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chat_history' AND COLUMN_NAME = 'message'
-            """)
-    Long selectChatHistoryMessageCharMaxLength();
-
     @Update("""
             ALTER TABLE chat_history ADD COLUMN auditAction varchar(16) NOT NULL DEFAULT 'SKIP' COMMENT '审查动作：ALLOW/REJECT/SKIP' AFTER userId
             """)

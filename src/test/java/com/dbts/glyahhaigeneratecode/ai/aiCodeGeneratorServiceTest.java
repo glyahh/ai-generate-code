@@ -17,14 +17,14 @@ class aiCodeGeneratorServiceTest {
 
     @Test
     void generateCodeHTML() {
-        HtmlCodeResult Result = aiCodeGeneratorService.generateCodeHTML("生成一个介绍glyahh的网站,越短越好");
+        HtmlCodeResult Result = aiCodeGeneratorService.generateCodeHTML(0L, "生成一个介绍glyahh的网站,越短越好");
         Assertions.assertNotNull(Result);
         System.out.println(Result);
     }
 
     @Test
     void generateCodeMultiFile() {
-        MultiFileCodeResult Result = aiCodeGeneratorService.generateCodeMultiFile("生成一个介绍glyahh的网站,越短越好");
+        MultiFileCodeResult Result = aiCodeGeneratorService.generateCodeMultiFile(0L, "生成一个介绍glyahh的网站,越短越好");
         Assertions.assertNotNull(Result);
         System.out.println(Result);
     }

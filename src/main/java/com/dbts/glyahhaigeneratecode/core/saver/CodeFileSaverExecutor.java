@@ -24,13 +24,16 @@ public class CodeFileSaverExecutor {
      *
      * @param codeGenTypeEnum 生成类型（HTML / MULTI_FILE）
      * @param codeResult      代码结果，HTML 时为 HtmlCodeResult，MULTI_FILE 时为 MultiFileCodeResult
+     * @param appId           应用主键，用于拼输出目录名
      * @return 保存后的目录对象
      */
     public File execute(CodeGenTypeEnum codeGenTypeEnum, Object codeResult, Long appId) {
+        // 1. 校验生成类型非空
         if (codeGenTypeEnum == null) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
         try {
+            // 2. 分支强转并调用对应 Template.save
             return switch (codeGenTypeEnum) {
                 case HTML -> htmlCodeFileSaverTemplate.save((HtmlCodeResult) codeResult, appId);
                 case MULTI_FILE -> multiFileCodeFileSaverTemplate.save((MultiFileCodeResult) codeResult, appId);
@@ -40,6 +43,7 @@ public class CodeFileSaverExecutor {
                 }
             };
         } catch (MyException e) {
+            // 3. 捕获后统一加上「代码保存失败」前缀，便于日志与前端提示
             throw new MyException(ErrorCode.SYSTEM_ERROR, "代码保存失败: " + e.getMessage());
         }
     }

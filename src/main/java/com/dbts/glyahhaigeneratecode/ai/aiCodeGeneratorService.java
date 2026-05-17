@@ -11,39 +11,61 @@ import reactor.core.publisher.Flux;
 public interface aiCodeGeneratorService {
     /**
      * 返回用户提示词的输出单个HTML文件
-     * @param userMessage
-     * @return
+     * @param appId 会话记忆 id，与文件工具 {@code @ToolMemoryId} 对齐
+     * @param userMessage 用户输入
+     * @return 解析结果
      */
     @SystemMessage(fromResource = "Prompt/Single_File_Prompt.txt")
-    HtmlCodeResult generateCodeHTML(String userMessage);
+    HtmlCodeResult generateCodeHTML(@MemoryId Long appId, @UserMessage String userMessage);
 
 
     /**
      * 返回用户提示词的输出多个文件
-     * @param userMessage
-     * @return
+     * @param appId 会话记忆 id
+     * @param userMessage 用户输入
+     * @return 解析结果
      */
     @SystemMessage(fromResource = "Prompt/Various_File_Prompt.txt")
-    MultiFileCodeResult generateCodeMultiFile(String userMessage);
+    MultiFileCodeResult generateCodeMultiFile(@MemoryId Long appId, @UserMessage String userMessage);
 
 
 
     /**
      * 返回用户提示词的输出单个HTML文件
-     * @param userMessage
-     * @return
+     * @param appId 会话记忆 id
+     * @param userMessage 用户输入
+     * @return 流式片段
      */
     @SystemMessage(fromResource = "Prompt/Single_File_Prompt.txt")
-    Flux<String> generateCodeHTMLStream(String userMessage);
+    Flux<String> generateCodeHTMLStream(@MemoryId Long appId, @UserMessage String userMessage);
 
 
     /**
      * 返回用户提示词的输出多个文件
-     * @param userMessage
-     * @return
+     * @param appId 会话记忆 id
+     * @param userMessage 用户输入
+     * @return 流式片段
      */
     @SystemMessage(fromResource = "Prompt/Various_File_Prompt.txt")
-    Flux<String> generateCodeMultiFileStream(String userMessage);
+    Flux<String> generateCodeMultiFileStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 返回用户提示词的输出单个HTML文件（TokenStream 流式）。
+     * @param appId 会话记忆 id
+     * @param userMessage 用户输入
+     * @return TokenStream 流
+     */
+    @SystemMessage(fromResource = "Prompt/Single_File_Prompt.txt")
+    TokenStream generateCodeHTMLTokenStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 返回用户提示词的输出多个文件（TokenStream 流式）。
+     * @param appId 会话记忆 id
+     * @param userMessage 用户输入
+     * @return TokenStream 流
+     */
+    @SystemMessage(fromResource = "Prompt/Various_File_Prompt.txt")
+    TokenStream generateCodeMultiFileTokenStream(@MemoryId Long appId, @UserMessage String userMessage);
 
 
     /**

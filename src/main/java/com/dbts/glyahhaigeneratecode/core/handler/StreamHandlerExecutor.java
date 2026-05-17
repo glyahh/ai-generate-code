@@ -28,14 +28,18 @@ public class StreamHandlerExecutor {
     private final WorkflowTextStreamHandler workflowTextStreamHandler = new WorkflowTextStreamHandler();
 
     /**
-     * 创建流处理器并处理聊天历史记录
+     * 按生成类型与工作流开关选择具体 Handler，并在流上挂载「轮次结束」统计回调
      *
-     * @param originFlux         原始流
-     * @param chatHistoryService 聊天历史服务
-     * @param appId              应用ID
-     * @param loginUser          登录用户
-     * @param codeGenType        代码生成类型
-     * @return 处理后的流
+     * @param originFlux         原始 SSE 文本流
+     * @param chatHistoryService 会话服务（含 onRoundCompleted）
+     * @param appId              应用 ID
+     * @param loginUser          当前用户
+     * @param codeGenType        HTML / MULTI_FILE / VUE
+     * @param workflowMode       是否走 LangGraph 工作流文本处理器
+     * @param firstRound         是否首轮（Vue JSON 处理器用）
+     * @param userMessage        用户原文（Vue JSON 处理器用）
+     * @param roundId            当前对话轮次 ID（非法则跳过 onRoundCompleted）
+     * @return 包装后的 Flux
      */
     public Flux<String> doExecute(Flux<String> originFlux,
                                   ChatHistoryService chatHistoryService,
@@ -45,6 +49,7 @@ public class StreamHandlerExecutor {
         AtomicBoolean once = new AtomicBoolean(false);
         int[] bufferChars = new int[]{0};
 
+        // 1. 根据 workflowMode / codeGenType 选择具体流处理器实现
         Flux<String> handledFlux;
         if (workflowMode) {
             handledFlux = workflowTextStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
@@ -59,7 +64,7 @@ public class StreamHandlerExecutor {
 
         return handledFlux
                 .doOnNext(chunk -> {
-                    // 1. 聚合流式输出长度，用于 onRoundCompleted 指标上报。
+                    // 1. 累加已输出字符数，供 onRoundCompleted 上报
                     if (chunk != null) {
                         bufferChars[0] += chunk.length();
                     }
@@ -77,6 +82,7 @@ public class StreamHandlerExecutor {
                     if (!once.compareAndSet(false, true)) {
                         return;
                     }
+                    // 2. roundId 非法则跳过统计回调（避免脏数据）
                     if (roundId == null || roundId <= 0) {
                         log.warn("onRoundCompleted 跳过，roundId 非法，appId={}, roundId={}", appId, roundId);
                         return;

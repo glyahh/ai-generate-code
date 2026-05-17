@@ -18,15 +18,20 @@ public abstract class CodeFileSaverTemplate<T> {
     private static final String Base_ROOT_PATH = "D:\\mainJava\\all Code\\program\\glyahh-ai-generate-code\\temp\\code_output";
 
     /**
-     * 统一入口：保存代码并返回所在目录
+     * 统一入口：校验 → 建目录 → 子类写文件 → 返回目录 File
      *
      * @param codeResult 待保存的代码模型（HtmlCodeResult / MultiFileCodeResult）
+     * @param appId      应用主键，参与目录名拼接
      * @return 保存后的目录对象
      */
     public final File save(T codeResult, Long appId) {
+        // 1. 校验 codeResult 非空
         validateInput(codeResult);
+        // 2. 生成并创建唯一输出目录
         String uniqueDirName = buildUniqueDirName(appId);
+        // 3. 子类在目录内写入具体文件
         saveFiles(uniqueDirName, codeResult);
+        // 4. 返回目录 File 供上层记录路径
         return new File(uniqueDirName);
     }
 
@@ -36,38 +41,47 @@ public abstract class CodeFileSaverTemplate<T> {
      * @param codeResult 待保存的代码模型
      */
     private void validateInput(T codeResult) {
+        // 1. null 表示无可保存内容，直接 PARAMS_ERROR
         if (codeResult == null) {
             throw new MyException(ErrorCode.PARAMS_ERROR, "保存的代码对象为空");
         }
     }
 
     /**
-     * 构建唯一目录并创建，返回目录路径
+     * 构建唯一目录并创建，返回目录路径字符串
      *
+     * @param appId 应用主键
      * @return 唯一目录路径字符串
      */
     private String buildUniqueDirName(Long appId) {
+        // 1. 拼路径（尚未 mkdir）
         String uniqueDirName = buildUniqueDirPath(appId);
+        // 2. 确保目录存在
         ensureDirExists(uniqueDirName);
+        // 3. 返回路径
         return uniqueDirName;
     }
 
     /**
-     * 拼出唯一目录路径（未创建）
+     * 拼出唯一目录路径（此时尚未创建目录）
      *
+     * @param appId 应用主键
      * @return 目录路径字符串
      */
     private String buildUniqueDirPath(Long appId) {
+        // 1. 取子类业务类型（html / multi_file 等）
         String bizType = getBizType();
+        // 2. 根路径 + 分隔符 + 类型_appId
         return Base_ROOT_PATH + File.separator + bizType + "_" + appId;
     }
 
     /**
-     * 根据路径创建目录
+     * 根据路径创建目录（不存在则创建）
      *
      * @param dirPath 目录路径
      */
     private void ensureDirExists(String dirPath) {
+        // 1. Hutool 递归创建目录
         FileUtil.mkdir(dirPath);
     }
 
@@ -94,11 +108,13 @@ public abstract class CodeFileSaverTemplate<T> {
      * @param content  文件内容
      */
     protected void writeSingleFile(String Path, String fileName, String content) {
-        // 若生成内容为空，认为本次生成失败，抛出异常避免覆盖掉已有文件
+        // 1. 空内容禁止写入，避免覆盖掉用户已有文件
         if (StrUtil.isBlank(content)) {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成的 " + fileName + " 内容为空，已终止写入");
         }
+        // 2. 拼完整路径
         String filePath = Path + File.separator + fileName;
+        // 3. UTF-8 落盘
         FileUtil.writeString(content, filePath, "UTF-8");
     }
 }

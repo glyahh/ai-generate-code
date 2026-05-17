@@ -24,14 +24,19 @@ public class HtmlCodeParser implements CodeParser<HtmlCodeResult> {
     @Override
     public HtmlCodeResult parse(String codeContent) {
         HtmlCodeResult result = new HtmlCodeResult();
-        // 提取 HTML 代码
+        // 1. 优先用 ```html 围栏正则抽取正文
         String htmlCode = extractHtmlCode(codeContent);
+        // 2. 命中且非空：trim 后写入结果并直接返回（标准路径）
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
-        } else {
-            // 如果没有找到代码块，将整个内容作为 HTML，避免额外调试文案污染页面
-            result.setHtmlCode(codeContent.trim());
+            return result;
         }
+        // 3. 未命中围栏：仅在整段文本「看起来像 HTML」时才落盘，避免自然语言污染 index.html
+        String raw = codeContent == null ? "" : codeContent.trim();
+        if (looksLikeHtmlDocument(raw)) {
+            result.setHtmlCode(raw);
+        }
+        // 4. 返回结果（可能 html 仍为空，由上层决定是否可保存）
         return result;
     }
 
@@ -42,10 +47,35 @@ public class HtmlCodeParser implements CodeParser<HtmlCodeResult> {
      * @return HTML代码，未匹配到则 null
      */
     private String extractHtmlCode(String content) {
+        // 1. null 直接视为无代码
+        if (content == null) {
+            return null;
+        }
+        // 2. 正则匹配第一个 ```html ... ``` 块
         Matcher matcher = HTML_CODE_PATTERN.matcher(content);
+        // 3. 命中返回捕获组，否则 null
         if (matcher.find()) {
             return matcher.group(1);
         }
         return null;
+    }
+
+    /**
+     * 判定文本是否像可执行 HTML 文档。
+     * @param content 原始文本
+     * @return true-可按 HTML 落盘；false-视为非代码文本
+     */
+    private boolean looksLikeHtmlDocument(String content) {
+        // 1. 空串不算 HTML
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        String lower = content.toLowerCase();
+        // 2. 完整文档特征：DOCTYPE 或 <html
+        if (lower.contains("<!doctype html") || lower.contains("<html")) {
+            return true;
+        }
+        // 3. 片段特征：常见块级标签，降低把纯文本当 HTML 的概率
+        return lower.contains("<body") || lower.contains("<div") || lower.contains("<section");
     }
 }

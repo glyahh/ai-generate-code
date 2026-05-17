@@ -95,6 +95,7 @@ public class aiCodeGeneratorServiceFactory {
 
     /**
      * 获取 ai 代码生成器服务（支持首轮工具白名单控制 + 可选缓存命中压缩）
+     *
      */
     public aiCodeGeneratorService getAiCodeGeneratorService(Long appId,
                                                             CodeGenTypeEnum codeGenTypeEnum,
@@ -105,6 +106,13 @@ public class aiCodeGeneratorServiceFactory {
             log.info("首轮 VUE 对话，创建 writeFile-only AI 服务，appId={}", appId);
             return createAiCodeGeneratorServiceForEachApp(appId, codeGenTypeEnum, true);
         }
+
+        // 首轮 HTML/MULTI_FILE 且上层判定为「纯流式首轮」（非编辑意图）：不绑定任何文件工具，与历史逻辑一致
+        if (firstRound && (codeGenTypeEnum == CodeGenTypeEnum.HTML || codeGenTypeEnum == CodeGenTypeEnum.MULTI_FILE)) {
+            log.info("首轮 HTML/MULTI_FILE 纯流式（不绑定文件工具），appId={}", appId);
+            return createAiCodeGeneratorServiceForEachApp (appId, codeGenTypeEnum, true);
+        }
+
         // 从缓存中获取 aiCodeGeneratorService
         String cacheKey = buildServiceCacheKey(appId, codeGenTypeEnum);
         aiCodeGeneratorService service = serviceCache.getIfPresent(cacheKey);
@@ -200,20 +208,24 @@ public class aiCodeGeneratorServiceFactory {
             case HTML, MULTI_FILE -> {
                 // 使用多例模式的 streamingModel 解决并发问题
                 StreamingChatModel prototypeStreamingChatModel = applicationContext.getBean("prototypeStreamingChatModel", StreamingChatModel.class);
-                yield AiServices.builder(aiCodeGeneratorService.class)
-                    .chatModel(chatModel)
-                    .streamingChatModel(prototypeStreamingChatModel)
-                    .chatMemory(build)
-                    // 允许 HTML / MULTI_FILE 在“修改/可视化编辑”场景通过工具增量改文件
-                    // （不改变默认输出规则，是否调用工具由 system prompt + 用户意图决定）
-                    .tools((Object[]) toolManager.getAllTools())
-                    .maxSequentialToolsInvocations(20)
-                    .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
-                            ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())
-                    )
-                    .inputGuardrails(new PromptSafetyInputGuardrail())
-                    // .outputGuardrails(new RetryOutputGuardrail(outputGuardrailsConfig.getMaxRetries())) 为了能够流式输出,先注释
-                    .build();
+                // firstRound=true：首轮纯流式，不注册工具；firstRound=false：仅开放读/改/删/exit，不含 writeFile
+                var htmlMultiBuilder = AiServices.builder(aiCodeGeneratorService.class)
+                        .chatModel(chatModel)
+                        .streamingChatModel(prototypeStreamingChatModel)
+                        .chatMemoryProvider(memoryId -> build)
+                        .maxSequentialToolsInvocations(20)
+                        .hallucinatedToolNameStrategy(hallucinatedToolNameStrategy ->
+                                ToolExecutionResultMessage.from(hallucinatedToolNameStrategy, "There is no toolbar named: " + hallucinatedToolNameStrategy.name())
+                        )
+                        .inputGuardrails(new PromptSafetyInputGuardrail());
+                // 第一轮直接返回构造好的service
+                if (firstRound) {
+                    yield htmlMultiBuilder.build();
+                }
+                // 后面几轮返回构造好的特殊工具集
+                yield htmlMultiBuilder
+                        .tools((Object[]) toolManager.getHtmlMultiEditTools())
+                        .build();
             }
             default -> throw new MyException(114514, "不支持的代码生成类型");
         };

@@ -35,7 +35,7 @@ public abstract class BaseTool {
     /**
      * 生成工具请求时的返回值（显示给用户）
      *
-     * @return 工具请求显示内容
+     * @return 格式化的工具请求显示内容
      */
     public String generateToolRequestResponse() {
         return String.format("\n\n[选择工具] %s\n", getDisplayName());

@@ -32,8 +32,11 @@ public class ExitTool extends BaseTool {
         return "不要继续调用工具，可以输出最终结果了";
     }
 
+    /**
+     * 不向 SSE/聊天正文追加「执行结束」类占位；模型侧仍以 {@link #exit()} 返回值为准。
+     */
     @Override
     public String generateToolExecutedResult(JSONObject arguments) {
-        return "\n\n[执行结束]\n\n";
+        return "";
     }
 }

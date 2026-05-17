@@ -33,7 +33,7 @@ import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
  * responses and responses with the request to execute one or multiple tools.
  */
 @Internal
-class AiServiceStreamingResponseHandler implements StreamingChatResponseHandler {
+public class AiServiceStreamingResponseHandler implements StreamingChatResponseHandler {
     private static final Logger LOG = LoggerFactory.getLogger(AiServiceStreamingResponseHandler.class);
 
     private final ChatExecutor chatExecutor;
@@ -111,6 +111,19 @@ class AiServiceStreamingResponseHandler implements StreamingChatResponseHandler 
             return;
         }
         partialToolExecutionRequestHandler.accept(index, partialToolExecutionRequest);
+    }
+
+    /**
+     * OpenAiStreamingChatModel 在 SSE 收尾阶段会对已累积的 tool_calls 调用本方法；
+     * 若不在此转发到 TokenStream，则仅依赖 {@link #onPartialToolExecutionRequest} 的链路在
+     * 「整段 arguments 只在最后一帧出现」或上游从不拆 arguments delta 时会完全收不到工具流式回调。
+     */
+    @Override
+    public void onCompleteToolExecutionRequest(int index, ToolExecutionRequest completeToolExecutionRequest) {
+        if (completeToolExecutionRequestHandler == null) {
+            return;
+        }
+        completeToolExecutionRequestHandler.accept(index, completeToolExecutionRequest);
     }
 
     @Override

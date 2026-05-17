@@ -1,5 +1,7 @@
 package com.dbts.glyahhaigeneratecode.exception;
 
+import lombok.SneakyThrows;
+
 public class ThrowUtils {
 
     /**
@@ -11,6 +13,19 @@ public class ThrowUtils {
     public static void throwIf(boolean condition, RuntimeException runtimeException) {
         if (condition) {
             throw runtimeException;
+        }
+    }
+
+    /**
+     * 条件成立则抛异常
+     *
+     * @param condition        条件
+     * @param exception 异常
+     */
+    @SneakyThrows
+    public static void throwIf(boolean condition, Exception exception) {
+        if (condition) {
+            throw exception;
         }
     }
 

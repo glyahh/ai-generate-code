@@ -7,7 +7,9 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -71,5 +73,23 @@ public class ToolManager {
             ThrowUtils.throwIf(true,  ErrorCode.OPERATION_ERROR, "writeFile 工具未注册");
         }
         return new BaseTool[]{writeFileTool};
+    }
+
+    /**
+     * HTML / 多文件：非首轮或「修改意图」对话使用的工具集（不含 writeFile）。
+     * 首轮纯流式生成由模型直接输出 fenced 代码块落盘，不通过写入文件工具。
+     */
+    public BaseTool[] getHtmlMultiEditTools() {
+        String[] names = {"readFile", "readDir", "modifyFile", "deleteFile", "exit"};
+        List<BaseTool> list = new ArrayList<>(names.length);
+        for (String name : names) {
+            BaseTool t = toolMap.get(name);
+            if (t != null) {
+                list.add(t);
+            } else {
+                log.warn("HTML/MULTI 编辑工具集缺少已注册工具: {}", name);
+            }
+        }
+        return list.toArray(new BaseTool[0]);
     }
 }

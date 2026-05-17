@@ -26,11 +26,11 @@ public class MultiFileCodeParser implements CodeParser<MultiFileCodeResult> {
     @Override
     public MultiFileCodeResult parse(String codeContent) {
         MultiFileCodeResult result = new MultiFileCodeResult();
-        // 提取各类代码
+        // 1. 分别用 html / css / js 三个 Pattern 从原文提取 fenced 块
         String htmlCode = extractCodeByPattern(codeContent, HTML_CODE_PATTERN);
         String cssCode = extractCodeByPattern(codeContent, CSS_CODE_PATTERN);
         String jsCode = extractCodeByPattern(codeContent, JS_CODE_PATTERN);
-        // 设置 HTML / CSS / JS 代码，本身保持干净，不追加调试文案，避免在页面中露出
+        // 2. 仅当某类代码非空才 set，避免空串覆盖、也避免把说明文字写进文件
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
         }
@@ -40,6 +40,7 @@ public class MultiFileCodeParser implements CodeParser<MultiFileCodeResult> {
         if (jsCode != null && !jsCode.trim().isEmpty()) {
             result.setJsCode(jsCode.trim());
         }
+        // 3. 返回聚合对象（字段可能部分为空，由保存层再校验）
         return result;
     }
 
@@ -51,7 +52,13 @@ public class MultiFileCodeParser implements CodeParser<MultiFileCodeResult> {
      * @return 提取的代码，未匹配到则 null
      */
     private String extractCodeByPattern(String content, Pattern pattern) {
+        // 1. null 无内容可匹配
+        if (content == null) {
+            return null;
+        }
+        // 2. 用传入 pattern 做 find
         Matcher matcher = pattern.matcher(content);
+        // 3. 命中返回 group(1)，否则 null
         if (matcher.find()) {
             return matcher.group(1);
         }

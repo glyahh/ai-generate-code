@@ -26,31 +26,38 @@ public class CodeParser {
     private static final Pattern JS_CODE_PATTERN = Pattern.compile("```(?:js|javascript)\\s*\\n([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
 
     /**
-     * 解析 HTML 单文件代码
+     * 从模型输出中解析 HTML 单文件代码（优先 fenced 代码块，否则整段兜底）
+     *
+     * @param codeContent 原始文本（可能含 ```html 围栏）
+     * @return 解析后的 HtmlCodeResult
      */
     public static HtmlCodeResult parseHtmlCode(String codeContent) {
         HtmlCodeResult result = new HtmlCodeResult();
-        // 提取 HTML 代码
+        // 1. 用 ```html 围栏正则尝试抽取中间正文
         String htmlCode = extractHtmlCode(codeContent);
+        // 2. 命中围栏则写入 trim 后的 HTML；否则把整段 trim 后当作 HTML（兼容无围栏输出）
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
         } else {
-            // 如果没有找到代码块，将整个内容作为 HTML，避免调试文案污染页面
             result.setHtmlCode(codeContent.trim());
         }
+        // 3. 返回结果对象
         return result;
     }
 
     /**
-     * 解析多文件代码（HTML + CSS + JS）
+     * 从模型输出中解析多文件代码（HTML、CSS、JS 三个 fenced 块）
+     *
+     * @param codeContent 原始文本（可能含 html/css/js 围栏）
+     * @return 解析后的 MultiFileCodeResult
      */
     public static MultiFileCodeResult parseMultiFileCode(String codeContent) {
         MultiFileCodeResult result = new MultiFileCodeResult();
-        // 提取各类代码
+        // 1. 分别用三个正则从同一段文本里提取 html / css / js 围栏内容
         String htmlCode = extractCodeByPattern(codeContent, HTML_CODE_PATTERN);
         String cssCode = extractCodeByPattern(codeContent, CSS_CODE_PATTERN);
         String jsCode = extractCodeByPattern(codeContent, JS_CODE_PATTERN);
-        // 设置 HTML / CSS / JS 代码，保持内容干净
+        // 2. 仅当某类代码非空时才 set，避免用空串覆盖已有字段语义
         if (htmlCode != null && !htmlCode.trim().isEmpty()) {
             result.setHtmlCode(htmlCode.trim());
         }
@@ -60,17 +67,20 @@ public class CodeParser {
         if (jsCode != null && !jsCode.trim().isEmpty()) {
             result.setJsCode(jsCode.trim());
         }
+        // 3. 返回聚合结果
         return result;
     }
 
     /**
-     * 提取HTML代码内容
+     * 用 HTML 围栏正则从原始文本中提取第一个匹配到的代码体
      *
      * @param content 原始内容
-     * @return HTML代码
+     * @return 匹配到的 HTML 字符串；未匹配返回 null
      */
     private static String extractHtmlCode(String content) {
+        // 1. 对全文做 matcher
         Matcher matcher = HTML_CODE_PATTERN.matcher(content);
+        // 2. 找到则返回捕获组 1（围栏内正文）；否则 null
         if (matcher.find()) {
             return matcher.group(1);
         }
@@ -78,14 +88,16 @@ public class CodeParser {
     }
 
     /**
-     * 根据正则模式提取代码
+     * 用给定 Pattern 从原始文本中提取第一个匹配到的代码体
      *
      * @param content 原始内容
-     * @param pattern 正则模式
-     * @return 提取的代码
+     * @param pattern 已编译的正则（需含捕获组 1）
+     * @return 捕获组内容；未匹配返回 null
      */
     private static String extractCodeByPattern(String content, Pattern pattern) {
+        // 1. 创建 matcher
         Matcher matcher = pattern.matcher(content);
+        // 2. find 成功则返回 group(1)
         if (matcher.find()) {
             return matcher.group(1);
         }

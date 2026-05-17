@@ -29,15 +29,19 @@ public class vueProjectBuilder {
     private VueSfcSyntaxCheckFixTool vueSfcSyntaxCheckFixTool;
 
     /**
-     * 创建虚拟线程，并执行 Vue 项目构建任务
-     * @param projectPath
+     * 在虚拟线程中异步执行 {@link #buildProject(String)}，不阻塞调用方
+     *
+     * @param projectPath Vue 项目根目录绝对路径
      */
     public void BuildVirtualThreadForBuildVue (String projectPath){
+        // 1. 创建命名虚拟线程并启动
         Thread.ofVirtual().name("vue-builder-"+System.currentTimeMillis())
                 .start(() -> {
                     try {
+                        // 2. 同步执行构建
                         buildProject(projectPath);
                     } catch (Exception e) {
+                        // 3. 失败转统一业务异常（线程内抛出由未捕获处理器处理）
                         throw new MyException(ErrorCode.SYSTEM_ERROR, "Vue项目代码构建失败: " + e.getMessage());
                     }
                 });
@@ -51,12 +55,13 @@ public class vueProjectBuilder {
      * @return 是否构建成功
      */
     public boolean buildProject (String projectPath) {
+        // 1. 校验项目目录存在
         File projectDir = new File(projectPath);
         if (!projectDir.exists() || !projectDir.isDirectory()) {
             log.error("项目目录不存在: {}", projectPath);
             return false;
         }
-        // 检查 package.json 是否存在
+        // 2. 校验 package.json
         File packageJson = new File(projectDir, "package.json");
         if (!packageJson.exists()) {
             log.error("package.json 文件不存在: {}", packageJson.getAbsolutePath());
@@ -64,7 +69,7 @@ public class vueProjectBuilder {
         }
         log.info("开始构建 Vue 项目: {}", projectPath);
 
-        // A1: clean old dist before each build
+        // 3. 清理旧 dist，避免脏产物
         File distDirToClean = new File(projectDir, "dist");
         if (distDirToClean.exists()) {
             try {
@@ -75,32 +80,31 @@ public class vueProjectBuilder {
             }
         }
 
-        // [LLM 缺陷兜底] Vite 配置文件常见缺陷：使用 fileURLToPath 但未 import，导致构建直接失败。
-        // 证据：ReferenceError: fileURLToPath is not defined（vite 加载 bundled config 时抛出）。
+        // 4. 尝试自动修复常见 vite.config 缺 import 问题
         try {
             fixViteConfigIfNeeded(projectDir);
         } catch (Exception e) {
             log.warn("Vite 配置自动修复失败（将继续尝试构建）: {}", e.getMessage());
         }
 
-        // 执行 npm install
+        // 5. npm install
         if (!executeNpmInstall(projectDir)) {
             log.error("npm install 执行失败");
             return false;
         }
 
-        // [SFC parse 校验] build 前先用 @vue/compiler-sfc 做语法校验；失败则调用工具修复后重试。
+        // 6. SFC 语法预检（失败可尝试工具修复后再检）
         if (!validateVueSfcBeforeBuild(projectDir)) {
             log.error("Vue SFC 语法校验失败，终止构建");
             return false;
         }
 
-        // 执行 npm run build
+        // 7. npm run build
         if (!executeNpmBuild(projectDir)) {
             log.error("npm run build 执行失败");
             return false;
         }
-        // 验证 dist 目录是否生成
+        // 8. 确认 dist 已生成
         File distDir = new File(projectDir, "dist");
         if (!distDir.exists()) {
             log.error("构建完成但 dist 目录未生成: {}", distDir.getAbsolutePath());
@@ -116,6 +120,7 @@ public class vueProjectBuilder {
      * 说明：Node ESM 环境下 fileURLToPath 不在全局对象中，不显式 import 会导致构建失败。
      */
     private void fixViteConfigIfNeeded(File projectDir) throws Exception {
+        // 1. 收集可能存在的 vite 配置文件路径
         List<Path> candidates = new ArrayList<>();
         candidates.add(projectDir.toPath().resolve("vite.config.ts"));
         candidates.add(projectDir.toPath().resolve("vite.config.js"));
@@ -123,14 +128,16 @@ public class vueProjectBuilder {
         candidates.add(projectDir.toPath().resolve("vite.config.cjs"));
 
         for (Path p : candidates) {
+            // 2. 文件不存在则跳过
             if (!Files.isRegularFile(p)) {
                 continue;
             }
             String raw = Files.readString(p, StandardCharsets.UTF_8);
-            // 只在“使用了 fileURLToPath 且没有任何相关 import”时补丁，避免误改用户自定义配置
+            // 3. 未使用 fileURLToPath 则无需补丁
             if (!raw.contains("fileURLToPath")) {
                 continue;
             }
+            // 4. 已有 import 则跳过
             boolean hasFileUrlToPathImport =
                     raw.contains("import { fileURLToPath") ||
                     raw.contains("import{fileURLToPath") ||
@@ -139,8 +146,8 @@ public class vueProjectBuilder {
                 continue;
             }
 
+            // 5. 在文件头插入 import（兼容 shebang）
             String patchLine = "import { fileURLToPath } from 'node:url'\n";
-            // 插入到顶部；若存在 shebang（极少见）则放在 shebang 后
             String fixed = raw.startsWith("#!")
                     ? raw.replaceFirst("^#!.*\\R", "$0" + patchLine)
                     : patchLine + raw;
@@ -154,26 +161,48 @@ public class vueProjectBuilder {
 
 
     /**
-     * 执行 npm install 命令
+     * 在项目目录执行 npm install
+     *
+     * @param projectDir 项目根目录
+     * @return 退出码 0 为成功
      */
     private boolean executeNpmInstall(File projectDir) {
+        // 1. 组装 npm(.cmd) install 命令
         log.info("执行 npm install...");
         String npmInstall = String.format("%s install", buildCommand("npm"));
-        return executeCommand(projectDir, npmInstall, 300); // 5分钟超时
+        // 2. 交给通用执行器（5 分钟超时）
+        return executeCommand(projectDir, npmInstall, 300);
     }
 
     /**
-     * 执行 npm run build 命令
+     * 在项目目录执行 npm run build
+     *
+     * @param projectDir 项目根目录
+     * @return 退出码 0 为成功
      */
     private boolean executeNpmBuild(File projectDir) {
+        // 1. 组装 npm run build
         log.info("执行 npm run build...");
         String npmBuild = String.format("%s run build", buildCommand("npm"));
-        return executeCommand(projectDir, npmBuild, 180); // 3分钟超时
+        // 2. 执行命令（3 分钟超时）
+        return executeCommand(projectDir, npmBuild, 180);
     }
 
+    /**
+     * 当前 JVM 是否跑在 Windows 上
+     *
+     * @return true 表示 Windows
+     */
     private boolean isWindows() {
         return System.getProperty("os.name").toLowerCase().contains("windows");
     }
+
+    /**
+     * Windows 下为 npm/node 追加 .cmd 后缀，其它 OS 原样返回
+     *
+     * @param baseCommand 如 npm
+     * @return 可传给 ProcessBuilder 的命令前缀
+     */
     private String buildCommand(String baseCommand) {
         if (isWindows()) {
             return baseCommand + ".cmd";
@@ -187,13 +216,14 @@ public class vueProjectBuilder {
      * - 校验失败：调用 {@link VueSfcSyntaxCheckFixTool} 修复 src 目录下所有 .vue 文件，然后再校验一次
      */
     private boolean validateVueSfcBeforeBuild(File projectDir) {
+        // 1. 首次全量 SFC parse
         log.info("执行 Vue SFC parse 语法校验（@vue/compiler-sfc）...");
         boolean ok = executeVueSfcParseCheck(projectDir, 60);
         if (ok) {
             return true;
         }
 
-        // 证据：vite 构建日志常见 "Element is missing end tag" 等 SFC 解析错误
+        // 2. 失败则调用修复工具扫 src 下 .vue
         try {
             VueSfcSyntaxCheckFixTool.FixSummary summary =
                     vueSfcSyntaxCheckFixTool.fixProjectVueFiles(projectDir.getAbsolutePath());
@@ -203,6 +233,7 @@ public class vueProjectBuilder {
             log.warn("Vue SFC 语法修复工具执行失败（仍会继续二次校验）: {}", e.getMessage());
         }
 
+        // 3. 修复后再跑一次 parse 检查
         log.info("执行 Vue SFC parse 二次语法校验（修复后）...");
         return executeVueSfcParseCheck(projectDir, 60);
     }
@@ -216,9 +247,10 @@ public class vueProjectBuilder {
      */
     private boolean executeVueSfcParseCheck(File projectDir, int timeoutSeconds) {
         try {
+            // 1. 落地临时 node 脚本到项目根（避免命令行引号被 shell 拆坏）
             Path scriptFile = projectDir.toPath().resolve(".gly_sfc_check.cjs");
             Files.writeString(scriptFile, buildSfcCheckScript(), StandardCharsets.UTF_8);
-            // Windows 上常见的是 node.exe，而不是 node.cmd；这里固定使用 node，避免 CreateProcess error=2
+            // 2. node 执行该脚本
             String cmd = String.format("%s %s", "node", scriptFile.getFileName().toString());
             return executeCommand(projectDir, cmd, timeoutSeconds);
         } catch (Exception e) {
@@ -227,12 +259,18 @@ public class vueProjectBuilder {
         }
     }
 
+//    /**
+//     * 生成用于遍历 src/**/*.vue 并调用 @vue/compiler-sfc 的 Node 脚本源码
+//     *
+//     * @return .cjs 脚本内容
+//     */
+    // 用于修复极少数缺少<style>标签无法执行npm run build的情况
     private String buildSfcCheckScript() {
         return """
                 const fs = require('fs');
                 const path = require('path');
                 const { parse } = require('@vue/compiler-sfc');
-                
+
                 function walk(dir, out) {
                   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
                     const p = path.join(dir, e.name);
@@ -240,16 +278,16 @@ public class vueProjectBuilder {
                     else if (e.isFile() && p.endsWith('.vue')) out.push(p);
                   }
                 }
-                
+
                 const srcDir = path.join(process.cwd(), 'src');
                 if (!fs.existsSync(srcDir)) {
                   console.log('[sfc-check] src 目录不存在，跳过');
                   process.exit(0);
                 }
-                
+
                 const files = [];
                 walk(srcDir, files);
-                
+
                 let hasError = false;
                 for (const f of files) {
                   const code = fs.readFileSync(f, 'utf8');
@@ -266,7 +304,7 @@ public class vueProjectBuilder {
                     }
                   }
                 }
-                
+
                 process.exit(hasError ? 1 : 0);
                 """;
     }
@@ -283,16 +321,17 @@ public class vueProjectBuilder {
      */
     private boolean executeCommand(File workingDir, String command, int timeoutSeconds) {
         try {
+            // 1. 记录即将执行的命令
             log.info("在目录 {} 中执行命令: {}", workingDir.getAbsolutePath(), command);
 
-            // 通过 ProcessBuilder 读取 stdout/stderr，避免只看退出码无法定位真实失败原因
+            // 2. 启动子进程（stdout/stderr 合并）
             ProcessBuilder processBuilder = new ProcessBuilder(command.split("\\s+"));
             processBuilder.directory(workingDir);
-            processBuilder.redirectErrorStream(true); // 合并 stdout/stderr，便于统一记录
+            processBuilder.redirectErrorStream(true);
 
             Process process = processBuilder.start();
 
-            // 读取命令输出，限制最大长度避免日志/内存过大
+            // 3. 异步读输出，防止缓冲区塞满导致死锁
             StringBuilder output = new StringBuilder();
             int maxOutputChars = 200_000;
             Thread readerThread = new Thread(() -> {
@@ -304,12 +343,11 @@ public class vueProjectBuilder {
                         }
                     }
                 } catch (Exception ignored) {
-                    // 读取日志失败不影响主流程
                 }
             });
             readerThread.start();
 
-            // 等待进程完成，设置超时
+            // 4. 带超时等待结束
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 log.error("命令执行超时（{}秒），强制终止进程", timeoutSeconds);
@@ -319,6 +357,7 @@ public class vueProjectBuilder {
                 return false;
             }
             readerThread.join(2000);
+            // 5. 根据退出码判断成败
             int exitCode = process.exitValue();
             if (exitCode == 0) {
                 log.info("命令执行成功: {}", command);
@@ -333,13 +372,23 @@ public class vueProjectBuilder {
         }
     }
 
+    /**
+     * 日志输出截断，防止单条过长
+     *
+     * @param input  原始字符串
+     * @param maxLen 最大长度
+     * @return 截断后的文本
+     */
     private String truncate(String input, int maxLen) {
+        // 1. null 当空
         if (input == null) {
             return "";
         }
+        // 2. 未超长原样
         if (input.length() <= maxLen) {
             return input;
         }
+        // 3. 截断并提示
         return input.substring(0, maxLen) + "\n...（输出已截断）";
     }
 

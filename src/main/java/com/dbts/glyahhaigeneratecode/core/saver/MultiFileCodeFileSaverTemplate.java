@@ -18,6 +18,7 @@ public class MultiFileCodeFileSaverTemplate extends CodeFileSaverTemplate<MultiF
      */
     @Override
     protected String getBizType() {
+        // 1. 多文件业务类型前缀
         return CodeGenTypeEnum.MULTI_FILE.getValue();
     }
 
@@ -29,8 +30,11 @@ public class MultiFileCodeFileSaverTemplate extends CodeFileSaverTemplate<MultiF
      */
     @Override
     protected void saveFiles(String uniqueDirName, MultiFileCodeResult codeResult) {
+        // 1. 写 HTML 入口
         writeSingleFile(uniqueDirName, "index.html", codeResult.getHtmlCode());
+        // 2. 写样式
         writeSingleFile(uniqueDirName, "style.css", codeResult.getCssCode());
+        // 3. 写脚本
         writeSingleFile(uniqueDirName, "script.js", codeResult.getJsCode());
     }
 }

@@ -85,7 +85,7 @@ create table if not exists user_app_apply
 create table chat_history
 (
     id          bigint auto_increment comment 'id' primary key,
-    message     text                               not null comment '消息',
+    message     longtext                           not null comment '消息',
     messageType varchar(32)                        not null comment '消息类型：user/ai/error',
     appId       bigint                             not null comment '应用id',
     userId      bigint                             not null comment '创建用户id',
@@ -101,4 +101,6 @@ create table chat_history
 
 alter table chat_history add column if not exists auditAction varchar(16) default 'SKIP' not null comment '审查动作：ALLOW/REJECT/SKIP' after userId;
 alter table chat_history add column if not exists auditHitRule varchar(64) default 'NONE' not null comment '命中审查规则编码' after auditAction;
+-- 历史库若仍为 text(约 64KB)，升级为 longtext，避免长 AI 回复写库失败
+alter table chat_history modify column message longtext not null comment '消息';
 

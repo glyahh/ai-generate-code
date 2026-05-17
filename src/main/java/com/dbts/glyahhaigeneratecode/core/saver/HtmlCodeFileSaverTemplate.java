@@ -18,6 +18,7 @@ public class HtmlCodeFileSaverTemplate extends CodeFileSaverTemplate<HtmlCodeRes
      */
     @Override
     protected String getBizType() {
+        // 1. 与 CodeGenTypeEnum 对齐，供父类拼目录名
         return CodeGenTypeEnum.HTML.getValue();
     }
 
@@ -29,6 +30,7 @@ public class HtmlCodeFileSaverTemplate extends CodeFileSaverTemplate<HtmlCodeRes
      */
     @Override
     protected void saveFiles(String uniqueDirName, HtmlCodeResult codeResult) {
+        // 1. 单文件模式只写 index.html
         writeSingleFile(uniqueDirName, "index.html", codeResult.getHtmlCode());
     }
 }
