@@ -18,12 +18,16 @@ import requests
 from bs4 import BeautifulSoup
 from ruamel.yaml import YAML
 
+from model_usage.catalog import normalize_model_name
 
 ROOT = Path(__file__).resolve().parents[2]
 RESOURCES_DIR = ROOT / "src" / "main" / "resources"
 APP_YML = RESOURCES_DIR / "application.yml"
 LOCAL_YML = RESOURCES_DIR / "application-local.yml"
-DEFAULT_CONFIG = Path(__file__).resolve().parent / "config.example.yml"
+def _default_quota_config() -> str:
+    from quota.persist import materialize_platforms_config
+
+    return str(materialize_platforms_config())
 
 yaml = YAML()
 yaml.preserve_quotes = True
@@ -114,7 +118,7 @@ def collect_model_mappings(
 
     items: List[ModelMapping] = []
     for function_key in sorted(merged_blocks.keys()):
-        model_name = str(merged_blocks[function_key].get("model-name", "")).strip()
+        model_name = normalize_model_name(str(merged_blocks[function_key].get("model-name", "")))
         source = "application-local.yml" if function_key in local_blocks else "application.yml"
         items.append(
             ModelMapping(
@@ -212,15 +216,21 @@ def fetch_quota_by_api(platform: Dict[str, Any], context: Dict[str, Any], timeou
 
 
 def has_firecrawl_cli() -> bool:
-    return shutil.which("firecrawl") is not None
+    from quota.scrapers.http_text import has_firecrawl_cli as _has
+
+    return _has()
 
 
 def scrape_with_firecrawl(url: str) -> str:
+    from quota.scrapers.http_text import _firecrawl_argv, firecrawl_subprocess_env
+
     with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tmp:
         out_path = Path(tmp.name)
     try:
-        cmd = ["firecrawl", "scrape", url, "-o", str(out_path)]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        cmd = _firecrawl_argv("scrape", url, "-o", str(out_path))
+        subprocess.run(
+            cmd, check=True, capture_output=True, text=True, env=firecrawl_subprocess_env()
+        )
         return out_path.read_text(encoding="utf-8", errors="ignore")
     finally:
         if out_path.exists():
@@ -284,17 +294,9 @@ def fetch_page_text(url: str, timeout: int, headers: Optional[Dict[str, str]] = 
 
 
 def find_quota_for_model(raw_text: str, model_name: str) -> str:
-    escaped = re.escape(model_name)
-    patterns = [
-        rf"{escaped}[\s\S]{{0,120}}?(剩[^<\n\r/]*?[\d,]+(?:\.\d+)?\s*/\s*共?\s*[\d,]+(?:\.\d+)?)",
-        rf"{escaped}[\s\S]{{0,120}}?(remaining[^<\n\r]*?[\d,]+(?:\.\d+)?)",
-        rf"{escaped}[\s\S]{{0,120}}?([\d,]+(?:\.\d+)?\s*/\s*[\d,]+(?:\.\d+)?)",
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, raw_text, re.IGNORECASE)
-        if m:
-            return re.sub(r"\s+", " ", m.group(1)).strip()
-    return ""
+    from quota.parsers.text_match import find_quota_for_model as _find
+
+    return _find(raw_text, model_name)
 
 
 def parse_replacements(raw_values: List[str]) -> Dict[str, str]:
@@ -405,20 +407,15 @@ def check_quota_by_url_data(
             for m in mappings
         ]
 
-    results: List[Dict[str, str]] = []
-    for m in mappings:
-        quota = find_quota_for_model(raw_text, m["model_name"])
-        results.append(
-            {
-                "function": m["function"],
-                "model_name": m["model_name"],
-                "platform": "url-direct",
-                "quota": quota,
-                "method": "URL",
-                "error": "" if quota else "未在页面中匹配到额度信息（可能需要登录态或页面为动态渲染）",
-            }
-        )
-    return results
+    from quota.parsers.text_match import rows_from_page_text
+
+    return rows_from_page_text(
+        mappings,
+        raw_text,
+        platform="url-direct",
+        method="URL",
+        empty_error="未在页面中匹配到额度信息（可能需要登录态或页面为动态渲染）",
+    )
 
 
 def check_quota_from_text_data(
@@ -426,21 +423,16 @@ def check_quota_from_text_data(
     app_yml: str = str(APP_YML),
     local_yml: str = str(LOCAL_YML),
 ) -> List[Dict[str, str]]:
+    from quota.parsers.text_match import rows_from_page_text
+
     mappings = list_models_data(app_yml, local_yml)
-    results: List[Dict[str, str]] = []
-    for m in mappings:
-        quota = find_quota_for_model(page_text, m["model_name"])
-        results.append(
-            {
-                "function": m["function"],
-                "model_name": m["model_name"],
-                "platform": "clipboard-text",
-                "quota": quota,
-                "method": "CLIPBOARD",
-                "error": "" if quota else "未匹配到额度，请确认复制的是“模型用量”页面可见文本",
-            }
-        )
-    return results
+    return rows_from_page_text(
+        mappings,
+        page_text,
+        platform="clipboard-text",
+        method="CLIPBOARD",
+        empty_error="未匹配到额度，请确认复制的是“模型用量”页面可见文本",
+    )
 
 
 def preview_replace_data(
@@ -525,8 +517,9 @@ def list_models_cmd(args: argparse.Namespace) -> int:
 
 
 def check_quota_cmd(args: argparse.Namespace) -> int:
+    config = args.config or _default_quota_config()
     results = check_quota_data(
-        config=args.config,
+        config=config,
         app_yml=args.app_yml,
         local_yml=args.local_yml,
         platform=args.platform,
@@ -552,8 +545,15 @@ def replace_model_cmd(args: argparse.Namespace) -> int:
     print_table(changes, ["function", "from", "to", "target_file"])
 
     if args.apply:
-        apply_replace_data(replacements, args.app_yml, args.local_yml)
+        written = apply_replace_data(replacements, args.app_yml, args.local_yml)
+        from model_usage.migrate import migrate_model_usage_for_replace
+
+        usage_result = migrate_model_usage_for_replace(
+            written, args.app_yml, args.local_yml
+        )
         print("已写回配置文件")
+        if usage_result.changed:
+            print(usage_result.message)
     else:
         print("当前为 dry-run，未写入文件。使用 --apply 执行落盘。")
     return 0
@@ -570,7 +570,11 @@ def build_parser() -> argparse.ArgumentParser:
     p1.set_defaults(func=list_models_cmd)
 
     p2 = sub.add_parser("check-quota", help="检查模型额度（API优先，失败回退WEB）")
-    p2.add_argument("--config", default=str(DEFAULT_CONFIG), help="额度查询配置文件路径")
+    p2.add_argument(
+        "--config",
+        default=None,
+        help="额度 platforms 配置（默认由 quota.local.env 生成，无 local 则用内置默认）",
+    )
     p2.add_argument("--platform", default="", help="只查询指定平台名称")
     p2.add_argument("--timeout", type=int, default=20, help="请求超时秒数")
     p2.add_argument("--json", dest="output_json", action="store_true", help="JSON 输出")

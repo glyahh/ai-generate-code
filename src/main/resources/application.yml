@@ -91,7 +91,7 @@ langchain4j:
 
     # 1. 单页 HTML、多文件（HTML / MULTI_FILE）的流式生成
     streaming-chat-model:
-      model-name: glm-5 # qwen3.6-plus
+      model-name: qwen3.5-35b-a3b # qwen3.6-plus
       # Qwen3.5-Plus 的兼容模式地址，以阿里云百炼为例
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       # 你的 Qwen API Key
@@ -167,9 +167,9 @@ aliyun:
 # springdoc-openapi 配置
 springdoc:
   group-configs:
-    - group: 'default'
-      paths-to-match: '/**'
-      packages-to-scan: com.dbts.glyahhaigeneratecode.controller
+  - group: 'default'
+    paths-to-match: '/**'
+    packages-to-scan: com.dbts.glyahhaigeneratecode.controller
 # knife4j 配置项
 knife4j:
   enable: true
