@@ -53,13 +53,16 @@ public class ConversationMemoryRef implements Serializable {
     private String refId;
 
     /**
-     * 相对项目根的文件路径
+     * 相对项目根的文件路径（如 package-lock.json）。
+     * 由 {@link com.dbts.glyahhaigeneratecode.service.impl.ConversationMemoryStateServiceImpl#archiveLargeChangedFilesIfNeeded}
+     * 从生成目录磁盘读取后写入，非 npm 直接写库。
      */
     @Column("filePath")
     private String filePath;
 
     /**
-     * 归档时的文件全文（LONGTEXT）
+     * 归档时的文件全文（LONGTEXT），与磁盘上该路径文件内容一致。
+     * 同步热缓存到 Redis 键 {@code cm:ref:{refId}}，过期后从此列回源。
      */
     @Column("content")
     private String content;

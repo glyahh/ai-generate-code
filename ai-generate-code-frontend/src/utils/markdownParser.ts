@@ -29,6 +29,14 @@ const OPEN_FENCE_LINE_RE = /(?:^|[\r\n])( {0,3})(`{3,})([^\r\n]*)\r?\n/
 /**
  * 判断一行是否为「闭合围栏行」：缩进后反引号串长度 >= minRun，且其后仅有空白
  */
+/**
+ * 围栏代码块正文：去掉闭合围栏行之前的尾部空白。
+ * 避免模型在 content 末尾多带 `\n` 时，UI 在最后一行代码下多出一行空行。
+ */
+export function normalizeFenceCodeContent(content: string): string {
+  return content.replace(/\s+$/, '')
+}
+
 export function isClosingFenceLine(lineRaw: string, minRun: number): boolean {
   const line = lineRaw.replace(/\r$/, '')
   let i = 0
@@ -141,7 +149,7 @@ export function parseMarkdownWithCode(text: string): TextSegment[] {
     }
 
     const codeRaw = text.slice(contentStart, close.closeLineStart)
-    const codeContent = codeRaw.replace(/\s+$/, '')
+    const codeContent = normalizeFenceCodeContent(codeRaw)
 
     segments.push({
       type: 'code',

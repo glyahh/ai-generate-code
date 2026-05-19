@@ -1,4 +1,8 @@
-import { findClosingFenceLineRange, parseMarkdownWithCode } from '@/utils/markdownParser'
+import {
+  findClosingFenceLineRange,
+  normalizeFenceCodeContent,
+  parseMarkdownWithCode,
+} from '@/utils/markdownParser'
 
 /**
  * 工具执行结果里：从全文提取「[工具调用] 写入文件」块
@@ -47,7 +51,7 @@ export function extractToolWriteFileBlocksFromText(text: string): Array<{
       continue
     }
 
-    const content = text.slice(contentStart, close.closeLineStart)
+    const content = normalizeFenceCodeContent(text.slice(contentStart, close.closeLineStart))
     out.push({ filePath, lang, content })
 
     searchFrom = close.consumeEnd

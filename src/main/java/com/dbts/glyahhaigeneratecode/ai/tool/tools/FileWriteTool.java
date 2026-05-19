@@ -55,6 +55,9 @@ public class FileWriteTool extends BaseTool {
                 Files.createDirectories(parentDir);
             }
 
+            if (content != null) {
+                content = content.stripTrailing();
+            }
             if (relativeFilePath.endsWith(".vue")) {
                 content = repairVueSfcContent(content);
             }
@@ -82,6 +85,8 @@ public class FileWriteTool extends BaseTool {
 
     @Override
     public String generateToolExecutedResult(JSONObject arguments) {
+        String rawContent = arguments.getStr("content");
+        String displayContent = rawContent == null ? "" : rawContent.stripTrailing();
         return String.format("""
             [工具调用] %s %s
             文件内容:
@@ -90,7 +95,7 @@ public class FileWriteTool extends BaseTool {
             ```
             """, getDisplayName(), arguments.getStr("relativeFilePath"),
                 FileUtil.getSuffix(arguments.getStr("relativeFilePath")),
-                arguments.getStr("content"));
+                displayContent);
     }
 
     private String sanitizeVueContent(String content) {
@@ -130,7 +135,7 @@ public class FileWriteTool extends BaseTool {
         result = appendMissingClosingTag(result, "<template", "</template>");
         result = appendMissingClosingTag(result, "<script", "</script>");
         result = appendMissingClosingTag(result, "<style", "</style>");
-        return result.stripTrailing() + System.lineSeparator();
+        return result.stripTrailing();
     }
 
     private String appendMissingClosingTag(String text, String openingTagPrefix, String closingTag) {

@@ -35,7 +35,7 @@ public interface ConversationMemoryConstant {
     /**
      * 从磁盘按页读取单文件时的默认页大小（字符量级截断）。
      */
-    int DEFAULT_PAGE_SIZE = 9000;
+    int DEFAULT_PAGE_SIZE = 10000;
 
     /**
      * 注入块中「文件头」摘要单行/前缀的最大字符数。

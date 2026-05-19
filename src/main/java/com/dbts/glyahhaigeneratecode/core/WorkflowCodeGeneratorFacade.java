@@ -12,6 +12,7 @@ import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.WorkflowChunkDedupState;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -107,9 +108,11 @@ public class WorkflowCodeGeneratorFacade {
                         sink.complete();
                         return;
                     }
-                    // 7. 有错误信息则推送失败行
+                    // 7. 有错误信息则推送用户可见失败文案
                     if (finalContext.getErrorMessage() != null && !finalContext.getErrorMessage().isBlank()) {
-                        sink.next("[workflow] 生成失败: " + finalContext.getErrorMessage() + "\n");
+                        log.warn("workflow finished with error, appId={}, codeGenType={}, detail={}",
+                                appId, codeGenTypeEnum, finalContext.getErrorMessage());
+                        sink.next(ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE + "\n");
                     } else {
                         // 8. 非 Vue：把落盘后的源码以 fenced 形式回显，便于会话记忆与前端展示
                         String generatedDir = finalContext.getGeneratedCodeDir();

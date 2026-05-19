@@ -2,6 +2,7 @@ package com.dbts.glyahhaigeneratecode.controller;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
@@ -63,11 +64,13 @@ public class ChatToGenCodeController {
     private Flux<ServerSentEvent<String>> toSseEvent(Flux<String> contentFlux) {
         Flux<String> safeContentFlux = contentFlux.onErrorResume(e -> {
             log.error("SSE 流式生成失败，将以错误文本+done事件收尾。", e);
-            return Flux.just("[生成失败] 代码生成流异常中断，请重试。");
+            return Flux.just(ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE);
         });
 
         return safeContentFlux
+                // 对每个 chunk 调用 toSseEvents，把列表里的每条 SSE 展开成流里的独立事件
                 .flatMapIterable(this::toSseEvents)
+                // 添加 结束 事件
                 .concatWith(Mono.just(
                         ServerSentEvent.<String>builder()
                                 .event("done")

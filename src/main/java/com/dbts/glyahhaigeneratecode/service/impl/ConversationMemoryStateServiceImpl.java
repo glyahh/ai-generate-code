@@ -155,6 +155,9 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         // 将redis的string(Json)格式转成map
         Map<String, Object> state = loadStateFromRedisOrDb(appId);
         List<String> changedFiles = parseChangedFiles(state.get("changedFilesJson"));
+        // TODO(memory-v4): 将 state 中的 softSummary/hardSummary 以 SystemMessage 注入 chatMemory，
+        //  用于长会话引导模型优先看 changedFiles / 调 readFile；需与 trySummarizeOldestRoundsIfNeeded 的合并策略协调，
+        //  避免摘要行覆盖或挤掉注入块。
 
         // 2. 按优先级排序注入文件列表：入口/配置/路由 -> changedFiles -> 其余补齐。
         Path root = resolveProjectRoot(appId, codeGenTypeEnum);
@@ -173,8 +176,8 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
             try {
                 // 获取相对路径
                 String relative = root.relativize(file).toString().replace('\\', '/');
-                // 根据路径到temp/下读取前9000字符的内容
-                String content = readFilePageWithCache(appId, relative, ConversationMemoryConstant.DEFAULT_PAGE_SIZE);
+                // 根据项目根目录读取前 pageSize 字符（与 manifest 扫描根一致，见 readFilePageWithCache）
+                String content = readFilePageWithCache(appId, root, relative, ConversationMemoryConstant.DEFAULT_PAGE_SIZE);
                 if (StrUtil.isBlank(content)) {
                     continue;
                 }
@@ -460,6 +463,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
 
     /**
      * 构建软/硬摘要。
+     * <p>仅写入 conversation_memory_state / cm:state，{@link #loadConversationMemoryStateAndInject} 尚未注入模型。</p>
      *
      * @param appId 应用 id
      * @return 摘要结果
@@ -527,7 +531,12 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
                 }
                 String refId = "ref-" + appId + "-" + roundId + "-" + sha256Hex(relative + ":" + content.substring(0, Math.min(2000, content.length())));
                 long bytes = content.getBytes(StandardCharsets.UTF_8).length;
+                // 写入 MySQL conversation_memory_ref：持久化本轮变更中的大文件全文（如 package-lock.json）。
+                // relative -> filePath，content -> content；真相源在 DB，Redis 仅为热缓存。
                 conversationMemoryRefMapper.insertIgnore(appId, roundId, refId, relative, content, bytes);
+                // TODO(memory-v4): 实现按 refId/filePath 从 cm:ref 或 conversation_memory_ref 读回并注入 ChatMemory；
+                //  当前仅归档，模型上下文不消费 ref。
+                // 写入 Redis cm:ref:{refId}：与上表 content 同文，TTL 见 conversation.memory.ref-ttl-seconds，过期后从 DB 回源。
                 cacheRefToRedis(refId, content);
                 archived++;
             } catch (Exception ignore) {
@@ -683,24 +692,28 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
     /**
      * 分页读取文件并使用 Redis page 缓存。
      *
-     * @param appId    应用 id
-     * @param relative 相对路径
-     * @param pageSize 分页大小
-     * @return 文件前一页
+     * @param appId       应用 id（Redis key 片段）
+     * @param projectRoot 生成项目根目录（如 temp/code_output/vue_project_{appId}）
+     * @param relative    相对 projectRoot 的路径
+     * @param pageSize    分页大小
+     * @return 文件前一页；读失败返回空串（不写 Redis）
      */
-    private String readFilePageWithCache(Long appId, String relative, int pageSize) throws IOException {
+    private String readFilePageWithCache(Long appId, Path projectRoot, String relative, int pageSize) throws IOException {
 
-        // 1. Redis 分页缓存 key：cm:page:{appId}:{相对路径}:{页号}，当前仅缓存第 0 页（文件头一段）
+        // 1. Redis 分页缓存 key：cm:page:{appId}:{相对路径}:{页号}，当前仅缓存第 0 页（文件头一段）；无 MySQL 表，仅存 Redis。
         String key = "cm:page:" + appId + ":" + relative + ":0";
         String cached = stringRedisTemplate.opsForValue().get(key);
         if (StrUtil.isNotBlank(cached)) {
             return cached;
         }
 
-        // 2. 落盘根目录 + 相对路径 → 绝对路径；normalize + startsWith 防止跳出输出根目录
-        Path root = Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR);
-        Path candidate = root.resolve(relative).normalize();
-        if (!candidate.startsWith(root) || !Files.isRegularFile(candidate)) {
+        if (projectRoot == null || !Files.isDirectory(projectRoot)) {
+            return "";
+        }
+        // 2. 项目根（与 buildManifest / collectInjectCandidates 一致）+ 相对路径；防止路径穿越
+        Path normalizedRoot = projectRoot.toAbsolutePath().normalize();
+        Path candidate = normalizedRoot.resolve(relative).normalize();
+        if (!candidate.startsWith(normalizedRoot) || !Files.isRegularFile(candidate)) {
             return "";
         }
 
@@ -725,6 +738,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         if (StrUtil.isBlank(refId) || content == null) {
             return;
         }
+        // Redis 热缓存：键 cm:ref:{refId}，值为归档文件全文（与 conversation_memory_ref.content 一致）。
         String key = "cm:ref:" + refId;
         stringRedisTemplate.opsForValue().set(key, content, properties.getRefTtlSeconds(), TimeUnit.SECONDS);
     }

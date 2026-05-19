@@ -811,7 +811,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             String latest = StrUtil.blankToDefault(latestAiMessages.getFirst().getMessage(), "");
             String latestLower = latest.toLowerCase(Locale.ROOT);
             // 3. 最新 AI 明确标记生成失败时不触发总结,得到避免在失败态继续压历史的语义
-            if (latestLower.contains("[workflow] 生成失败")) {
+            if (latestLower.contains("[workflow] 生成失败")
+                    || latest.contains(ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE)) {
                 return false;
             }
             // 4. 仅当最新 AI 含成功完成标记时返回 true,得到允许在下一轮 workflow 前做会话压缩的信号

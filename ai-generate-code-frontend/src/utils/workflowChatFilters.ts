@@ -1,3 +1,8 @@
+import {
+  GENERATION_FAILED_MESSAGE,
+  GENERATION_INTERRUPTED_MARKER,
+} from '@/utils/chatGenerationStatus'
+
 /** 从 SSE 片段中解析出的工作流步骤（与后端 CodeGenWorkflow 文案一致） */
 export type WorkflowStepStatus = 'success' | 'failed' | 'pending'
 export type WorkflowStepRow = { step: number; label: string; status?: WorkflowStepStatus }
@@ -82,6 +87,7 @@ const WORKFLOW_MARKER_RE = /\[(?:workflow(?:_stage_status|_notice)?)\]/i
 
 const WORKFLOW_HISTORY_SUCCESS_RE = /(代码生成完成|工作流结束|构建成功|生成完成|ready)/i
 const WORKFLOW_HISTORY_FAILED_RE = /(失败|异常|error|中断|出现问题|超时)/i
+const LEGACY_AI_ERROR_LINE_RE = /^AI回复失败[:：]/
 const WORKFLOW_STAGE_FAILED_RE: Record<WorkflowStageKey, RegExp> = {
   initializing: /(初始化|提示词增强|开始准备)/i,
   image_collecting: /(图片|收集|图像|插画|logo|架构图)/i,
@@ -478,6 +484,8 @@ export function stripAssistantNoiseLines(text: string): string {
     if (WORKFLOW_STEP_LINE_RE.test(t)) continue
     if (WORKFLOW_DONE_LINE_RE.test(t)) continue
     if (WORKFLOW_NOTICE_MERMAID_ERROR_RE.test(t)) continue
+    if (t === GENERATION_FAILED_MESSAGE || t === GENERATION_INTERRUPTED_MARKER) continue
+    if (LEGACY_AI_ERROR_LINE_RE.test(t)) continue
     if (INTERNAL_DIR_LINE_RE.test(t)) continue
     const stripped = stripInlineNoiseFragments(line)
     if (!stripped) continue

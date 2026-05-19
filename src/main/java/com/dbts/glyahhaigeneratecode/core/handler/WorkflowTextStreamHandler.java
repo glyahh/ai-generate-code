@@ -1,6 +1,7 @@
 package com.dbts.glyahhaigeneratecode.core.handler;
 
 import cn.hutool.core.util.StrUtil;
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -58,10 +59,14 @@ public class WorkflowTextStreamHandler {
                     chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
                 })
                 .doOnError(error -> {
-                    // 1. 出错路径写失败说明（仅一次）
+                    // 1. 出错路径写用户可见失败说明（仅一次）；真实异常仅打日志
                     if (persisted.compareAndSet(false, true)) {
-                        String errorMessage = "AI回复失败: " + error.getMessage();
-                        chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                        log.warn("workflow stream failed, appId={}, type={}", appId, error.getClass().getSimpleName(), error);
+                        chatHistoryService.addChatMessage(
+                                appId,
+                                ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE,
+                                ChatHistoryMessageTypeEnum.AI.getValue(),
+                                loginUser.getId());
                     }
                 })
                 .doFinally(signal -> {
@@ -71,7 +76,7 @@ public class WorkflowTextStreamHandler {
                         if (StrUtil.isNotBlank(partial)) {
                             chatHistoryService.addChatMessage(
                                     appId,
-                                    partial + "\n\n[中断]",
+                                    partial + "\n\n" + ChatHistoryConstant.GENERATION_INTERRUPTED_MARKER,
                                     ChatHistoryMessageTypeEnum.AI.getValue(),
                                     loginUser.getId()
                             );

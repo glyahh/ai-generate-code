@@ -22,6 +22,7 @@ import { UserLoginStore } from '@/stores/UserLogin'
 import {
   parseMarkdownWithCode,
   findLineAlignedClosingFenceInBuffer,
+  normalizeFenceCodeContent,
 } from '@/utils/markdownParser'
 import type { WorkflowHistoryOutcome, WorkflowStepRow } from '@/utils/workflowChatFilters'
 import {
@@ -46,6 +47,10 @@ import {
   type VisualSelectedElementInfo,
 } from '@/utils/visualWebsiteEditor'
 import { buildDeployUrlFromKey } from '@/utils/deployUrl'
+import {
+  injectGenerationStatusSegments,
+  type GenerationStatusSegmentInput,
+} from '@/utils/chatGenerationStatus'
 
 // 与全局请求保持一致：默认走当前页面 origin 下的 `/api`
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
@@ -146,6 +151,8 @@ type UiToolRequestSegment = {
   kind: 'tool_request'
   rawLabel: string
   toolName: string
+  /** pending 胶囊开始计时（流式 tool_request 创建时写入） */
+  createdAt?: number
 }
 type UiToolExecutedWriteFileSegment = {
   kind: 'tool_executed_write_file'
@@ -174,12 +181,15 @@ type UiToolExecutedSimpleToolSegment = {
   done: boolean
 }
 
+type UiGenerationStatusSegment = GenerationStatusSegmentInput
+
 type UiSegment =
   | UiMarkdownSegment
   | UiToolRequestSegment
   | UiToolExecutedWriteFileSegment
   | UiToolExecutedModifyFileSegment
   | UiToolExecutedSimpleToolSegment
+  | UiGenerationStatusSegment
 
 type ToolExecStage =
   | 'markdown'
@@ -224,6 +234,8 @@ const eventSourceMap = new Map<string, EventSource>()
 const activeStreamOrder = ref<string[]>([])
 const activeStreamMeta = ref<Record<string, ActiveStreamMeta>>({})
 const WORKFLOW_SLOW_HINT_DELAY_MS = 120_000
+const TOOL_WRITE_SHIMMER_TIER_2_MS = 15_000
+const TOOL_WRITE_SHIMMER_TIER_3_MS = 30_000
 const workflowNowTs = ref(Date.now())
 let workflowSlowHintTicker: number | null = null
 
@@ -1104,16 +1116,19 @@ function drainBufferToSegments(state: AssistantUiState) {
   if (!state.buffer) return
   if (state.stage === 'tool_exec_stream') {
     const tool = getActiveToolExecutedSegment(state)
-    if (tool) tool.content += state.buffer
-    else appendMarkdown(state, state.buffer)
+    if (tool) {
+      tool.content = normalizeFenceCodeContent(tool.content + state.buffer)
+    } else appendMarkdown(state, state.buffer)
   } else if (state.stage === 'tool_exec_modify_stream_before') {
     const seg = getActiveToolExecutedModifyFileSegment(state)
-    if (seg) seg.beforeContent += state.buffer
-    else appendMarkdown(state, state.buffer)
+    if (seg) {
+      seg.beforeContent = normalizeFenceCodeContent(seg.beforeContent + state.buffer)
+    } else appendMarkdown(state, state.buffer)
   } else if (state.stage === 'tool_exec_modify_stream_after') {
     const seg = getActiveToolExecutedModifyFileSegment(state)
-    if (seg) seg.afterContent += state.buffer
-    else appendMarkdown(state, state.buffer)
+    if (seg) {
+      seg.afterContent = normalizeFenceCodeContent(seg.afterContent + state.buffer)
+    } else appendMarkdown(state, state.buffer)
   } else {
     appendMarkdown(state, state.buffer)
   }
@@ -1137,6 +1152,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
       kind: 'tool_request',
       rawLabel: `[选择工具] ${normalizedName}`,
       toolName: normalizedName,
+      createdAt: Date.now(),
     })
     state.lastToolRequestName = normalizedName
   }
@@ -1239,6 +1255,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
             kind: 'tool_request',
             rawLabel: raw,
             toolName,
+            createdAt: Date.now(),
           })
           state.lastToolRequestName = toolName
         }
@@ -1405,7 +1422,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
 
       if (closeRange) {
         const codePart = state.buffer.slice(0, closeRange.codeEnd)
-        toolSeg.content += codePart
+        toolSeg.content = normalizeFenceCodeContent(toolSeg.content + codePart)
         toolSeg.done = true
         if (toolSeg.filePath) {
           recordGeneratedFile(toolSeg.filePath, toolSeg.language, toolSeg.content)
@@ -1472,7 +1489,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
       const closeRange = findLineAlignedClosingFenceInBuffer(state.buffer, minRun)
       if (closeRange) {
         const codePart = state.buffer.slice(0, closeRange.codeEnd)
-        seg.beforeContent += codePart
+        seg.beforeContent = normalizeFenceCodeContent(seg.beforeContent + codePart)
         seg.beforeDone = true
         state.buffer = state.buffer.slice(closeRange.consumeEnd)
         state.stage = 'tool_exec_modify_wait_after_fence'
@@ -1527,7 +1544,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
       const closeRange = findLineAlignedClosingFenceInBuffer(state.buffer, minRun)
       if (closeRange) {
         const codePart = state.buffer.slice(0, closeRange.codeEnd)
-        seg.afterContent += codePart
+        seg.afterContent = normalizeFenceCodeContent(seg.afterContent + codePart)
         seg.afterDone = true
         seg.done = true
 
@@ -1605,10 +1622,11 @@ function extractToolWriteFileBlocks(text: string): Array<{ filePath: string; lan
 function recordGeneratedFile(filePath: string, language: string | undefined, content: string) {
   const now = Date.now()
   const existing = generatedFileMap.value[filePath]
+  const normalizedContent = normalizeFenceCodeContent(content)
   const item: GeneratedFileItem = {
     path: filePath,
     language: language || existing?.language,
-    content,
+    content: normalizedContent,
     updatedAt: now,
   }
   generatedFileMap.value = {
@@ -1678,6 +1696,10 @@ function maybeInjectToolSelectHint(chunk: string) {
   }
 }
 
+function applyGenerationStatusToSegments(segments: UiSegment[], rawText: string): UiSegment[] {
+  return injectGenerationStatusSegments(segments, rawText) as UiSegment[]
+}
+
 function buildUiSegmentsFromFullText(fullText: string): UiSegment[] {
   const state = createAssistantUiState()
   processAssistantChunkIntoUiState(state, fullText ?? '')
@@ -1687,10 +1709,11 @@ function buildUiSegmentsFromFullText(fullText: string): UiSegment[] {
     state.buffer = ''
   }
   // 若异常情况下仍在 tool_exec_stream，则也视为未完成（允许历史里展示“未闭合”的工具卡片）
-  return state.segments.filter((s) => {
+  const segments = state.segments.filter((s) => {
     if (s.kind !== 'markdown') return true
     return !!s.content && s.content.trim().length > 0
   })
+  return applyGenerationStatusToSegments(segments, fullText ?? '')
 }
 
 function isFirstSessionAssistantMessage(m: ChatMessage): boolean {
@@ -1884,7 +1907,7 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
         }
       }
     }
-    return normalizeFirstRoundUiSegments(m, segs)
+    return normalizeFirstRoundUiSegments(m, applyGenerationStatusToSegments(segs, m.content ?? ''))
   }
   const version = buildUiRenderVersion(m)
   const cache = messageRenderCache.get(m)
@@ -1901,6 +1924,17 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
     m.cachedUiSegments = segments
   }
   return normalizeFirstRoundUiSegments(m, segments)
+}
+
+function assistantHasNonWorkflowRenderableOutput(m: ChatMessage): boolean {
+  if (m.role !== 'assistant') return true
+  const segs = getMessageUiSegments(m)
+  for (const s of segs) {
+    if (s.kind === 'generation_status') return true
+    if (s.kind !== 'markdown') return true
+    if ((s.content ?? '').trim().length > 0) return true
+  }
+  return false
 }
 
 function assistantHasRenderableOutput(m: ChatMessage): boolean {
@@ -1923,22 +1957,23 @@ function assistantHasRenderableOutput(m: ChatMessage): boolean {
     })
     return true
   }
-  const segs = getMessageUiSegments(m)
-  for (const s of segs) {
-    if (s.kind !== 'markdown') return true
-    if ((s.content ?? '').trim().length > 0) return true
-  }
+  const hasUi = assistantHasNonWorkflowRenderableOutput(m)
   messageRenderCache.set(m, {
     ...cache,
     renderableVersion: combinedVersion,
-    renderable: false,
+    renderable: hasUi,
   })
-  return false
+  return hasUi
 }
 
 function getThinkingElapsedSec(m: ChatMessage): number | null {
   if (m.role !== 'assistant' || m.createTime || !m.streamStartedAt) return null
-  const endTs = m.firstVisibleAt ?? workflowNowTs.value
+  const streamActive = isStreamActiveForMessage(m)
+  const endTs = m.firstVisibleAt
+    ? m.firstVisibleAt
+    : streamActive
+      ? workflowNowTs.value
+      : (m.streamFinishedAt ?? workflowNowTs.value)
   return Math.max(0, Math.floor((endTs - m.streamStartedAt) / 1000))
 }
 
@@ -1958,7 +1993,8 @@ function getThinkingStatusText(m: ChatMessage): string {
 
 function markFirstVisibleAt(msg: ChatMessage, now = Date.now()) {
   if (msg.firstVisibleAt || msg.role !== 'assistant' || !!msg.createTime) return
-  if (assistantHasRenderableOutput(msg)) {
+  // 工作流进度卡片不算首屏可见；与 legacy 链路一致，仅真实 AI 输出到达时冻结“共思考”
+  if (assistantHasNonWorkflowRenderableOutput(msg)) {
     msg.firstVisibleAt = now
   }
 }
@@ -2159,6 +2195,23 @@ function isToolRequestPending(m: ChatMessage, idx: number): boolean {
     if (segs[i]?.kind === 'tool_request') return false
   }
   return true
+}
+
+function getToolRequestShimmerText(m: ChatMessage, idx: number): string {
+  const segs = getMessageUiSegments(m)
+  const seg = segs[idx]
+  if (!seg || seg.kind !== 'tool_request') return '代码努力写入中'
+
+  const defaultText = '代码努力写入中'
+  if (seg.toolName !== '写入文件') return defaultText
+
+  const startedAt = seg.createdAt
+  if (!startedAt) return defaultText
+
+  const elapsed = workflowNowTs.value - startedAt
+  if (elapsed < TOOL_WRITE_SHIMMER_TIER_2_MS) return defaultText
+  if (elapsed < TOOL_WRITE_SHIMMER_TIER_3_MS) return '文件有点大,正在努力写入中'
+  return '正在为您加速生成'
 }
 
 function appendAssistantChunkToStream(streamId: string, chunk: string) {
@@ -2792,11 +2845,33 @@ onBeforeUnmount(() => {
                         <span
                           v-if="isToolRequestPending(m, idx)"
                           class="tool-hint-shimmer"
-                          aria-label="代码努力写入中"
+                          :aria-label="getToolRequestShimmerText(m, idx)"
                         >
                           <i class="dot" /><i class="dot" /><i class="dot" />
-                          <span class="shimmer-text">代码努力写入中 -></span>
+                          <span class="shimmer-text">{{ getToolRequestShimmerText(m, idx) }}</span>
                         </span>
+                      </div>
+
+                      <!-- 生成失败 / 用户中断 -->
+                      <div
+                        v-else-if="segment.kind === 'generation_status'"
+                        class="gen-status-card"
+                        role="alert"
+                        aria-live="polite"
+                      >
+                        <div class="gen-status-card__icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 8v5" stroke-linecap="round" />
+                            <circle cx="12" cy="16" r="0.5" fill="currentColor" stroke="none" />
+                          </svg>
+                        </div>
+                        <div class="gen-status-card__body-wrap">
+                          <div class="gen-status-card__title">
+                            {{ segment.variant === 'failed' ? '生成失败' : '生成已中断' }}
+                          </div>
+                          <div class="gen-status-card__message">{{ segment.message }}</div>
+                        </div>
                       </div>
 
                       <!-- TOOL_EXECUTED：写入文件卡片（可流式追加） -->
@@ -3007,7 +3082,7 @@ onBeforeUnmount(() => {
 
         <div class="preview-body">
           <div v-if="!shouldShowWebsite" class="preview-empty">
-            <AEmpty description="AI 未生成内容，请先完成至少一轮对话（用户提问 + AI 回复）" />
+            <AEmpty description="AI 未生成内容，请先完成至少一轮对话" />
           </div>
           <iframe
             v-else
@@ -3898,6 +3973,39 @@ onBeforeUnmount(() => {
   line-height: 1;
   transform: translateY(1px);
   text-shadow: 0 1px 2px rgba(15, 23, 42, 0.35);
+}
+
+.gen-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 6px 0 8px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #dc2626;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.gen-status-card__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #dc2626;
+}
+
+.gen-status-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #991b1b;
+  line-height: 1.4;
+}
+
+.gen-status-card__message {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7f1d1d;
 }
 
 .tool-hint-pill {

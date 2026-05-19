@@ -10,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.ai.model.message.ToolExecutedMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.guardrail.RetryOutputGuardrail;
@@ -84,10 +85,14 @@ public class JsonMessageStreamHandler {
                     }
                 })
                 .doOnError(error -> {
-                    // 1. 出错时写一条失败说明，避免用户侧空白
+                    // 1. 出错时写用户可见失败说明；真实异常仅打日志
                     if (persisted.compareAndSet(false, true)) {
-                        String errorMessage = "AI回复失败: " + error.getMessage();
-                        chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                        log.warn("json message stream failed, appId={}, type={}", appId, error.getClass().getSimpleName(), error);
+                        chatHistoryService.addChatMessage(
+                                appId,
+                                ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE,
+                                ChatHistoryMessageTypeEnum.AI.getValue(),
+                                loginUser.getId());
                     }
                 })
                 .doFinally(signal -> {
@@ -97,7 +102,7 @@ public class JsonMessageStreamHandler {
                         if (StrUtil.isNotBlank(partial)) {
                             chatHistoryService.addChatMessage(
                                     appId,
-                                    partial + "\n\n[中断]",
+                                    partial + "\n\n" + ChatHistoryConstant.GENERATION_INTERRUPTED_MARKER,
                                     ChatHistoryMessageTypeEnum.AI.getValue(),
                                     loginUser.getId()
                             );

@@ -30,4 +30,14 @@ public interface ChatHistoryConstant {
      * 合并时取的最早消息条数（2 轮 = 2 用户 + 2 AI = 4 条）。
      */
     int MESSAGES_PER_MERGE = ROUNDS_TO_MERGE * 2;
+
+    /**
+     * 流式生成失败时写入 chat_history 的用户可见文案（禁止落库真实异常堆栈/配额 JSON）。
+     */
+    String GENERATION_FAILED_USER_MESSAGE = "[生成失败] 代码生成流异常中断，请重试。";
+
+    /**
+     * 用户取消 SSE 订阅时，追加在已缓冲 AI 片段末尾的标记（由前端解析为「中断」卡片）。
+     */
+    String GENERATION_INTERRUPTED_MARKER = "[中断]";
 }

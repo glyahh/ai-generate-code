@@ -1,5 +1,6 @@
 package com.dbts.glyahhaigeneratecode.core.handler;
 
+import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlStreamIntegrity;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
@@ -57,11 +58,14 @@ public class SimpleTextStreamHandler {
                     }
                 })
                 .doOnError(error -> {
-                    // 1. 错误路径同样只写一次
+                    // 1. 错误路径同样只写一次；真实异常仅打日志
                     if (persisted.compareAndSet(false, true)) {
-                        // 2. 用固定前缀 + 异常信息落库，便于用户看到失败原因
-                        String errorMessage = "AI回复失败: " + error.getMessage();
-                        chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                        log.warn("simple text stream failed, appId={}, type={}", appId, error.getClass().getSimpleName(), error);
+                        chatHistoryService.addChatMessage(
+                                appId,
+                                ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE,
+                                ChatHistoryMessageTypeEnum.AI.getValue(),
+                                loginUser.getId());
                     }
                 })
                 .doFinally(signal -> {
@@ -75,7 +79,7 @@ public class SimpleTextStreamHandler {
                         if (!partial.isBlank()) {
                             chatHistoryService.addChatMessage(
                                     appId,
-                                    partial + "\n\n[中断]",
+                                    partial + "\n\n" + ChatHistoryConstant.GENERATION_INTERRUPTED_MARKER,
                                     ChatHistoryMessageTypeEnum.AI.getValue(),
                                     loginUser.getId()
                             );
