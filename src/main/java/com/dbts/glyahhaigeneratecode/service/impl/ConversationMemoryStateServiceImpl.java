@@ -155,7 +155,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         // 将redis的string(Json)格式转成map
         Map<String, Object> state = loadStateFromRedisOrDb(appId);
         List<String> changedFiles = parseChangedFiles(state.get("changedFilesJson"));
-        // TODO(memory-v4): 将 state 中的 softSummary/hardSummary 以 SystemMessage 注入 chatMemory，
+        // TODO (memory-v4): 将 state 中的 softSummary/hardSummary 以 SystemMessage 注入 chatMemory，
         //  用于长会话引导模型优先看 changedFiles / 调 readFile；需与 trySummarizeOldestRoundsIfNeeded 的合并策略协调，
         //  避免摘要行覆盖或挤掉注入块。
 
@@ -534,8 +534,10 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
                 // 写入 MySQL conversation_memory_ref：持久化本轮变更中的大文件全文（如 package-lock.json）。
                 // relative -> filePath，content -> content；真相源在 DB，Redis 仅为热缓存。
                 conversationMemoryRefMapper.insertIgnore(appId, roundId, refId, relative, content, bytes);
-                // TODO(memory-v4): 实现按 refId/filePath 从 cm:ref 或 conversation_memory_ref 读回并注入 ChatMemory；
-                //  当前仅归档，模型上下文不消费 ref。
+
+                // TODO (memory-v4): 实现按 refId/filePath 从 cm:ref 或 conversation_memory_ref 读回并注入 ChatMemory；
+                // 当前仅归档，模型上下文不消费 ref。
+                
                 // 写入 Redis cm:ref:{refId}：与上表 content 同文，TTL 见 conversation.memory.ref-ttl-seconds，过期后从 DB 回源。
                 cacheRefToRedis(refId, content);
                 archived++;
