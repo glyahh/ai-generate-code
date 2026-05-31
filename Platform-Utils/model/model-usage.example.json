@@ -1,13 +1,25 @@
 {
-  "version": 1,
+  "version": 2,
   "updated_at": "2026-05-18T12:00:00+08:00",
-  "models": {
-    "qwen3.5-122b-a10b": {
+  "functions": {
+    "chat-model": {
       "description": "# 1. 对话记忆压缩/总结\n# 2. 工作流图片相关\n# 3. 代码生成主链路里的「非流式 / 工具侧」模型（几乎不用）",
       "updated_at": "2026-05-18T12:00:00+08:00"
     },
-    "glm-5": {
+    "streaming-chat-model": {
       "description": "# 1. 单页 HTML、多文件（HTML / MULTI_FILE）的流式生成",
+      "updated_at": "2026-05-18T12:00:00+08:00"
+    },
+    "reasoning-streaming-chat-model": {
+      "description": "# 1. Vue 项目流式生成与复杂推理场景",
+      "updated_at": "2026-05-18T12:00:00+08:00"
+    },
+    "routing-chat-model": {
+      "description": "# 1. 轻量路由 / 分类（Generate_Code_Enum_Routine）",
+      "updated_at": "2026-05-18T12:00:00+08:00"
+    },
+    "code-exam-chat-model": {
+      "description": "# 1. 工作流代码质检（code_exam）",
       "updated_at": "2026-05-18T12:00:00+08:00"
     }
   }

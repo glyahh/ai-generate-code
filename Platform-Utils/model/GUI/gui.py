@@ -29,6 +29,7 @@ from model_usage import (  # noqa: E402
     build_function_replace_context,
     build_model_catalog,
     catalog_to_descriptions,
+    detect_v1_orphan_models,
     is_placeholder_model,
     load_model_usage,
     migrate_model_usage_for_replace,
@@ -878,7 +879,7 @@ class ModelGuiApp(ctk.CTk):
 
         ctk.CTkLabel(
             left_panel,
-            text="项目模型",
+            text="配置位",
             font=ctk.CTkFont(size=14, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
 
@@ -892,7 +893,7 @@ class ModelGuiApp(ctk.CTk):
 
         self.usage_title_label = ctk.CTkLabel(
             right_panel,
-            text="请选择左侧模型",
+            text="请选择左侧配置位",
             font=ctk.CTkFont(size=18, weight="bold"),
             anchor="w",
         )
@@ -911,12 +912,12 @@ class ModelGuiApp(ctk.CTk):
         assoc_wrap.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             assoc_wrap,
-            text="YAML 关联",
+            text="当前模型",
             font=ctk.CTkFont(size=12, weight="bold"),
             anchor="w",
         ).grid(row=0, column=0, sticky="w", pady=(0, 4))
-        self.usage_assoc_frame = ctk.CTkFrame(assoc_wrap)
-        self.usage_assoc_frame.grid(row=1, column=0, sticky="ew")
+        self.usage_model_frame = ctk.CTkFrame(assoc_wrap)
+        self.usage_model_frame.grid(row=1, column=0, sticky="ew")
 
         editor_wrap = ctk.CTkFrame(right_panel, fg_color="transparent")
         editor_wrap.grid(row=3, column=0, sticky="nsew", padx=14, pady=(0, 8))
@@ -1693,7 +1694,7 @@ class ModelGuiApp(ctk.CTk):
         try:
             if rows is None:
                 rows = core.list_models_data(self.app_yml.get(), self.local_yml.get())
-            saved = load_model_usage()
+            saved = load_model_usage(migration_rows=rows)
             self._replace_map_rows = rows
             self._replace_context = build_function_replace_context(rows, saved)
             previous = self._replace_selected
@@ -1951,16 +1952,16 @@ class ModelGuiApp(ctk.CTk):
             messagebox.showerror("写入失败", str(e))
             self.log(f"写入失败: {e}")
 
-    def _usage_entry_by_name(self, model_name: str) -> ModelUsageEntry | None:
+    def _usage_entry_by_function(self, function_key: str) -> ModelUsageEntry | None:
         for entry in self._usage_catalog:
-            if entry.model_name == model_name:
+            if entry.function_key == function_key:
                 return entry
         return None
 
     def _sync_usage_editor_to_catalog(self) -> None:
         if not self._usage_selected:
             return
-        entry = self._usage_entry_by_name(self._usage_selected)
+        entry = self._usage_entry_by_function(self._usage_selected)
         if entry is None:
             return
         entry.description = self.usage_desc_box.get("1.0", "end").rstrip("\n")
@@ -1968,7 +1969,7 @@ class ModelGuiApp(ctk.CTk):
     def _on_usage_desc_change(self, _event=None) -> None:
         if not self._usage_selected:
             return
-        entry = self._usage_entry_by_name(self._usage_selected)
+        entry = self._usage_entry_by_function(self._usage_selected)
         if entry is None:
             return
         current = self.usage_desc_box.get("1.0", "end").rstrip("\n")
@@ -1985,32 +1986,36 @@ class ModelGuiApp(ctk.CTk):
                 text_color=("#64748b", "#94a3b8"),
             )
 
-    def _clear_usage_assoc_tags(self) -> None:
-        for child in self.usage_assoc_frame.winfo_children():
+    def _clear_usage_model_info(self) -> None:
+        for child in self.usage_model_frame.winfo_children():
             child.destroy()
 
-    def _render_usage_assoc_tags(self, functions: list[str]) -> None:
-        self._clear_usage_assoc_tags()
-        if not functions:
+    def _render_usage_model_info(self, entry: ModelUsageEntry) -> None:
+        self._clear_usage_model_info()
+        if not entry.model_name:
             ctk.CTkLabel(
-                self.usage_assoc_frame,
+                self.usage_model_frame,
                 text="无 YAML 绑定",
                 text_color=("#64748b", "#94a3b8"),
                 anchor="w",
             ).pack(anchor="w", padx=4, pady=4)
             return
-        tag_row = ctk.CTkFrame(self.usage_assoc_frame, fg_color="transparent")
-        tag_row.pack(fill="x", padx=2, pady=2)
-        for fn in functions:
+        ctk.CTkLabel(
+            self.usage_model_frame,
+            text=entry.model_name,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", padx=4, pady=(4, 2))
+        meta_parts = [part for part in (entry.source_file, entry.path) if part]
+        if meta_parts:
             ctk.CTkLabel(
-                tag_row,
-                text=fn,
-                fg_color=("#e2e8f0", "#334155"),
-                text_color=("#0f172a", "#e2e8f0"),
-                corner_radius=6,
-                padx=10,
-                pady=4,
-            ).pack(side="left", padx=(0, 6), pady=4)
+                self.usage_model_frame,
+                text=" · ".join(meta_parts),
+                text_color=("#64748b", "#94a3b8"),
+                anchor="w",
+                wraplength=520,
+                justify="left",
+            ).pack(anchor="w", padx=4, pady=(0, 4))
 
     def _rebuild_usage_list(self, select_name: str | None = None) -> None:
         for child in self.usage_list_frame.winfo_children():
@@ -2020,32 +2025,32 @@ class ModelGuiApp(ctk.CTk):
         if not self._usage_catalog:
             ctk.CTkLabel(
                 self.usage_list_frame,
-                text="暂无模型，请检查 YAML 后刷新",
+                text="暂无配置位，请检查 YAML 后刷新",
                 text_color=("#64748b", "#94a3b8"),
             ).pack(padx=8, pady=12)
             return
 
         target = select_name or self._usage_selected
         if target is None and self._usage_catalog:
-            target = self._usage_catalog[0].model_name
+            target = self._usage_catalog[0].function_key
 
         for entry in self._usage_catalog:
-            is_selected = entry.model_name == target
+            is_selected = entry.function_key == target
             btn = ctk.CTkButton(
                 self.usage_list_frame,
-                text=entry.model_name,
+                text=entry.function_key,
                 anchor="center",
                 height=44,
                 fg_color=("#dbeafe", "#1e3a5f") if is_selected else ("#f1f5f9", "#1e293b"),
                 text_color=("#0f172a", "#e2e8f0"),
                 hover_color=("#bfdbfe", "#334155"),
-                command=lambda n=entry.model_name: self._select_usage_model(n, force=True),
+                command=lambda n=entry.function_key: self._select_usage_function(n, force=True),
             )
             btn.pack(fill="x", padx=4, pady=4)
-            self._usage_card_buttons[entry.model_name] = btn
+            self._usage_card_buttons[entry.function_key] = btn
 
         if target:
-            self._select_usage_model(target, force=True, skip_prompt=True)
+            self._select_usage_function(target, force=True, skip_prompt=True)
 
     def _maybe_save_usage_prompt(self) -> bool:
         """Return True if safe to switch away (saved, discarded, or no dirty)."""
@@ -2053,7 +2058,7 @@ class ModelGuiApp(ctk.CTk):
             return True
         choice = messagebox.askyesnocancel(
             "未保存的修改",
-            "当前模型的功能说明尚未保存。是否保存？\n是=保存  否=放弃  取消=留在当前页",
+            "当前配置位的功能说明尚未保存。是否保存？\n是=保存  否=放弃  取消=留在当前页",
         )
         if choice is None:
             return False
@@ -2061,7 +2066,7 @@ class ModelGuiApp(ctk.CTk):
             self.save_usage_current()
         else:
             self._usage_dirty = False
-            entry = self._usage_entry_by_name(self._usage_selected or "")
+            entry = self._usage_entry_by_function(self._usage_selected or "")
             if entry is not None:
                 self.usage_desc_box.delete("1.0", "end")
                 self.usage_desc_box.insert("1.0", entry.description)
@@ -2072,15 +2077,28 @@ class ModelGuiApp(ctk.CTk):
             return
         try:
             rows = core.list_models_data(self.app_yml.get(), self.local_yml.get())
-            yaml_names = {
-                normalize_model_name(row.get("model_name", ""))
+            yaml_keys = {
+                str(row.get("function", "")).strip()
                 for row in rows
-                if normalize_model_name(row.get("model_name", ""))
+                if str(row.get("function", "")).strip()
             }
-            removed = prune_orphan_model_usage(yaml_names)
+            is_v1, orphan_models = detect_v1_orphan_models(migration_rows=rows)
+            if is_v1 and orphan_models:
+                orphan_text = "、".join(orphan_models)
+                self.log(
+                    f"v1 迁移提示：以下 model 说明不在当前 YAML 中，迁移后将丢弃：{orphan_text}"
+                )
+                if not silent:
+                    messagebox.showinfo(
+                        "v1 迁移提示",
+                        "检测到旧版 model-usage.json（按 model_name 存储）。\n\n"
+                        f"以下 model 说明不在当前 YAML 映射中，迁移后将丢弃：\n{orphan_text}\n\n"
+                        "同一 model_name 绑定多个配置位时，说明会复制到各配置位。",
+                    )
+            self._usage_saved = load_model_usage(migration_rows=rows)
+            removed = prune_orphan_model_usage(yaml_keys)
             if removed and not silent:
-                self.log(f"已清理不在 YAML 中的模型说明：{'、'.join(removed)}")
-            self._usage_saved = load_model_usage()
+                self.log(f"已清理不在 YAML 中的配置位说明：{'、'.join(removed)}")
             previous = self._usage_selected
             self._usage_catalog = build_model_catalog(
                 self.app_yml.get(),
@@ -2088,47 +2106,52 @@ class ModelGuiApp(ctk.CTk):
                 self._usage_saved,
             )
             if previous:
-                names = {e.model_name for e in self._usage_catalog}
-                if previous not in names:
+                keys = {e.function_key for e in self._usage_catalog}
+                if previous not in keys:
                     previous = None
             self._rebuild_usage_list(select_name=previous)
             if not silent:
                 yaml_count = sum(1 for e in self._usage_catalog if e.in_yaml)
-                self.log(f"模型功能列表已刷新：共 {yaml_count} 个模型。")
+                self.log(f"模型功能列表已刷新：共 {yaml_count} 个配置位。")
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("模型列表读取失败", str(e))
             self.log(f"模型功能列表读取失败: {e}")
 
-    def _select_usage_model(self, model_name: str, *, force: bool = False, skip_prompt: bool = False) -> None:
-        if not force and model_name == self._usage_selected:
+    def _select_usage_function(
+        self,
+        function_key: str,
+        *,
+        force: bool = False,
+        skip_prompt: bool = False,
+    ) -> None:
+        if not force and function_key == self._usage_selected:
             return
         if not skip_prompt and self._usage_dirty and not self._maybe_save_usage_prompt():
             return
-        if self._usage_selected and self._usage_selected != model_name:
+        if self._usage_selected and self._usage_selected != function_key:
             self._sync_usage_editor_to_catalog()
 
-        entry = self._usage_entry_by_name(model_name)
+        entry = self._usage_entry_by_function(function_key)
         if entry is None:
             return
 
-        self._usage_selected = model_name
+        self._usage_selected = function_key
         self._usage_dirty = False
 
-        for name, btn in self._usage_card_buttons.items():
-            selected = name == model_name
+        for key, btn in self._usage_card_buttons.items():
+            selected = key == function_key
             btn.configure(
                 fg_color=("#dbeafe", "#1e3a5f") if selected else ("#f1f5f9", "#1e293b"),
             )
 
-        title = entry.model_name
         hints: list[str] = []
         if entry.is_placeholder:
             hints.append("占位或未解析")
         if entry.orphan:
             hints.append("已不在当前 YAML 配置中")
-        self.usage_title_label.configure(text=title)
+        self.usage_title_label.configure(text=entry.function_key)
         self.usage_hint_label.configure(text=" · ".join(hints) if hints else " ")
-        self._render_usage_assoc_tags(entry.functions)
+        self._render_usage_model_info(entry)
 
         self.usage_desc_box.delete("1.0", "end")
         if entry.description:
@@ -2137,19 +2160,19 @@ class ModelGuiApp(ctk.CTk):
 
     def save_usage_current(self) -> None:
         if not self._usage_selected:
-            messagebox.showwarning("提示", "请先选择左侧模型。")
+            messagebox.showwarning("提示", "请先选择左侧配置位。")
             return
         self._sync_usage_editor_to_catalog()
         descriptions = catalog_to_descriptions(self._usage_catalog)
         try:
             path = save_model_usage(descriptions, existing=self._usage_saved)
             self._usage_saved = load_model_usage(path)
-            entry = self._usage_entry_by_name(self._usage_selected)
+            entry = self._usage_entry_by_function(self._usage_selected)
             if entry is not None:
                 entry.description = descriptions.get(self._usage_selected, "")
             self._usage_dirty = False
             self._update_usage_status_label()
-            self.log(f"已保存模型「{self._usage_selected}」的功能说明。")
+            self.log(f"已保存配置位「{self._usage_selected}」的功能说明。")
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("保存失败", str(e))
             self.log(f"模型功能保存失败: {e}")
@@ -2158,17 +2181,17 @@ class ModelGuiApp(ctk.CTk):
         if self._usage_selected:
             self._sync_usage_editor_to_catalog()
         if not self._usage_catalog:
-            messagebox.showwarning("提示", "没有可保存的模型。")
+            messagebox.showwarning("提示", "没有可保存的配置位。")
             return
         descriptions = catalog_to_descriptions(self._usage_catalog)
         try:
             path = save_model_usage(descriptions, existing=self._usage_saved)
             self._usage_saved = load_model_usage(path)
             for entry in self._usage_catalog:
-                entry.description = descriptions.get(entry.model_name, "")
+                entry.description = descriptions.get(entry.function_key, "")
             self._usage_dirty = False
             self._update_usage_status_label()
-            self.log(f"已保存全部 {len(descriptions)} 个模型的功能说明到 {path.name}。")
+            self.log(f"已保存全部 {len(descriptions)} 个配置位的功能说明到 {path.name}。")
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("保存失败", str(e))
             self.log(f"模型功能保存失败: {e}")
