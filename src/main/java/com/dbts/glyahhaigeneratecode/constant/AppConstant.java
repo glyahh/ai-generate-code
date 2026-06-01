@@ -5,6 +5,11 @@ import java.util.List;
 public interface AppConstant {
 
     /**
+     * 首页「我的应用 / 精选应用」列表单页最大条数（与前端 page-size-options 上限一致）
+     */
+    int MAX_APP_LIST_PAGE_SIZE = 80;
+
+    /**
      * 精选应用的优先级
      */
     Integer GOOD_APP_PRIORITY = 99;

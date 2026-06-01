@@ -145,7 +145,7 @@ public class AppController {
     }
 
     /**
-     * 【用户】分页查询自己的应用列表（支持根据名称查询，每页最多 20 个）
+     * 【用户】分页查询自己的应用列表（支持根据名称查询，每页最多 {@link AppConstant#MAX_APP_LIST_PAGE_SIZE} 条）
      */
     @PostMapping("/my/list/page/vo")
     public BaseResponse<Page<AppVO>> listMyAppVOByPage(@RequestBody AppQueryRequest appQueryRequest,
@@ -154,7 +154,8 @@ public class AppController {
 
         int pageNum = appQueryRequest.getPageNum();
         int pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize <= 0 || pageSize > 20, ErrorCode.PARAMS_ERROR, "每页最多 20 条");
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > AppConstant.MAX_APP_LIST_PAGE_SIZE,
+                ErrorCode.PARAMS_ERROR, "每页最多 " + AppConstant.MAX_APP_LIST_PAGE_SIZE + " 条");
 
         User loginUser = userService.getUserInSession(request);
 
@@ -181,9 +182,9 @@ public class AppController {
     )
     public BaseResponse<Page<AppVO>> listGoodAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {
         ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
-        // 限制每页最多 20 个
         long pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize > 20, ErrorCode.PARAMS_ERROR, "每页最多查询 20 个应用");
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > AppConstant.MAX_APP_LIST_PAGE_SIZE,
+                ErrorCode.PARAMS_ERROR, "每页最多查询 " + AppConstant.MAX_APP_LIST_PAGE_SIZE + " 个应用");
         long pageNum = appQueryRequest.getPageNum();
         // 只查询精选的应用,管理员没有声明按99,否则按照管理员设置的
         if (appQueryRequest.getPriority() != null){

@@ -198,7 +198,7 @@ const myApps = ref<AppListState>({
   records: [],
   total: 0,
   pageNum: 1,
-  pageSize: 12,
+  pageSize: 20,
   loading: false,
   keyword: '',
 })
@@ -207,7 +207,7 @@ const goodApps = ref<AppListState>({
   records: [],
   total: 0,
   pageNum: 1,
-  pageSize: 12,
+  pageSize: 20,
   loading: false,
   keyword: '',
 })
@@ -359,7 +359,11 @@ async function loadMyApps() {
     if (isSuccess(res.data.code) && res.data.data) {
       myApps.value.records = res.data.data.records || []
       myApps.value.total = res.data.data.totalRow || 0
+    } else {
+      message.error(res.data.message || '加载我的应用失败')
     }
+  } catch {
+    message.error('加载我的应用失败，请稍后重试')
   } finally {
     myApps.value.loading = false
   }
@@ -378,20 +382,26 @@ async function loadGoodApps() {
     if (isSuccess(res.data.code) && res.data.data) {
       goodApps.value.records = res.data.data.records || []
       goodApps.value.total = res.data.data.totalRow || 0
+    } else {
+      message.error(res.data.message || '加载精选应用失败')
     }
+  } catch {
+    message.error('加载精选应用失败，请稍后重试')
   } finally {
     goodApps.value.loading = false
   }
 }
 
 function handleMyPageChange(page: number, pageSize: number) {
-  myApps.value.pageNum = page
+  const pageSizeChanged = pageSize !== myApps.value.pageSize
+  myApps.value.pageNum = pageSizeChanged ? 1 : page
   myApps.value.pageSize = pageSize
   void loadMyApps()
 }
 
 function handleGoodPageChange(page: number, pageSize: number) {
-  goodApps.value.pageNum = page
+  const pageSizeChanged = pageSize !== goodApps.value.pageSize
+  goodApps.value.pageNum = pageSizeChanged ? 1 : page
   goodApps.value.pageSize = pageSize
   void loadGoodApps()
 }
@@ -680,7 +690,6 @@ onMounted(() => {
     <section class="apps-section apps-section--featured">
       <div class="section-header">
         <h2>精选应用</h2>
-        <span class="section-subtitle">由管理员挑选的优质案例</span>
       </div>
 
       <div class="list-toolbar">
@@ -727,7 +736,7 @@ onMounted(() => {
 
       <div v-if="goodApps.total > 0" class="pagination-wrap">
         <APagination :current="goodApps.pageNum" :page-size="goodApps.pageSize" :total="goodApps.total"
-          :show-size-changer="true" :page-size-options="['8', '12', '20']" @change="handleGoodPageChange"
+          :show-size-changer="true" :page-size-options="['10', '20', '40', '80']" @change="handleGoodPageChange"
           @show-size-change="handleGoodPageChange" />
       </div>
     </section>
@@ -735,7 +744,6 @@ onMounted(() => {
     <section class="apps-section apps-section--mine">
       <div class="section-header">
         <h2>我的应用</h2>
-        <span class="section-subtitle">最多每页展示 20 个，可根据名称搜索</span>
       </div>
 
       <div v-if="!isLogin" class="section-login-tip">
@@ -839,7 +847,7 @@ onMounted(() => {
         </div>
         <div v-if="myApps.total > 0" class="pagination-wrap">
           <APagination :current="myApps.pageNum" :page-size="myApps.pageSize" :total="myApps.total"
-            :show-size-changer="true" :page-size-options="['8', '12', '20']" @change="handleMyPageChange"
+            :show-size-changer="true" :page-size-options="['10', '20', '40', '80']" @change="handleMyPageChange"
             @show-size-change="handleMyPageChange" />
         </div>
       </div>
@@ -1553,11 +1561,6 @@ onMounted(() => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-}
-
-.section-subtitle {
-  font-size: 12px;
-  color: #6b7280;
 }
 
 .section-login-tip {
