@@ -1261,10 +1261,13 @@ export function attachVisualWebsiteEditor(opts: {
   }
 }
 
+/** 与 formatSelectedElementForPrompt / 历史 message 正文中的可视化编辑块标题一致 */
+export const VISUAL_EDIT_BLOCK_TITLE = '[可视化编辑：已选中元素]'
+
 export function formatSelectedElementForPrompt(info: VisualSelectedElementInfo): string {
   const lines: string[] = []
   const title = info.cssSelector || info.xpath || info.tagName
-  lines.push('[可视化编辑：已选中元素]')
+  lines.push(VISUAL_EDIT_BLOCK_TITLE)
   lines.push(`- locator: ${title}`)
   if (info.tagName) lines.push(`- tag: ${info.tagName}`)
   if (info.id) lines.push(`- id: ${info.id}`)

@@ -51,6 +51,12 @@ import {
   injectGenerationStatusSegments,
   type GenerationStatusSegmentInput,
 } from '@/utils/chatGenerationStatus'
+import {
+  getVisualEditCardTitle,
+  getVisualEditFieldRows,
+  splitUserMessageForDisplay,
+  type ParsedVisualEditSelection,
+} from '@/utils/visualEditMessageParser'
 
 // 与全局请求保持一致：默认走当前页面 origin 下的 `/api`
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
@@ -183,6 +189,10 @@ type UiToolExecutedSimpleToolSegment = {
 
 type UiGenerationStatusSegment = GenerationStatusSegmentInput
 
+type UiVisualEditSelectionSegment = {
+  kind: 'visual_edit_selection'
+} & ParsedVisualEditSelection
+
 type UiSegment =
   | UiMarkdownSegment
   | UiToolRequestSegment
@@ -190,6 +200,7 @@ type UiSegment =
   | UiToolExecutedModifyFileSegment
   | UiToolExecutedSimpleToolSegment
   | UiGenerationStatusSegment
+  | UiVisualEditSelectionSegment
 
 type ToolExecStage =
   | 'markdown'
@@ -1874,9 +1885,65 @@ function hasMermaidNoticeForMessage(m: ChatMessage): boolean {
   return (m.content ?? '').includes('[workflow_notice] mermaid_error')
 }
 
+function buildUserMessageUiSegments(content: string): UiSegment[] {
+  const cleaned = stripVisualEditModelOnlyHint(content ?? '')
+  const { userText, visualEdit } = splitUserMessageForDisplay(cleaned)
+  const segments: UiSegment[] = []
+  if (userText.trim()) {
+    segments.push({ kind: 'markdown', content: userText })
+  }
+  if (visualEdit) {
+    segments.push({ kind: 'visual_edit_selection', ...visualEdit })
+  }
+  return segments.length > 0 ? segments : [{ kind: 'markdown', content: '' }]
+}
+
+function getUserMarkdownSegments(m: ChatMessage): UiMarkdownSegment[] {
+  return getMessageUiSegments(m).filter((s): s is UiMarkdownSegment => s.kind === 'markdown')
+}
+
+function getUserVisualEditSegment(m: ChatMessage): UiVisualEditSelectionSegment | null {
+  const seg = getMessageUiSegments(m).find((s) => s.kind === 'visual_edit_selection')
+  return seg && seg.kind === 'visual_edit_selection' ? seg : null
+}
+
+const visualEditTextExpandedKeys = ref<Set<string>>(new Set())
+
+function visualEditExpandKey(m: ChatMessage): string {
+  return `${m.createTime ?? 'session'}-${m.id}`
+}
+
+function isVisualEditTextExpanded(m: ChatMessage): boolean {
+  return visualEditTextExpandedKeys.value.has(visualEditExpandKey(m))
+}
+
+function toggleVisualEditTextExpanded(m: ChatMessage) {
+  const key = visualEditExpandKey(m)
+  const next = new Set(visualEditTextExpandedKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  visualEditTextExpandedKeys.value = next
+}
+
+function shouldTruncateVisualEditText(value: string): boolean {
+  return value.length > 120 || value.split('\n').length > 3
+}
+
+function getVisualEditTextPreview(value: string, expanded: boolean): string {
+  if (!shouldTruncateVisualEditText(value) || expanded) return value
+  const lines = value.split('\n')
+  if (lines.length > 3) {
+    return `${lines.slice(0, 3).join('\n')}…`
+  }
+  return `${value.slice(0, 120)}…`
+}
+
 function getMessageUiSegments(m: ChatMessage): UiSegment[] {
   if (m.role === 'user') {
-    return [{ kind: 'markdown', content: stripVisualEditModelOnlyHint(m.content ?? '') }]
+    return buildUserMessageUiSegments(m.content ?? '')
   }
   if (m.role !== 'assistant') {
     return [{ kind: 'markdown', content: m.content ?? '' }]
@@ -2773,7 +2840,109 @@ onBeforeUnmount(() => {
                   <div class="bubble-role">
                     {{ m.role === 'user' ? '我' : '应用助手' }}
                   </div>
-                  <div class="bubble-content">
+                  <template v-if="m.role === 'user'">
+                    <div
+                      v-if="getUserMarkdownSegments(m).some((s) => s.content.trim())"
+                      class="bubble-content"
+                    >
+                      <template v-for="(segment, idx) in getUserMarkdownSegments(m)" :key="`u-md-${idx}`">
+                        <template
+                          v-for="(mdSeg, mdIdx) in parseMarkdownWithCode(segment.content)"
+                          :key="`u-md-${idx}-${mdIdx}`"
+                        >
+                          <CodeBlock
+                            v-if="mdSeg.type === 'code'"
+                            :code="mdSeg.content"
+                            :language="mdSeg.language"
+                            :file-label="mdSeg.fileLabel"
+                            :is-streaming="false"
+                          />
+                          <span v-else class="text-segment">{{ mdSeg.content }}</span>
+                        </template>
+                      </template>
+                    </div>
+                    <div
+                      v-if="getUserVisualEditSegment(m)"
+                      class="visual-edit-selection-card"
+                      role="region"
+                      aria-label="编辑模式"
+                    >
+                      <div class="visual-edit-selection-card__glow" aria-hidden="true" />
+                      <div class="visual-edit-selection-card__inner">
+                        <div class="visual-edit-selection-card__header">
+                          <div class="visual-edit-selection-card__identity">
+                            <span class="visual-edit-selection-badge">
+                              <svg
+                                class="visual-edit-badge-icon"
+                                viewBox="0 0 16 16"
+                                width="12"
+                                height="12"
+                                fill="none"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  d="M8 2.5v11M2.5 8h11"
+                                  stroke="currentColor"
+                                  stroke-width="1.4"
+                                  stroke-linecap="round"
+                                />
+                                <circle cx="8" cy="8" r="5.25" stroke="currentColor" stroke-width="1.2" />
+                              </svg>
+                              编辑模式
+                            </span>
+                          </div>
+                          <a-button
+                            size="small"
+                            class="ghost-btn visual-edit-copy-btn"
+                            @click="
+                              copyToClipboard(
+                                getUserVisualEditSegment(m)?.cssSelector ||
+                                  getUserVisualEditSegment(m)?.locator ||
+                                  '',
+                              )
+                            "
+                          >
+                            复制选择器
+                          </a-button>
+                        </div>
+                        <div class="visual-edit-selector-chip">
+                          <span class="visual-edit-selector-chip__label">locator</span>
+                          <code class="visual-edit-selector-chip__value">{{
+                            getVisualEditCardTitle(getUserVisualEditSegment(m)!)
+                          }}</code>
+                        </div>
+                        <div
+                          v-if="getVisualEditFieldRows(getUserVisualEditSegment(m)!).length > 0"
+                          class="visual-edit-selection-card__fields"
+                        >
+                          <div
+                            v-for="row in getVisualEditFieldRows(getUserVisualEditSegment(m)!)"
+                            :key="row.label"
+                            class="visual-edit-field-row"
+                          >
+                            <span class="visual-edit-field-label">{{ row.label }}</span>
+                            <span
+                              class="visual-edit-field-value"
+                              :class="{ 'visual-edit-field-value--text': row.label === 'text' }"
+                            >
+                              <template v-if="row.label === 'text' && shouldTruncateVisualEditText(row.value)">
+                                {{ getVisualEditTextPreview(row.value, isVisualEditTextExpanded(m)) }}
+                                <button
+                                  type="button"
+                                  class="visual-edit-expand-btn"
+                                  @click="toggleVisualEditTextExpanded(m)"
+                                >
+                                  {{ isVisualEditTextExpanded(m) ? '收起' : '展开' }}
+                                </button>
+                              </template>
+                              <template v-else>{{ row.value }}</template>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <div v-else class="bubble-content">
                     <template
                       v-if="m.role === 'assistant' && isStreamActiveForMessage(m) && !assistantHasRenderableOutput(m)">
                       <div class="typing-indicator" role="status" aria-live="polite" aria-label="应用助手正在思考">
@@ -2957,8 +3126,8 @@ onBeforeUnmount(() => {
                         </div>
                       </div>
 
-                      <!-- 普通 markdown：仍保持流式解析与代码块渲染 -->
-                      <template v-else>
+                      <!-- 普通 markdown：仍保持流式解析与代码块渲染（仅助手消息） -->
+                      <template v-else-if="segment.kind === 'markdown'">
                         <template v-for="(mdSeg, mdIdx) in parseMarkdownWithCode(segment.content)" :key="`md-${idx}-${mdIdx}`">
                           <CodeBlock
                             v-if="mdSeg.type === 'code'"
@@ -3501,6 +3670,197 @@ onBeforeUnmount(() => {
 .bubble-user .bubble-inner {
   background: #2563eb;
   color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.visual-edit-selection-card {
+  position: relative;
+  margin-top: 4px;
+  border-radius: 14px;
+  overflow: hidden;
+  isolation: isolate;
+  color: #0f172a;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.65) inset,
+    0 10px 28px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.22);
+  transition: box-shadow 220ms ease, transform 220ms ease;
+}
+
+.visual-edit-selection-card:hover {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.75) inset,
+    0 14px 32px rgba(15, 23, 42, 0.16),
+    0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .visual-edit-selection-card {
+    transition: none;
+  }
+}
+
+.visual-edit-selection-card__glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 120% 80% at 0% -20%, rgba(191, 219, 254, 0.55), transparent 52%),
+    radial-gradient(ellipse 90% 70% at 100% 110%, rgba(199, 210, 254, 0.35), transparent 48%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 48%, rgba(241, 245, 249, 0.92) 100%);
+  pointer-events: none;
+}
+
+.visual-edit-selection-card__inner {
+  position: relative;
+  padding: 11px 12px 12px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background-image:
+    linear-gradient(rgba(37, 99, 235, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.04) 1px, transparent 1px);
+  background-size: 18px 18px;
+  background-position: -1px -1px;
+}
+
+.visual-edit-selection-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.visual-edit-selection-card__identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.visual-edit-selection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1e40af 0%, #2563eb 48%, #4338ca 100%);
+  color: #f8fafc;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.28);
+}
+
+.visual-edit-badge-icon {
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+
+.visual-edit-copy-btn {
+  flex-shrink: 0;
+  color: #1e3a8a !important;
+  border-color: rgba(99, 102, 241, 0.28) !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.visual-edit-copy-btn:hover {
+  color: #1d4ed8 !important;
+  border-color: rgba(37, 99, 235, 0.45) !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+}
+
+.visual-edit-selector-chip {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.visual-edit-selector-chip__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6366f1;
+}
+
+.visual-edit-selector-chip__value {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  word-break: break-all;
+}
+
+.visual-edit-selection-card__fields {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.visual-edit-field-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.visual-edit-field-row + .visual-edit-field-row {
+  padding-top: 7px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.visual-edit-field-label {
+  color: #475569;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.visual-edit-field-value {
+  color: #1e293b;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.visual-edit-field-value--text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.visual-edit-expand-btn {
+  border: none;
+  padding: 2px 0 0;
+  background: transparent;
+  color: #4f46e5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.visual-edit-expand-btn:hover {
+  color: #2563eb;
+  text-decoration: underline;
 }
 
 .bubble-role {
