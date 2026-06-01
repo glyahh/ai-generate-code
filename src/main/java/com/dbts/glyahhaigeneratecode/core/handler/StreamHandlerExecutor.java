@@ -1,5 +1,7 @@
 package com.dbts.glyahhaigeneratecode.core.handler;
 
+import cn.hutool.core.util.StrUtil;
+import com.dbts.glyahhaigeneratecode.guardrail.UserFacingOutputSanitizer;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
@@ -24,8 +26,13 @@ public class StreamHandlerExecutor {
     @Resource
     private JsonMessageStreamHandler jsonMessageStreamHandler;
 
+    @Resource
+    private UserFacingOutputSanitizer userFacingOutputSanitizer;
+
+    @Resource
+    private WorkflowTextStreamHandler workflowTextStreamHandler;
+
     private final SimpleTextStreamHandler simpleTextStreamHandler = new SimpleTextStreamHandler();
-    private final WorkflowTextStreamHandler workflowTextStreamHandler = new WorkflowTextStreamHandler();
 
     /**
      * 按生成类型与工作流开关选择具体 Handler，并在流上挂载「轮次结束」统计回调
@@ -49,16 +56,25 @@ public class StreamHandlerExecutor {
         AtomicBoolean once = new AtomicBoolean(false);
         int[] bufferChars = new int[]{0};
 
+        // 用户输入内容的安全清理与格式化, 防止XSS攻击和注入恶意代码
+        UserFacingOutputSanitizer.StreamBuffer streamBuffer = userFacingOutputSanitizer.newStreamBuffer();
+        Flux<String> userFacingFlux = originFlux
+                .map(chunk -> userFacingOutputSanitizer.sanitizeChunk(streamBuffer, chunk))
+                .concatWith(Flux.defer(() -> {
+                    String tail = userFacingOutputSanitizer.flush(streamBuffer);
+                    return StrUtil.isBlank(tail) ? Flux.empty() : Flux.just(tail);
+                }));
+
         // 1. 根据 workflowMode / codeGenType 选择具体流处理器实现
         Flux<String> handledFlux;
         if (workflowMode) {
-            handledFlux = workflowTextStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
+            handledFlux = workflowTextStreamHandler.handle(userFacingFlux, chatHistoryService, appId, loginUser);
         } else {
             handledFlux = switch (codeGenType) {
                 case VUE -> // 使用注入的组件实例
-                        jsonMessageStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser, firstRound, userMessage);
+                        jsonMessageStreamHandler.handle(userFacingFlux, chatHistoryService, appId, loginUser, firstRound, userMessage);
                 case HTML, MULTI_FILE -> // 简单文本处理器不需要依赖注入
-                        simpleTextStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
+                        simpleTextStreamHandler.handle(userFacingFlux, chatHistoryService, appId, loginUser);
             };
         }
 

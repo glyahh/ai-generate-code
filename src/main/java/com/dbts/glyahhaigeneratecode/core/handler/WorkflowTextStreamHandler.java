@@ -2,10 +2,13 @@ package com.dbts.glyahhaigeneratecode.core.handler;
 
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
+import com.dbts.glyahhaigeneratecode.guardrail.UserFacingOutputSanitizer;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 
@@ -15,7 +18,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Workflow 文本流处理器：聚合 LangGraph 推送的纯文本分片，结束时清洗噪声行再入库。
  */
 @Slf4j
+@Component
 public class WorkflowTextStreamHandler {
+
+    @Resource
+    private UserFacingOutputSanitizer userFacingOutputSanitizer;
     // 历史会话记录不再做硬截断：避免超长代码在入库阶段丢失，导致后续“修改/增量编辑”无法基于完整原文进行。
 
     /**
@@ -119,8 +126,8 @@ public class WorkflowTextStreamHandler {
             cleaned.append(line == null ? "" : line);
         }
 
-        // 4. 返回拼接结果（不再做硬截断，避免丢失超长代码）
+        // 4. 再剔除用户可见技术栈/部署术语（与 SSE 链路一致）
         String result = cleaned.toString().trim();
-        return result;
+        return userFacingOutputSanitizer.sanitizeText(result);
     }
 }

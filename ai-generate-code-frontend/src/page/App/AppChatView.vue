@@ -210,6 +210,11 @@ type ToolExecStage =
   | 'tool_exec_modify_stream_before'
   | 'tool_exec_modify_wait_after_fence'
   | 'tool_exec_modify_stream_after'
+type PendingToolRequest = {
+  toolName: string
+  createdAt: number
+}
+
 type AssistantUiState = {
   segments: UiSegment[]
   buffer: string
@@ -222,6 +227,8 @@ type AssistantUiState = {
   activeToolIndex?: number
   /** 折叠重复的“选择工具”提示，避免流式阶段刷屏 */
   lastToolRequestName?: string
+  /** 流式进行中：底部「选择工具」胶囊（不入 segments 时间线） */
+  pendingToolRequest?: PendingToolRequest | null
 }
 
 /** 已加载的历史消息（来自接口） */
@@ -985,6 +992,7 @@ function createAssistantUiState(): AssistantUiState {
     buffer: '',
     stage: 'markdown',
     lastToolRequestName: undefined,
+    pendingToolRequest: null,
   }
 }
 
@@ -1144,28 +1152,21 @@ function drainBufferToSegments(state: AssistantUiState) {
     appendMarkdown(state, state.buffer)
   }
   state.buffer = ''
+  state.pendingToolRequest = null
 }
 
 function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string) {
   state.buffer += chunk ?? ''
 
-  const TOOL_REQUEST_ANY_RE = /\[选择工具\]\s*([^\r\n]+)\s*(?:\r?\n|$)/
+  const TOOL_REQUEST_ANY_RE = /\[选择工具\]\s*([^\r\n]+)/
 
   const TOOL_EXEC_HEADER_RE_WRITE_FILE = /\[工具调用\]\s*写入文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
   const TOOL_EXEC_HEADER_RE_MODIFY_FILE = /\[工具调用\]\s*修改文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
   const TOOL_EXEC_HEADER_RE_DELETE_FILE = /\[工具调用\]\s*删除文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
   const TOOL_EXEC_HEADER_RE_READ_FILE = /\[工具调用\]\s*读取文件\s+([^\r\n]+)\s*(?:\r?\n|$)/
   const TOOL_EXEC_HEADER_RE_READ_DIR = /\[工具调用\]\s*读取目录结构\s+([^\r\n]+)\s*(?:\r?\n|$)/
-  const ensureToolRequestBeforeExecute = (toolName: string) => {
-    const normalizedName = (toolName ?? '').trim() || '未知工具'
-    if (state.lastToolRequestName === normalizedName) return
-    state.segments.push({
-      kind: 'tool_request',
-      rawLabel: `[选择工具] ${normalizedName}`,
-      toolName: normalizedName,
-      createdAt: Date.now(),
-    })
-    state.lastToolRequestName = normalizedName
+  const clearPendingToolRequest = () => {
+    state.pendingToolRequest = null
   }
 
   const loopGuardMax = 2000
@@ -1256,21 +1257,27 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
           break
         }
 
-        const raw = (mReqNow[0] ?? '').trim()
         const toolName = (mReqNow[1] ?? next.toolName ?? '').trim() || '未知工具'
+        const matchStart = mReqNow.index ?? 0
+        const matchLen = mReqNow[0].length
+        const afterMatch = state.buffer.slice(matchStart + matchLen)
 
-        state.buffer = state.buffer.slice(mReqNow[0].length)
-        state.buffer = consumeLeadingNewlines(state.buffer, 2)
-        if (state.lastToolRequestName !== toolName) {
-          state.segments.push({
-            kind: 'tool_request',
-            rawLabel: raw,
-            toolName,
-            createdAt: Date.now(),
-          })
-          state.lastToolRequestName = toolName
-        }
+        state.pendingToolRequest = { toolName, createdAt: Date.now() }
+        state.lastToolRequestName = toolName
         toolSelectHintShown.value = true
+
+        if (afterMatch.startsWith('\r\n')) {
+          state.buffer = state.buffer.slice(matchStart + matchLen + 2)
+          state.buffer = consumeLeadingNewlines(state.buffer, 2)
+        } else if (afterMatch.startsWith('\n')) {
+          state.buffer = state.buffer.slice(matchStart + matchLen + 1)
+          state.buffer = consumeLeadingNewlines(state.buffer, 2)
+        } else if (matchStart + matchLen >= state.buffer.length) {
+          break
+        } else {
+          state.buffer = state.buffer.slice(matchStart + matchLen)
+          state.buffer = consumeLeadingNewlines(state.buffer, 2)
+        }
         continue
       }
 
@@ -1285,7 +1292,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
-        ensureToolRequestBeforeExecute('写入文件')
+        clearPendingToolRequest()
         state.pendingFilePath = filePath
         // 进入真实工具执行后，重置“选择工具”去重状态，允许下一轮提示正常出现。
         state.lastToolRequestName = undefined
@@ -1303,7 +1310,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
-        ensureToolRequestBeforeExecute('修改文件')
+        clearPendingToolRequest()
         // 与 writeFile 一致：执行开始后清空去重状态。
         state.lastToolRequestName = undefined
 
@@ -1325,7 +1332,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
-        ensureToolRequestBeforeExecute('删除文件')
+        clearPendingToolRequest()
         state.lastToolRequestName = undefined
 
         removeGeneratedFile(filePath)
@@ -1349,7 +1356,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
-        ensureToolRequestBeforeExecute('读取文件')
+        clearPendingToolRequest()
         state.lastToolRequestName = undefined
 
         state.segments.push({
@@ -1371,7 +1378,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const filePath = (m[1] ?? '').trim()
         const headerLen = m[0].length
         state.buffer = state.buffer.slice(headerLen)
-        ensureToolRequestBeforeExecute('读取目录结构')
+        clearPendingToolRequest()
         state.lastToolRequestName = undefined
 
         state.segments.push({
@@ -1995,6 +2002,7 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
 
 function assistantHasNonWorkflowRenderableOutput(m: ChatMessage): boolean {
   if (m.role !== 'assistant') return true
+  if (getPendingToolRequest(m)) return true
   const segs = getMessageUiSegments(m)
   for (const s of segs) {
     if (s.kind === 'generation_status') return true
@@ -2254,6 +2262,11 @@ function isStreamActiveForMessage(m: ChatMessage): boolean {
   return !!activeStreamMeta.value[sid]
 }
 
+function getPendingToolRequest(m: ChatMessage): PendingToolRequest | null {
+  if (!isStreamActiveForMessage(m)) return null
+  return m.uiState?.pendingToolRequest ?? null
+}
+
 function isToolRequestPending(m: ChatMessage, idx: number): boolean {
   if (!isStreamActiveForMessage(m)) return false
   const segs = getMessageUiSegments(m)
@@ -2262,6 +2275,19 @@ function isToolRequestPending(m: ChatMessage, idx: number): boolean {
     if (segs[i]?.kind === 'tool_request') return false
   }
   return true
+}
+
+function getPendingToolRequestShimmerText(m: ChatMessage): string {
+  const pending = getPendingToolRequest(m)
+  if (!pending) return '代码努力写入中'
+
+  const defaultText = '代码努力写入中'
+  if (pending.toolName !== '写入文件') return defaultText
+
+  const elapsed = workflowNowTs.value - pending.createdAt
+  if (elapsed < TOOL_WRITE_SHIMMER_TIER_2_MS) return defaultText
+  if (elapsed < TOOL_WRITE_SHIMMER_TIER_3_MS) return '文件有点大,正在努力写入中'
+  return '正在为您加速生成'
 }
 
 function getToolRequestShimmerText(m: ChatMessage, idx: number): string {
@@ -3007,8 +3033,11 @@ onBeforeUnmount(() => {
                         </div>
                       </div>
                       <template v-for="(segment, idx) in getMessageUiSegments(m)" :key="idx">
-                      <!-- TOOL_REQUEST：选择工具卡片（一次性） -->
-                      <div v-if="segment.kind === 'tool_request'" class="tool-hint-pill">
+                      <!-- TOOL_REQUEST：历史回放中的选择工具胶囊（流式进行中改由底部 pending 展示） -->
+                      <div
+                        v-if="segment.kind === 'tool_request' && !isStreamActiveForMessage(m)"
+                        class="tool-hint-pill"
+                      >
                         <span class="tool-hint-label">选择工具</span>
                         <span class="tool-hint-main">{{ segment.toolName }}</span>
                         <span
@@ -3144,6 +3173,21 @@ onBeforeUnmount(() => {
                         </template>
                       </template>
                       </template>
+                      <!-- 流式底部 pending：始终在 segments 列表最下方 -->
+                      <div
+                        v-if="getPendingToolRequest(m)"
+                        class="tool-hint-pill"
+                      >
+                        <span class="tool-hint-label">选择工具</span>
+                        <span class="tool-hint-main">{{ getPendingToolRequest(m)?.toolName }}</span>
+                        <span
+                          class="tool-hint-shimmer"
+                          :aria-label="getPendingToolRequestShimmerText(m)"
+                        >
+                          <i class="dot" /><i class="dot" /><i class="dot" />
+                          <span class="shimmer-text">{{ getPendingToolRequestShimmerText(m) }}</span>
+                        </span>
+                      </div>
                     </template>
                   </div>
                 </div>

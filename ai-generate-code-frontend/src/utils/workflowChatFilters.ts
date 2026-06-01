@@ -85,6 +85,29 @@ function classifyWorkflowStage(rawLabel: string): WorkflowStageKey | null {
 
 const WORKFLOW_MARKER_RE = /\[(?:workflow(?:_stage_status|_notice)?)\]/i
 
+/** 与后端 UserFacingOutputSanitizer 对齐：用户可见正文中的内部技术栈/部署术语 */
+const TOOL_PROTOCOL_LINE_RE = /^\[(?:选择工具|工具调用|workflow(?:_stage_status|_notice)?)\]/i
+const STACK_JARGON_LINE_RES: RegExp[] = [
+  /vue\s*3/i,
+  /\bvite\b/i,
+  /vue\s*router/i,
+  /hash\s*模式/i,
+  /hash\s*路由/i,
+  /子路径部署/i,
+  /部署配置/i,
+  /可构建/i,
+  /可运行/i,
+  /npm\s+(?:install|run|build)/i,
+  /主要技术栈/i,
+  /技术栈/i,
+]
+
+function isStackJargonLine(trimmed: string): boolean {
+  if (!trimmed) return false
+  if (TOOL_PROTOCOL_LINE_RE.test(trimmed)) return false
+  return STACK_JARGON_LINE_RES.some((re) => re.test(trimmed))
+}
+
 const WORKFLOW_HISTORY_SUCCESS_RE = /(代码生成完成|工作流结束|构建成功|生成完成|ready)/i
 const WORKFLOW_HISTORY_FAILED_RE = /(失败|异常|error|中断|出现问题|超时)/i
 const LEGACY_AI_ERROR_LINE_RE = /^AI回复失败[:：]/
@@ -409,6 +432,7 @@ export function filterAssistantSseChunkForUi(
   const filteredKept = kept.filter((line) => {
     const t = line.trim()
     if (!t) return true
+    if (isStackJargonLine(t)) return false
     if (t.length <= 2 && !/[A-Za-z0-9\u4e00-\u9fa5]/.test(t)) return false
     return true
   })
@@ -487,6 +511,7 @@ export function stripAssistantNoiseLines(text: string): string {
     if (t === GENERATION_FAILED_MESSAGE || t === GENERATION_INTERRUPTED_MARKER) continue
     if (LEGACY_AI_ERROR_LINE_RE.test(t)) continue
     if (INTERNAL_DIR_LINE_RE.test(t)) continue
+    if (isStackJargonLine(t)) continue
     const stripped = stripInlineNoiseFragments(line)
     if (!stripped) continue
     if (SHORT_NOISE_ENGLISH_WORD_RE.test(stripped)) continue
