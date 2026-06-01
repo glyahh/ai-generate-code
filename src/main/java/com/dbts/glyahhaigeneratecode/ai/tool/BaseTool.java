@@ -91,4 +91,20 @@ public abstract class BaseTool {
         }
         return root.normalize().toAbsolutePath();
     }
+
+    /**
+     * 将绝对文件路径转为相对项目根的路径（正斜杠）。
+     */
+    protected String toRelativePath(Path projectRoot, Path absoluteFile) {
+        if (projectRoot == null || absoluteFile == null) {
+            return null;
+        }
+        try {
+            return projectRoot.relativize(absoluteFile.normalize().toAbsolutePath())
+                    .toString()
+                    .replace('\\', '/');
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }

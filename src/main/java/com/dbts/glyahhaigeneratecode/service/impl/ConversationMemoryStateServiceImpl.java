@@ -4,6 +4,8 @@ import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.config.ConversationMemoryProperties;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.constant.ConversationMemoryConstant;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryStateInjectSupport;
+import com.dbts.glyahhaigeneratecode.model.memory.FileNoteEntry;
 import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.mapper.ConversationMemoryRefMapper;
 import com.dbts.glyahhaigeneratecode.mapper.ConversationMemoryStateMapper;
@@ -61,6 +63,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final ConversationMemoryProperties properties;
+    private final ConversationMemoryStateInjectSupport conversationMemoryStateInjectSupport;
 
 
     /**
@@ -89,6 +92,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         int refArchivedCount = 0;
         String redisStatus = "miss";
         String dbStatus = "ok";
+        String fileNoteStatus = "none";
         try {
             // 1. 目录稳定性检查，防止 workflow 落盘尚未完成就生成 manifest。
             Path projectRoot = resolveProjectRoot(appId, codeGenTypeEnum);
@@ -104,10 +108,12 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
             // 3. 保存 snapshot_history 真相源。
             snapshotId = insertSnapshotHistory(appId, roundId, current);
 
-            // 4. 滚动维护 memory_state（软/硬摘要 + changedFiles）。
+            // 4. 工具写盘 fileNote 批量摘要，再滚动维护 memory_state。
             SummaryBundle summaryBundle = buildSummaryBundle(appId);
             summarizeLevel = summaryBundle.level();
-            upsertConversationMemoryState(appId, roundId, snapshotId, summaryBundle, changedFiles);
+            String fileNotesJson = conversationMemoryStateInjectSupport.resolveFileNotesJsonForUpsert(appId, roundId);
+            fileNoteStatus = fileNotesJson == null ? "unchanged" : "ok";
+            upsertConversationMemoryState(appId, roundId, snapshotId, summaryBundle, changedFiles, fileNotesJson);
 
             // 5. 超长 changed file 归档为 ref，避免主状态膨胀。
             refArchivedCount = archiveLargeChangedFilesIfNeeded(appId, roundId, projectRoot, changedFiles);
@@ -126,9 +132,9 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         } finally {
             // 7. 固化可观测字段，便于排查 manifest/摘要/Redis 抖动问题。
             long finalElapsed = System.currentTimeMillis() - start;
-            log.info("onRoundCompleted metrics appId={} roundId={} snapshotId={} manifestFilesCount={} changedFilesCount={} bufferChars={} summarizeLevel={} refArchivedCount={} elapsedMs={} redisHit={} dbFallback={} workflowMode={} userId={}",
+            log.info("onRoundCompleted metrics appId={} roundId={} snapshotId={} manifestFilesCount={} changedFilesCount={} bufferChars={} summarizeLevel={} refArchivedCount={} fileNoteStatus={} elapsedMs={} redisHit={} dbFallback={} workflowMode={} userId={}",
                     appId, roundId, snapshotId, manifestFilesCount, changedFilesCount, bufferChars, summarizeLevel,
-                    refArchivedCount, Math.max(elapsedMs, finalElapsed), redisStatus, dbStatus, workflowMode, userId);
+                    refArchivedCount, fileNoteStatus, Math.max(elapsedMs, finalElapsed), redisStatus, dbStatus, workflowMode, userId);
         }
     }
 
@@ -155,9 +161,12 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         // 将redis的string(Json)格式转成map
         Map<String, Object> state = loadStateFromRedisOrDb(appId);
         List<String> changedFiles = parseChangedFiles(state.get("changedFilesJson"));
+        Map<String, FileNoteEntry> fileNotes = conversationMemoryStateInjectSupport.parseFileNotes(state.get("fileNotesJson"));
         // TODO (memory-v4): 将 state 中的 softSummary/hardSummary 以 SystemMessage 注入 chatMemory，
         //  用于长会话引导模型优先看 changedFiles / 调 readFile；需与 trySummarizeOldestRoundsIfNeeded 的合并策略协调，
         //  避免摘要行覆盖或挤掉注入块。
+
+        int taggedInjected = conversationMemoryStateInjectSupport.injectMemoryTaggedMessages(chatMemory, changedFiles, fileNotes);
 
         // 2. 按优先级排序注入文件列表：入口/配置/路由 -> changedFiles -> 其余补齐。
         Path root = resolveProjectRoot(appId, codeGenTypeEnum);
@@ -176,8 +185,8 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
             try {
                 // 获取相对路径
                 String relative = root.relativize(file).toString().replace('\\', '/');
-                // 根据项目根目录读取前 pageSize 字符（与 manifest 扫描根一致，见 readFilePageWithCache）
-                String content = readFilePageWithCache(appId, root, relative, ConversationMemoryConstant.DEFAULT_PAGE_SIZE);
+                // 根据项目根目录读取前 pageSize 字符（与 manifest 扫描根一致，见 readFilePageHead）
+                String content = readFilePageHead(root, relative, ConversationMemoryConstant.DEFAULT_PAGE_SIZE);
                 if (StrUtil.isBlank(content)) {
                     continue;
                 }
@@ -207,7 +216,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         return ConversationMemoryInjectResult.builder()
                 // 从何处拿到的数据
                 .source(source)
-                .injectedMessageCount(Math.min(injected, Math.max(0, maxCount)))
+                .injectedMessageCount(Math.min(taggedInjected + injected, Math.max(0, maxCount)))
                 .changedFiles(changedFiles)
                 .build();
     }
@@ -493,7 +502,13 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
      * @param changedFiles changedFiles
      * @return 无
      */
-    private void upsertConversationMemoryState(Long appId, Long roundId, long snapshotId, SummaryBundle summaryBundle, List<String> changedFiles) throws Exception {
+    private void upsertConversationMemoryState(
+            Long appId,
+            Long roundId,
+            long snapshotId,
+            SummaryBundle summaryBundle,
+            List<String> changedFiles,
+            String fileNotesJson) throws Exception {
         String changedFilesJson = objectMapper.writeValueAsString(changedFiles == null ? Collections.emptyList() : changedFiles);
         conversationMemoryStateMapper.upsertByAppId(
                 appId,
@@ -501,7 +516,8 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
                 snapshotId <= 0 ? null : snapshotId,
                 summaryBundle.softSummary(),
                 summaryBundle.hardSummary(),
-                changedFilesJson
+                changedFilesJson,
+                fileNotesJson
         );
     }
 
@@ -537,7 +553,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
 
                 // TODO (memory-v4): 实现按 refId/filePath 从 cm:ref 或 conversation_memory_ref 读回并注入 ChatMemory；
                 // 当前仅归档，模型上下文不消费 ref。
-                
+
                 // 写入 Redis cm:ref:{refId}：与上表 content 同文，TTL 见 conversation.memory.ref-ttl-seconds，过期后从 DB 回源。
                 cacheRefToRedis(refId, content);
                 archived++;
@@ -612,6 +628,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
             map.put("softSummary", row.getSoftSummary());
             map.put("hardSummary", row.getHardSummary());
             map.put("changedFilesJson", row.getChangedFilesJson());
+            map.put("fileNotesJson", row.getFileNotesJson());
             return map;
         } catch (Exception e) {
             return Collections.emptyMap();
@@ -692,41 +709,24 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
     }
 
     /**
-     * 分页读取文件并使用 Redis page 缓存。
+     * 读取注入用文件头：直读磁盘并截断前 pageSize 字符，不经过 Redis 缓存。
      *
-     * @param appId       应用 id（Redis key 片段）
      * @param projectRoot 生成项目根目录（如 temp/code_output/vue_project_{appId}）
      * @param relative    相对 projectRoot 的路径
      * @param pageSize    分页大小
-     * @return 文件前一页；读失败返回空串（不写 Redis）
+     * @return 文件头片段；读失败或路径非法时返回空串
      */
-    private String readFilePageWithCache(Long appId, Path projectRoot, String relative, int pageSize) throws IOException {
-
-        // 1. Redis 分页缓存 key：cm:page:{appId}:{相对路径}:{页号}，当前仅缓存第 0 页（文件头一段）；无 MySQL 表，仅存 Redis。
-        String key = "cm:page:" + appId + ":" + relative + ":0";
-        String cached = stringRedisTemplate.opsForValue().get(key);
-        if (StrUtil.isNotBlank(cached)) {
-            return cached;
-        }
-
+    private String readFilePageHead(Path projectRoot, String relative, int pageSize) throws IOException {
         if (projectRoot == null || !Files.isDirectory(projectRoot)) {
             return "";
         }
-        // 2. 项目根（与 buildManifest / collectInjectCandidates 一致）+ 相对路径；防止路径穿越
         Path normalizedRoot = projectRoot.toAbsolutePath().normalize();
         Path candidate = normalizedRoot.resolve(relative).normalize();
         if (!candidate.startsWith(normalizedRoot) || !Files.isRegularFile(candidate)) {
             return "";
         }
-
-        // 3. 读全文后截取前 pageSize 字符作为「第一页」，避免一次把大文件塞进内存上下文
-        // 直接截断分页
         String content = Files.readString(candidate, StandardCharsets.UTF_8);
-        String page = content.length() <= pageSize ? content : content.substring(0, pageSize);
-
-        // 4. 回写 Redis 短 TTL，减轻同一路径重复读盘
-        stringRedisTemplate.opsForValue().set(key, page, properties.getPageTtlSeconds(), TimeUnit.SECONDS);
-        return page;
+        return content.length() <= pageSize ? content : content.substring(0, pageSize);
     }
 
     /**

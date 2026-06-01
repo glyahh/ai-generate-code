@@ -39,9 +39,6 @@ conversation:
     # Redis key：cm:ref:{refId}。超长归档片段热缓存，过期后从 conversation_memory_ref 表回源。
     # 默认 3 天（秒）
     ref-ttl-seconds: 259200
-    # Redis key：cm:page:*。readFile/大 ref 分页切片缓存，短 TTL 减轻重复读盘。
-    # 默认 12 小时（秒）
-    page-ttl-seconds: 43200
     # --- G 数据治理：定时任务清理 conversation_memory_ref，多条件任一超限则删最旧 ---
     # 单 app 最多保留 ref 行数（超出删旧）
     ref-keep-count-per-app: 500
@@ -53,6 +50,12 @@ conversation:
     manifest-stable-retry-times: 3
     # 每轮稳定性检查间隔（毫秒），与 retry-times 配合约覆盖「短暂落盘延迟」
     manifest-stable-retry-sleep-ms: 150
+    # --- 方式 2：工具写盘后 fileNote（批量 LLM 摘要，见 ConversationMemoryFileNoteService）---
+    file-note-enabled: true
+    file-note-debounce-ms: 400
+    file-note-max-paths-per-round: 20
+    file-note-input-chars: 2000
+    file-note-max-note-chars: 120
 
 
 server:
@@ -132,6 +135,16 @@ langchain4j:
       temperature: 0.1
       log-requests: true
       log-responses: true
+
+    # 工具 writeFile/modifyFile 落盘后的路径级中文 fileNote（批量摘要）
+    file-note-chat-model:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${langchain4j.open-ai.chat-model.api-key}
+      model-name: gui-plus-2026-02-26
+      max-tokens: 2048
+      temperature: 0.2
+      log-requests: false
+      log-responses: false
 
 
 

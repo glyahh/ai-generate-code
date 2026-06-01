@@ -21,6 +21,10 @@
     "code-exam-chat-model": {
       "description": "# 1. 工作流代码质检（code_exam）",
       "updated_at": "2026-05-18T12:00:00+08:00"
+    },
+    "file-note-chat-model": {
+      "description": "# 1. 工具 writeFile/modifyFile 落盘后的路径级 fileNote 批量摘要",
+      "updated_at": "2026-06-01T12:00:00+08:00"
     }
   }
 }

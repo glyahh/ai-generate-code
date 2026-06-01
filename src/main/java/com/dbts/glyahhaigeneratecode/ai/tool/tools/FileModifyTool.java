@@ -1,10 +1,14 @@
 package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
 import cn.hutool.json.JSONObject;
+import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
+import com.dbts.glyahhaigeneratecode.config.ConversationMemoryProperties;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryFileNoteSupport;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
+import com.dbts.glyahhaigeneratecode.service.ConversationMemoryFileNoteService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
@@ -34,6 +38,12 @@ public class FileModifyTool extends BaseTool {
 
     @Resource
     private AppService appService;
+
+    @Resource
+    private ConversationMemoryFileNoteService conversationMemoryFileNoteService;
+
+    @Resource
+    private ConversationMemoryProperties conversationMemoryProperties;
 
     @Tool("修改文件内容，用新内容替换指定旧内容")
     public String modifyFile(
@@ -92,6 +102,7 @@ public class FileModifyTool extends BaseTool {
 
             Files.writeString(path, modifiedContent, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             log.info("成功修改文件: {}", path.toAbsolutePath());
+            registerFileNoteAfterModify(appId, projectRoot, path, oldContent, newContent);
             return "文件修改成功: " + relativeFilePath;
         } catch (IOException e) {
             String errorMessage = "修改文件失败: " + relativeFilePath + ", 错误: " + e.getMessage();
@@ -149,6 +160,24 @@ public class FileModifyTool extends BaseTool {
     @Override
     public String getDisplayName() {
         return "修改文件";
+    }
+
+    private void registerFileNoteAfterModify(
+            Long appId, Path projectRoot, Path absoluteFile, String oldContent, String newContent) {
+        try {
+            String relative = toRelativePath(projectRoot, absoluteFile);
+            if (relative == null) {
+                return;
+            }
+            int maxChars = conversationMemoryProperties == null ? 2000 : conversationMemoryProperties.getFileNoteInputChars();
+            String hint = "替换前片段:\n"
+                    + ConversationMemoryFileNoteSupport.truncateHint(StrUtil.blankToDefault(oldContent, ""), maxChars / 2)
+                    + "\n替换后片段:\n"
+                    + ConversationMemoryFileNoteSupport.truncateHint(StrUtil.blankToDefault(newContent, ""), maxChars / 2);
+            conversationMemoryFileNoteService.registerPendingFileChange(appId, relative, hint);
+        } catch (Exception ignore) {
+            // fileNote 失败不阻塞改盘
+        }
     }
 
     @Override

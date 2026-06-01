@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS conversation_memory_state (
   softSummary TEXT NULL,
   hardSummary TEXT NULL,
   changedFilesJson LONGTEXT NULL,
+  fileNotesJson LONGTEXT NULL COMMENT 'path->{note,roundId,updatedAt}',
   updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_app_id (appId),

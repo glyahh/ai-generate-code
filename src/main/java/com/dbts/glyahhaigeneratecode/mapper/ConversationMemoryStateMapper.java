@@ -16,14 +16,15 @@ public interface ConversationMemoryStateMapper extends BaseMapper<ConversationMe
      * 按 appId 幂等写入或更新一行（依赖 uk_app_id）。
      */
     @Insert("""
-            INSERT INTO conversation_memory_state(appId, latestRoundId, latestSnapshotId, softSummary, hardSummary, changedFilesJson, createdAt, updatedAt)
-            VALUES(#{appId}, #{latestRoundId}, #{latestSnapshotId}, #{softSummary}, #{hardSummary}, #{changedFilesJson}, NOW(), NOW())
+            INSERT INTO conversation_memory_state(appId, latestRoundId, latestSnapshotId, softSummary, hardSummary, changedFilesJson, fileNotesJson, createdAt, updatedAt)
+            VALUES(#{appId}, #{latestRoundId}, #{latestSnapshotId}, #{softSummary}, #{hardSummary}, #{changedFilesJson}, #{fileNotesJson}, NOW(), NOW())
             ON DUPLICATE KEY UPDATE
                 latestRoundId=VALUES(latestRoundId),
                 latestSnapshotId=VALUES(latestSnapshotId),
                 softSummary=VALUES(softSummary),
                 hardSummary=VALUES(hardSummary),
                 changedFilesJson=VALUES(changedFilesJson),
+                fileNotesJson=VALUES(fileNotesJson),
                 updatedAt=NOW()
             """)
     int upsertByAppId(@Param("appId") Long appId,
@@ -31,5 +32,6 @@ public interface ConversationMemoryStateMapper extends BaseMapper<ConversationMe
                       @Param("latestSnapshotId") Long latestSnapshotId,
                       @Param("softSummary") String softSummary,
                       @Param("hardSummary") String hardSummary,
-                      @Param("changedFilesJson") String changedFilesJson);
+                      @Param("changedFilesJson") String changedFilesJson,
+                      @Param("fileNotesJson") String fileNotesJson);
 }

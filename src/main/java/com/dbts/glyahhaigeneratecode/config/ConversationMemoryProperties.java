@@ -23,11 +23,6 @@ public class ConversationMemoryProperties {
     private long refTtlSeconds = 3L * 24L * 3600L;
 
     /**
-     * cm:page:* TTL（秒），默认 12 小时。
-     */
-    private long pageTtlSeconds = 12L * 3600L;
-
-    /**
      * 每个 app 保留最近 ref 条数上限。
      */
     private int refKeepCountPerApp = 500;
@@ -51,5 +46,30 @@ public class ConversationMemoryProperties {
      * manifest 稳定性检查重试间隔（毫秒）。
      */
     private long manifestStableRetrySleepMs = 150L;
+
+    /**
+     * 是否启用工具写盘后的 fileNote 批量摘要。
+     */
+    private boolean fileNoteEnabled = true;
+
+    /**
+     * 写盘后 debounce 窗口（毫秒）；权威收口仍以 onRoundCompleted 同步 flush 为准。
+     */
+    private long fileNoteDebounceMs = 400L;
+
+    /**
+     * 单轮参与摘要的路径数上限。
+     */
+    private int fileNoteMaxPathsPerRound = 20;
+
+    /**
+     * 无 diff 时读盘截断字符数（仅用于摘要模型输入）。
+     */
+    private int fileNoteInputChars = 2000;
+
+    /**
+     * 单路径 note 最大字符数（落库硬截断）。
+     */
+    private int fileNoteMaxNoteChars = 120;
 }
 

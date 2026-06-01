@@ -71,6 +71,12 @@ public class ConversationMemoryState implements Serializable {
     private String changedFilesJson;
 
     /**
+     * 按相对路径的中文文件说明 JSON：path -> { note, roundId, updatedAt }
+     */
+    @Column("fileNotesJson")
+    private String fileNotesJson;
+
+    /**
      * 行更新时间
      */
     @Column("updatedAt")
