@@ -56,14 +56,17 @@ public class StreamHandlerExecutor {
         AtomicBoolean once = new AtomicBoolean(false);
         int[] bufferChars = new int[]{0};
 
-        // 用户输入内容的安全清理与格式化, 防止XSS攻击和注入恶意代码
-        UserFacingOutputSanitizer.StreamBuffer streamBuffer = userFacingOutputSanitizer.newStreamBuffer();
-        Flux<String> userFacingFlux = originFlux
-                .map(chunk -> userFacingOutputSanitizer.sanitizeChunk(streamBuffer, chunk))
-                .concatWith(Flux.defer(() -> {
-                    String tail = userFacingOutputSanitizer.flush(streamBuffer);
-                    return StrUtil.isBlank(tail) ? Flux.empty() : Flux.just(tail);
-                }));
+        // 用户可见输出脱敏：仅对“纯文本流”生效，避免破坏 VUE(JSON 工具协议)流式解析
+        Flux<String> userFacingFlux = originFlux;
+        if (workflowMode || codeGenType != CodeGenTypeEnum.VUE) {
+            UserFacingOutputSanitizer.StreamBuffer streamBuffer = userFacingOutputSanitizer.newStreamBuffer();
+            userFacingFlux = originFlux
+                    .map(chunk -> userFacingOutputSanitizer.sanitizeChunk(streamBuffer, chunk))
+                    .concatWith(Flux.defer(() -> {
+                        String tail = userFacingOutputSanitizer.flush(streamBuffer);
+                        return StrUtil.isBlank(tail) ? Flux.empty() : Flux.just(tail);
+                    }));
+        }
 
         // 1. 根据 workflowMode / codeGenType 选择具体流处理器实现
         Flux<String> handledFlux;

@@ -71,5 +71,15 @@ public class ConversationMemoryProperties {
      * 单路径 note 最大字符数（落库硬截断）。
      */
     private int fileNoteMaxNoteChars = 120;
+
+    /**
+     * LangChain4j ChatMemory（memoryId=appId）TTL（秒），仅 AI 轨。
+     */
+    private long chatTtlSeconds = 600L;
+
+    /**
+     * 用户回显全文缓存 chat:echo_memory:{appId} TTL（秒）。
+     */
+    private long echoMemoryTtlSeconds = 3600L;
 }
 

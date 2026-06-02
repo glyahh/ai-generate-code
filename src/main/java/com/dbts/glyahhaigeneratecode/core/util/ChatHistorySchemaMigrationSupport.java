@@ -564,9 +564,26 @@ public final class ChatHistorySchemaMigrationSupport {
      * @return 最早的消息列表（通常 4 条，对应两轮 user+ai）
      */
     public static List<ChatHistory> listOldestMessagesForMerge(Long appId, int limit, ChatHistoryMapper chatHistoryMapper) {
-        // 1. 构造按创建时间与主键升序的查询并 limit,得到待合并的最早若干条消息
+        return listOldestMessagesForMerge(appId, limit, chatHistoryMapper, null);
+    }
+
+    /**
+     * 按创建时间正序取最早若干条消息，排除已合并进 memory_shrink 的 chat_history id。
+     *
+     * @param appId                 应用 id
+     * @param limit                   最多取几条
+     * @param chatHistoryMapper       对话历史 Mapper
+     * @param excludeChatHistoryIds   已纳入 summary 的 chat_history id，可为 null
+     * @return 最早的消息列表（通常 4 条）
+     */
+    public static List<ChatHistory> listOldestMessagesForMerge(Long appId, int limit,
+                                                               ChatHistoryMapper chatHistoryMapper,
+                                                               java.util.Set<Long> excludeChatHistoryIds) {
         QueryWrapper q = new QueryWrapper();
         q.eq(ChatHistory::getAppId, appId);
+        if (excludeChatHistoryIds != null && !excludeChatHistoryIds.isEmpty()) {
+            q.notIn(ChatHistory::getId, excludeChatHistoryIds);
+        }
         q.orderBy(ChatHistory::getCreateTime, true);
         q.orderBy(ChatHistory::getId, true);
         q.limit(limit);

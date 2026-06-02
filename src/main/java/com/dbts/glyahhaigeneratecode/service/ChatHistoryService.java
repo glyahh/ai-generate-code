@@ -204,6 +204,13 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason);
 
     /**
+     * 刷新 AI ChatMemory Redis TTL（memoryId=appId）。
+     *
+     * @param appId 应用 id
+     */
+    void refreshAiChatMemoryTtl(Long appId);
+
+    /**
      * 工作流重试前，定向清理 Redis ChatMemory 里上一轮失败生成的 AI 长消息（仅删失败产物，不清空整段会话）。
      *
      * @param appId           应用 id

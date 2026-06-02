@@ -174,9 +174,14 @@ public class JsonMessageStreamHandler {
                         seenToolIds.add(toolId);
                         BaseTool tool = toolManager.getTool(toolRequestMessage.getName());
                         if (tool != null) {
-                            return tool.generateToolRequestResponse();
+                            String output = tool.generateToolRequestResponse();
+                            // AI 消息持久化
+                            chatHistoryStringBuilder.append(output);
+                            return output;
                         }
-                        return String.format("[选择工具] %s", toolName);
+                        String output = String.format("[选择工具] %s", toolName);
+                        chatHistoryStringBuilder.append(output);
+                        return output;
                     }
                     return "";
                 }

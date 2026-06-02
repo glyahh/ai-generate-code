@@ -127,10 +127,14 @@ public class aiCodeGeneratorServiceFactory {
                     service = null;
                 }
             }
+
+            // 除非需要走记忆压缩并且没有成功写入新的记忆到redis中,其他场景都会更新TTL
             if (service != null) {
                 if (compactMemoryOnCacheHit) {
                     // 缓存命中时也执行一次在线压缩，避免旧的超长历史 AI 消息持续放大请求 token
                     chatHistoryService.compactMemoryMessagesIfNeeded(appId, codeGenTypeEnum, "cache_hit");
+                } else {
+                    chatHistoryService.refreshAiChatMemoryTtl(appId);
                 }
                 log.info("从缓存中获取 AI 服务实例，appId: {}", appId);
                 return service;

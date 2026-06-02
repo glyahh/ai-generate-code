@@ -1,7 +1,6 @@
 package com.dbts.glyahhaigeneratecode.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -21,7 +20,11 @@ import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 
 import static com.dbts.glyahhaigeneratecode.constant.ChatHistoryMemoryCompactionConstant.*;
 
+import com.dbts.glyahhaigeneratecode.core.memory.ChatAiMemoryRedisSupport;
+import com.dbts.glyahhaigeneratecode.core.memory.ChatHistoryAiMemoryRebuildSupport;
+import com.dbts.glyahhaigeneratecode.core.memory.ChatHistoryEchoRedisSupport;
 import com.dbts.glyahhaigeneratecode.core.util.ChatHistorySchemaMigrationSupport;
+import com.dbts.glyahhaigeneratecode.service.MemoryShrinkService;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ConversationMemoryStateService;
@@ -38,10 +41,8 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,15 +52,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  * 对话历史 服务层实现。
  * <p>
  * 当 Redis 中用户轮数超过 {@link ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，会通过
- * {@link #trySummarizeOldestRoundsIfNeeded} 将最早两轮合并为摘要并写回 DB（逻辑删原文）、再按 DB 重建 Redis；
+ * {@link #trySummarizeOldestRoundsIfNeeded} 将最早两轮合并为摘要写入 memory_shrink（chat_history 保持全文）并重建 AI Redis；
  * HTML/MULTI_FILE 下更早的 AI 长文做片段压缩，但保留「最后一轮中主 AI 长文」以降低整站漂移。
  * </p>
  *
@@ -81,6 +80,18 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
     @Resource
     private ConversationMemoryStateService conversationMemoryStateService;
+
+    @Resource
+    private MemoryShrinkService memoryShrinkService;
+
+    @Resource
+    private ChatHistoryEchoRedisSupport chatHistoryEchoRedisSupport;
+
+    @Resource
+    private ChatHistoryAiMemoryRebuildSupport chatHistoryAiMemoryRebuildSupport;
+
+    @Resource
+    private ChatAiMemoryRedisSupport chatAiMemoryRedisSupport;
 
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
@@ -147,6 +158,10 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (!saved || chatHistory.getId() == null || chatHistory.getId() <= 0) {
             return null;
         }
+        chatHistoryEchoRedisSupport.invalidate(appId);
+        if (ChatHistoryMessageTypeEnum.USER.getValue().equals(messageType)) {
+            chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
+        }
         return chatHistory.getId();
     }
 
@@ -168,21 +183,65 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         boolean isCreator = app.getUserId().equals(loginUser.getId());
         ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权查看该应用的对话历史");
 
-        // 2. 组装按应用与时间游标过滤的查询请求对象,得到与分页接口一致的 QueryWrapper 入参
-        // 构建查询条件
-        ChatHistoryQueryRequest queryRequest = new ChatHistoryQueryRequest();
-        queryRequest.setAppId(appId);
-        queryRequest.setLastCreateTime(lastCreateTime);
-        QueryWrapper queryWrapper = this.buildQueryWrapper(queryRequest);
+        Page<ChatHistory> page = loadAppChatHistoryPageFromEchoOrDb(appId, pageSize, lastCreateTime);
 
-        // 3. 执行首页固定容量分页查询,得到当前页的 ChatHistory 实体列表
-        // 查询数据
-        Page<ChatHistory> page = this.page(Page.of(1, pageSize), queryWrapper);
-
-        // 4. 为 workflow AI 行追加阶段状态标记,得到前端可直接渲染绿红灰态的回显文本
-        // 从数据库中查到workflow生成的AI message,删掉给后面加上状态
         ChatHistorySchemaMigrationSupport.appendWorkflowStageStatusForHistoryPage(page);
         return AppChatHistoryPageVO.from(page, app.getIsBeta());
+    }
+
+    /**
+     * 优先 echo_memory 全文缓存，miss 时从 chat_history 加载并回填 Redis。
+     *
+     * @param appId          应用 id
+     * @param pageSize       每页条数
+     * @param lastCreateTime 游标：仅返回 createTime 小于等于该时间的记录；首页为 null
+     * @return 内存分页结果，records 为当前页、totalRow 为全文条数
+     */
+    private Page<ChatHistory> loadAppChatHistoryPageFromEchoOrDb(Long appId, int pageSize, LocalDateTime lastCreateTime) {
+        // 1. 尝试 echo_memory 命中全文列表
+        List<ChatHistory> fullList = chatHistoryEchoRedisSupport.getCachedFullHistory(appId);
+        if (fullList == null) {
+            // 2. miss 时从 chat_history 升序拉全量并回填 Redis
+            QueryWrapper allQ = new QueryWrapper();
+            allQ.eq(ChatHistory::getAppId, appId);
+            allQ.orderBy(ChatHistory::getCreateTime, true);
+            fullList = this.list(allQ);
+            if (fullList == null) {
+                fullList = Collections.emptyList();
+            }
+            chatHistoryEchoRedisSupport.putFullHistory(appId, fullList);
+        }
+        // 3. 按 lastCreateTime 过滤并在内存中倒序分页，得到与旧 SQL 语义一致的当前页
+        List<ChatHistory> filtered = fullList.stream()
+                .filter(row -> lastCreateTime == null
+                        || row.getCreateTime() == null
+                        || !row.getCreateTime().isAfter(lastCreateTime))
+                .sorted((a, b) -> {
+                    if (a.getCreateTime() == null && b.getCreateTime() == null) {
+                        return Long.compare(
+                                b.getId() == null ? 0L : b.getId(),
+                                a.getId() == null ? 0L : a.getId());
+                    }
+                    if (a.getCreateTime() == null) {
+                        return 1;
+                    }
+                    if (b.getCreateTime() == null) {
+                        return -1;
+                    }
+                    int cmp = b.getCreateTime().compareTo(a.getCreateTime());
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+                    return Long.compare(
+                            b.getId() == null ? 0L : b.getId(),
+                            a.getId() == null ? 0L : a.getId());
+                })
+                .limit(pageSize)
+                .toList();
+        Page<ChatHistory> page = new Page<>(1, pageSize);
+        page.setRecords(new ArrayList<>(filtered));
+        page.setTotalRow(fullList.size());
+        return page;
     }
 
 
@@ -455,8 +514,19 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum) {
-        // 1. 先按既有链路把 DB 历史恢复到 Redis，保持与旧行为一致。
-        int restored = turnHistoryToMemory(appId, messageWindowChatMemory, maxCount);
+        int restored;
+        if (chatHistoryAiMemoryRebuildSupport.hasAiMemoryInRedis(appId)) {
+            chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
+            try {
+                List<ChatMessage> existing = chatMemoryStore.getMessages(appId);
+                restored = existing == null ? 0 : existing.size();
+            } catch (Exception e) {
+                restored = 0;
+            }
+        } else {
+            restored = chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(
+                    appId, messageWindowChatMemory, maxCount, codeGenTypeEnum);
+        }
         // 注入数量
         int injectedCount = 0;
 
@@ -501,14 +571,116 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         boolean isCreator = app.getUserId().equals(loginUser.getId());
         ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权导出该应用的对话历史");
 
-        // 2. 构造按 appId 过滤且按时间升序的查询,得到导出用的全量历史行
-        QueryWrapper queryWrapper = new QueryWrapper();
-        queryWrapper.eq(ChatHistory::getAppId, appId);
-        queryWrapper.orderBy(ChatHistory::getCreateTime, true);
-        List<ChatHistory> list = this.list(queryWrapper);
-        log.info("导出对话历史，appId={}, count={}", appId, list != null ? list.size() : 0);
+        List<ChatHistory> list = chatHistoryEchoRedisSupport.getCachedFullHistory(appId);
+        if (list == null) {
+            QueryWrapper queryWrapper = new QueryWrapper();
+            queryWrapper.eq(ChatHistory::getAppId, appId);
+            queryWrapper.orderBy(ChatHistory::getCreateTime, true);
+            list = this.list(queryWrapper);
+            if (list == null) {
+                list = Collections.emptyList();
+            }
+            chatHistoryEchoRedisSupport.putFullHistory(appId, list);
+        }
+        log.info("导出对话历史，appId={}, count={}", appId, list.size());
         // 3. 将实体列表批量转为 VO 列表,得到导出接口可直接序列化的结果
-        return getChatHistoryVOList(list != null ? list : Collections.emptyList());
+        return getChatHistoryVOList(list);
+    }
+
+    /**
+     * 在线截断 Redis 后，将变更的 AI 行 upsert 到 memory_shrink。
+     *
+     * @param appId           应用 id
+     * @param before          截断前 Redis 消息列表
+     * @param after           截断后 Redis 消息列表
+     * @param codeGenTypeEnum 代码生成类型（豁免主 AI 规则）
+     */
+    private void syncTruncateShrinksAfterRedisCompact(Long appId, List<ChatMessage> before, List<ChatMessage> after,
+                                                      CodeGenTypeEnum codeGenTypeEnum) {
+        if (before == null || after == null || before.size() != after.size()) {
+            return;
+        }
+        try {
+            syncTruncateShrinksAfterRedisCompactInternal(appId, before, after, codeGenTypeEnum);
+        } catch (Exception e) {
+            log.warn("同步 message_truncate 到 memory_shrink 失败，appId={}", appId, e);
+        }
+    }
+
+    /**
+     * 按时间序对齐 Redis AiMessage 与 chat_history AI 行，对发生 compact 的行 upsert message_truncate
+     *
+     * @param appId           应用 id
+     * @param before          截断前 Redis 消息
+     * @param after           截断后 Redis 消息
+     * @param codeGenTypeEnum 代码生成类型
+     */
+    private void syncTruncateShrinksAfterRedisCompactInternal(Long appId, List<ChatMessage> before, List<ChatMessage> after,
+                                                              CodeGenTypeEnum codeGenTypeEnum) {
+        memoryShrinkService.ensureTableExists();
+        Set<Long> mergedSourceIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+        QueryWrapper q = new QueryWrapper();
+        q.eq(ChatHistory::getAppId, appId);
+        if (!mergedSourceIds.isEmpty()) {
+            q.notIn(ChatHistory::getId, mergedSourceIds);
+        }
+        q.orderBy(ChatHistory::getCreateTime, true);
+        List<ChatHistory> dbRows = this.list(q);
+        if (dbRows == null || dbRows.isEmpty()) {
+            return;
+        }
+        List<ChatHistory> dbAiRows = dbRows.stream()
+                .filter(h -> ChatHistoryMessageTypeEnum.AI.getValue().equals(h.getMessageType()))
+                .toList();
+        int exemptAiIdx = ChatHistorySchemaMigrationSupport.indexOfExemptAiCompactionRedisMessages(after, codeGenTypeEnum);
+        int aiDbIdx = 0;
+        Long lastUserId = dbRows.stream()
+                .filter(h -> ChatHistoryMessageTypeEnum.USER.getValue().equals(h.getMessageType()))
+                .reduce((first, second) -> second)
+                .map(ChatHistory::getUserId)
+                .orElse(null);
+        for (int i = 0; i < after.size(); i++) {
+            ChatMessage msg = after.get(i);
+            if (msg instanceof UserMessage) {
+                for (ChatHistory row : dbRows) {
+                    if (ChatHistoryMessageTypeEnum.USER.getValue().equals(row.getMessageType())
+                            && Objects.equals(row.getMessage(), ((UserMessage) msg).singleText())) {
+                        lastUserId = row.getUserId();
+                    }
+                }
+                continue;
+            }
+            if (!(msg instanceof AiMessage aiMessage)) {
+                continue;
+            }
+            if (exemptAiIdx >= 0 && i == exemptAiIdx) {
+                if (aiDbIdx < dbAiRows.size()) {
+                    aiDbIdx++;
+                }
+                continue;
+            }
+            ChatMessage oldMsg = before.get(i);
+            String oldText = oldMsg instanceof AiMessage o ? o.text() : null;
+            String newText = aiMessage.text();
+            if (Objects.equals(oldText, newText) || aiDbIdx >= dbAiRows.size()) {
+                if (aiDbIdx < dbAiRows.size()) {
+                    aiDbIdx++;
+                }
+                continue;
+            }
+            ChatHistory sourceRow = dbAiRows.get(aiDbIdx);
+            aiDbIdx++;
+            if (sourceRow.getId() == null || lastUserId == null) {
+                continue;
+            }
+            memoryShrinkService.upsertMessageTruncate(
+                    appId,
+                    lastUserId,
+                    sourceRow.getId(),
+                    sourceRow.getCreateTime(),
+                    newText,
+                    ChatHistoryMessageTypeEnum.AI.getValue());
+        }
     }
 
     @Override
@@ -523,19 +695,61 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         boolean isCreator = app.getUserId().equals(loginUser.getId());
         ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权查看该应用的对话轮数");
 
-        // 2. 统计 DB 中 USER 条数作为权威轮数,并与 Redis 视角对比打日志
+        // 2. 统计 DB 中 USER 条数作为权威轮数
         QueryWrapper queryWrapper = new QueryWrapper();
         queryWrapper.eq(ChatHistory::getAppId, appId);
         queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
         long count = this.count(queryWrapper);
-        // 3. 读取 Redis 侧轮数做一致性校验,得到偏差告警或对齐日志
-        // 优先数 Redis 里的 user 条数，失败则回退数 DB
-        int redisRounds = ChatHistorySchemaMigrationSupport.countRoundsByAppIdInternal(appId, chatMemoryStore, this.getMapper());
-        if (redisRounds != (int) count) {
-            log.warn("对话轮数存在 Redis/DB 偏差，appId={}, dbRounds={}, redisRounds={}", appId, count, redisRounds);
-        } else {
-            log.info("统计对话轮数，appId={}, rounds={}, redisAligned=true", appId, count);
+
+        // 3. 仅对比“回显全文缓存”（chat:echo_memory:{appId}）与 DB 轮数，避免与 AI ChatMemory（压缩/注入/窗口）产生噪声偏差
+        // 3.1 优先从 echo_memory 命中全文列表；miss 时回源 DB 并回填
+        List<ChatHistory> echoFull = chatHistoryEchoRedisSupport.getCachedFullHistory(appId);
+        if (echoFull == null) {
+            QueryWrapper allQ = new QueryWrapper();
+            allQ.eq(ChatHistory::getAppId, appId);
+            allQ.orderBy(ChatHistory::getCreateTime, true);
+            echoFull = this.list(allQ);
+            if (echoFull == null) {
+                echoFull = Collections.emptyList();
+            }
+            // 将 chat_history 全文写入 echo_memory 并设置 TTL
+            chatHistoryEchoRedisSupport.putFullHistory(appId, echoFull);
         }
+
+        // 计算 echo_memory 中的 USER 条数
+        int echoRounds = (int) echoFull.stream()
+                .filter(row -> ChatHistoryMessageTypeEnum.USER.getValue().equals(row.getMessageType()))
+                .count();
+
+        if (echoRounds != (int) count) {
+            // 3.2 自愈一次：invalidate + 回源 DB 重建 echo_memory 后再次比对
+            int echoRoundsAfter = echoRounds;
+            try {
+                chatHistoryEchoRedisSupport.invalidate(appId);
+                QueryWrapper allQ2 = new QueryWrapper();
+                allQ2.eq(ChatHistory::getAppId, appId);
+                allQ2.orderBy(ChatHistory::getCreateTime, true);
+                List<ChatHistory> rebuilt = this.list(allQ2);
+                if (rebuilt == null) {
+                    rebuilt = Collections.emptyList();
+                }
+                chatHistoryEchoRedisSupport.putFullHistory(appId, rebuilt);
+                echoRoundsAfter = (int) rebuilt.stream()
+                        .filter(row -> ChatHistoryMessageTypeEnum.USER.getValue().equals(row.getMessageType()))
+                        .count();
+            } catch (Exception ignore) {
+                // 保持主流程可用：比对失败不影响对外返回值（仍以 DB 为准）
+            }
+            if (echoRoundsAfter != (int) count) {
+                log.warn("对话轮数存在 echo_memory/DB 偏差，appId={}, dbRounds={}, echoRoundsBefore={}, echoRoundsAfter={}",
+                        appId, count, echoRounds, echoRoundsAfter);
+            } else {
+                log.info("对话轮数已自愈对齐，appId={}, rounds={}, echoAligned=true", appId, count);
+            }
+        } else {
+            log.info("统计对话轮数，appId={}, rounds={}, echoAligned=true", appId, count);
+        }
+
         // 4. 对外仍以 DB 统计为准返回 int,得到与持久化一致的业务轮数
         return (int) count;
     }
@@ -550,21 +764,23 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
         // 2. 读取当前 DB 用户轮数并与阈值比较,未超标则记录日志后结束
         String reason = StrUtil.blankToDefault(triggerReason, "unknown");
-        // 统计库里 USER 消息条数，当作当前对话轮数
-        int dbRoundsBefore = ChatHistorySchemaMigrationSupport.countUserRoundsFromDatabase(appId, this.getMapper());
-        if (dbRoundsBefore <= ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
-            log.info("会话级总结跳过，compressType=conversation_summary, triggerReason={}, appId={}, dbRounds={}, threshold={}",
-                    reason, appId, dbRoundsBefore, ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY);
+        memoryShrinkService.ensureTableExists();
+        Set<Long> mergedSourceIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+        int effectiveRoundsBefore = memoryShrinkService.countEffectiveUserRounds(appId, mergedSourceIds);
+        if (effectiveRoundsBefore <= ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
+            log.info("会话级总结跳过，compressType=conversation_summary, triggerReason={}, appId={}, effectiveRounds={}, threshold={}",
+                    reason, appId, effectiveRoundsBefore, ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY);
             return;
         }
         // 3. 确保审计列存在后进入 while 循环,反复合并最早两轮直至轮数达标
         // 合并写库前再检查表结构是否满足 audit / longtext
         ChatHistorySchemaMigrationSupport.ensureAuditColumnsIfMissing(appId, this.getMapper());
         int mergedCount = 0;
-        // 轮数仍超阈值时，反复合并最早两轮
-        while (ChatHistorySchemaMigrationSupport.countUserRoundsFromDatabase(appId, this.getMapper()) > ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
-            // 按创建时间取最早的 4 条消息（两轮 user+ai）
-            List<ChatHistory> oldestFour = ChatHistorySchemaMigrationSupport.listOldestMessagesForMerge(appId, ChatHistoryConstant.MESSAGES_PER_MERGE, this.getMapper());
+        while (memoryShrinkService.countEffectiveUserRounds(appId, memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId))
+                > ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
+            Set<Long> excludeIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+            List<ChatHistory> oldestFour = ChatHistorySchemaMigrationSupport.listOldestMessagesForMerge(
+                    appId, ChatHistoryConstant.MESSAGES_PER_MERGE, this.getMapper(), excludeIds);
             if (oldestFour == null || oldestFour.size() < ChatHistoryConstant.MESSAGES_PER_MERGE) {
                 log.warn("对话合并：不足 {} 条最早消息，跳过本次合并，appId={}", ChatHistoryConstant.MESSAGES_PER_MERGE, appId);
                 break;
@@ -572,9 +788,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             String userSummary;
             String aiSummary;
             try {
-                // 调用模型把两轮对话压成带【用户总结】【AI总结】标记的文本
                 String summaryText = ChatHistorySchemaMigrationSupport.summarizeTwoRoundsWithAi(oldestFour, chatModel);
-                // 从模型输出里拆出 user/ai 两段摘要
                 String[] parsed = ChatHistorySchemaMigrationSupport.parseSummaryResponse(summaryText);
                 userSummary = parsed[0];
                 aiSummary = parsed[1];
@@ -583,26 +797,25 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 break;
             }
             LocalDateTime anchorCreateTime = oldestFour.getFirst().getCreateTime();
-            for (ChatHistory row : oldestFour) {
-                this.removeById(row.getId());
-            }
-            // 插入合并后的一轮 USER+AI 摘要行
-            ChatHistorySchemaMigrationSupport.saveMergedRoundSummaryRows(appId, userId, anchorCreateTime, userSummary, aiSummary, this.getMapper());
+            List<Long> sourceIds = oldestFour.stream().map(ChatHistory::getId).filter(Objects::nonNull).toList();
+            memoryShrinkService.insertSummaryPair(appId, userId, anchorCreateTime, userSummary, aiSummary, sourceIds);
             mergedCount++;
-            log.info("已将最早两轮合并为一轮并写入 DB（逻辑删原文），appId={}, mergedCount={}", appId, mergedCount);
+            log.info("已将最早两轮合并写入 memory_shrink（chat_history 保留原文），appId={}, mergedCount={}", appId, mergedCount);
         }
-        // 合并结束后重新统计 DB 轮数，供完成日志使用
-        int dbRoundsAfter = ChatHistorySchemaMigrationSupport.countUserRoundsFromDatabase(appId, this.getMapper());
-        log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeDbRounds={}, afterDbRounds={}, mergedIterations={}",
-                reason, appId, dbRoundsBefore, dbRoundsAfter, mergedCount);
-        // 4. 若发生过合并则重建 MessageWindowChatMemory 并重新灌库,得到与 DB 一致的 Redis 视图
+        int effectiveRoundsAfter = memoryShrinkService.countEffectiveUserRounds(appId, memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId));
+        log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeEffectiveRounds={}, afterEffectiveRounds={}, mergedIterations={}",
+                reason, appId, effectiveRoundsBefore, effectiveRoundsAfter, mergedCount);
         if (mergedCount > 0) {
+            chatHistoryEchoRedisSupport.invalidate(appId);
             MessageWindowChatMemory rebuildMemory = MessageWindowChatMemory.builder()
                     .id(appId)
                     .chatMemoryStore(chatMemoryStore)
                     .maxMessages(ChatHistoryConstant.CHAT_MEMORY_MAX_MESSAGES)
                     .build();
-            turnHistoryToMemory(appId, rebuildMemory, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS);
+            App app = appService.getById(appId);
+            CodeGenTypeEnum codeGenTypeEnum = app != null ? CodeGenTypeEnum.getEnumByValue(app.getCodeGenType()) : null;
+            chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(
+                    appId, rebuildMemory, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS, codeGenTypeEnum);
         }
     }
 
@@ -661,6 +874,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             // 5. 若存在变更则写回 Redis,并打完成或跳过日志,得到在线压缩闭环
             if (changed) {
                 chatMemoryStore.updateMessages(appId, newList);
+                syncTruncateShrinksAfterRedisCompact(appId, messages, newList, codeGenTypeEnum);
+                chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
                 log.info("消息级截断完成，compressType=message_truncate, triggerReason={}, appId={}, codeGenType={}, beforeCount={}, afterCount={}, changed=true",
                         StrUtil.blankToDefault(triggerReason, "unknown"), appId, codeGenTypeEnum.getValue(), beforeCount, newList.size());
             } else {
@@ -670,6 +885,16 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         } catch (Exception e) {
             log.warn("在线压缩 Redis 历史上下文失败，appId={}", appId, e);
         }
+    }
+
+    /**
+     * 委托 ChatAiMemoryRedisSupport 刷新 AI 轨 Redis TTL
+     *
+     * @param appId 应用 id
+     */
+    @Override
+    public void refreshAiChatMemoryTtl(Long appId) {
+        chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
     }
 
     @Override

@@ -56,6 +56,10 @@ conversation:
     file-note-max-paths-per-round: 20
     file-note-input-chars: 2000
     file-note-max-note-chars: 120
+    # LangChain4j ChatMemory（AI 压缩上下文）TTL，秒
+    chat-ttl-seconds: 600
+    # 用户回显全文 echo Redis TTL，秒
+    echo-memory-ttl-seconds: 3600
 
 
 server:

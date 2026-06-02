@@ -1266,6 +1266,21 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         state.lastToolRequestName = toolName
         toolSelectHintShown.value = true
 
+        // 根因修复：此前只写 pendingToolRequest，不创建 kind==='tool_request' 的 segments，
+        // 导致“选择工具”卡片无法在流结束/历史回放中稳定展示（只能短暂闪一下）。
+        const rawLabel = mReqNow[0] ?? `[选择工具] ${toolName}`
+        const lastSeg = state.segments[state.segments.length - 1]
+        const alreadyHasSameToolRequest =
+          lastSeg?.kind === 'tool_request' && (lastSeg as UiToolRequestSegment).toolName === toolName
+        if (!alreadyHasSameToolRequest) {
+          state.segments.push({
+            kind: 'tool_request',
+            rawLabel,
+            toolName,
+            createdAt: Date.now(),
+          })
+        }
+
         if (afterMatch.startsWith('\r\n')) {
           state.buffer = state.buffer.slice(matchStart + matchLen + 2)
           state.buffer = consumeLeadingNewlines(state.buffer, 2)

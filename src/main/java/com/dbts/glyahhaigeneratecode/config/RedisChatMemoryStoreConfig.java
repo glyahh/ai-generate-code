@@ -1,7 +1,6 @@
 package com.dbts.glyahhaigeneratecode.config;
 
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
-import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -21,13 +20,16 @@ public class RedisChatMemoryStoreConfig {
     private long ttl;
 
     @Bean
-    public RedisChatMemoryStore redisChatMemoryStore() {
+    public RedisChatMemoryStore redisChatMemoryStore(ConversationMemoryProperties conversationMemoryProperties) {
+        long aiTtl = conversationMemoryProperties.getChatTtlSeconds() > 0
+                ? conversationMemoryProperties.getChatTtlSeconds()
+                : ttl;
         return RedisChatMemoryStore.builder()
                 .host(host)
                 .port(port)
                 // 密码不为空时设置user,为空不要设置
                 .password(password)
-                .ttl(ttl)
+                .ttl(aiTtl)
                 .build();
     }
 }
