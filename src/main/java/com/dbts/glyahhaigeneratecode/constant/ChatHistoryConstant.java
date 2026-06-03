@@ -6,10 +6,14 @@ package com.dbts.glyahhaigeneratecode.constant;
 public interface ChatHistoryConstant {
 
     /**
-     * Redis 中用户消息条数（轮数）超过该阈值后，启动「最早两轮合并为一轮摘要」并写回 DB + 重建 Redis。
-     * 与 {@link #CHAT_MEMORY_MAX_MESSAGES}、{@link #MEMORY_PRELOAD_MESSAGE_ROWS} 配合；阈值 3 表示约 3 轮用户发问后再触发合并。
+     * AI 上下文可见的「用户轮」上限：1 条压缩摘要（计 1 轮）+ {@link #TARGET_UNMERGED_DB_USER_ROUNDS} 条未合并完整轮。
      */
     int MAX_ROUNDS_BEFORE_SUMMARY = 3;
+
+    /**
+     * 合并后 chat_history 中保留的未合并 USER 轮数（上一轮完整 + 当前轮）。
+     */
+    int TARGET_UNMERGED_DB_USER_ROUNDS = 2;
 
     /**
      * {@link dev.langchain4j.memory.chat.MessageWindowChatMemory} 窗口上限（条），含 user/ai/tool 等。

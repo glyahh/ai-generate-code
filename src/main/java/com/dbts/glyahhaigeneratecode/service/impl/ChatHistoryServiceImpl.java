@@ -514,19 +514,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum) {
-        int restored;
-        if (chatHistoryAiMemoryRebuildSupport.hasAiMemoryInRedis(appId)) {
-            chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
-            try {
-                List<ChatMessage> existing = chatMemoryStore.getMessages(appId);
-                restored = existing == null ? 0 : existing.size();
-            } catch (Exception e) {
-                restored = 0;
-            }
-        } else {
-            restored = chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(
-                    appId, messageWindowChatMemory, maxCount, codeGenTypeEnum);
-        }
+        messageWindowChatMemory.clear();
+        int restored = chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(
+                appId, messageWindowChatMemory, maxCount, codeGenTypeEnum);
         // 注入数量
         int injectedCount = 0;
 
@@ -762,49 +752,75 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (appId == null || appId <= 0 || userId == null) {
             return;
         }
-        // 2. 读取当前 DB 用户轮数并与阈值比较,未超标则记录日志后结束
         String reason = StrUtil.blankToDefault(triggerReason, "unknown");
         memoryShrinkService.ensureTableExists();
         Set<Long> mergedSourceIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
-        int effectiveRoundsBefore = memoryShrinkService.countEffectiveUserRounds(appId, mergedSourceIds);
-        if (effectiveRoundsBefore <= ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
-            log.info("会话级总结跳过，compressType=conversation_summary, triggerReason={}, appId={}, effectiveRounds={}, threshold={}",
-                    reason, appId, effectiveRoundsBefore, ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY);
+        int dbUsersBefore = memoryShrinkService.countUnmergedDbUserRounds(appId, mergedSourceIds);
+        if (dbUsersBefore <= ChatHistoryConstant.TARGET_UNMERGED_DB_USER_ROUNDS) {
+            log.info("会话级总结跳过，compressType=conversation_summary, triggerReason={}, appId={}, unmergedDbUsers={}, target={}",
+                    reason, appId, dbUsersBefore, ChatHistoryConstant.TARGET_UNMERGED_DB_USER_ROUNDS);
             return;
         }
-        // 3. 确保审计列存在后进入 while 循环,反复合并最早两轮直至轮数达标
-        // 合并写库前再检查表结构是否满足 audit / longtext
         ChatHistorySchemaMigrationSupport.ensureAuditColumnsIfMissing(appId, this.getMapper());
         int mergedCount = 0;
-        while (memoryShrinkService.countEffectiveUserRounds(appId, memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId))
-                > ChatHistoryConstant.MAX_ROUNDS_BEFORE_SUMMARY) {
+        while (true) {
             Set<Long> excludeIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
-            List<ChatHistory> oldestFour = ChatHistorySchemaMigrationSupport.listOldestMessagesForMerge(
-                    appId, ChatHistoryConstant.MESSAGES_PER_MERGE, this.getMapper(), excludeIds);
-            if (oldestFour == null || oldestFour.size() < ChatHistoryConstant.MESSAGES_PER_MERGE) {
-                log.warn("对话合并：不足 {} 条最早消息，跳过本次合并，appId={}", ChatHistoryConstant.MESSAGES_PER_MERGE, appId);
+            int dbUsers = memoryShrinkService.countUnmergedDbUserRounds(appId, excludeIds);
+            if (dbUsers <= ChatHistoryConstant.TARGET_UNMERGED_DB_USER_ROUNDS) {
                 break;
             }
-            String userSummary;
-            String aiSummary;
+            var existingSummary = memoryShrinkService.getConversationSummaryPair(appId);
+            List<ChatHistory> toMerge;
+            String summaryText;
+            LocalDateTime anchorCreateTime;
+            List<Long> sourceIds;
             try {
-                String summaryText = ChatHistorySchemaMigrationSupport.summarizeTwoRoundsWithAi(oldestFour, chatModel);
-                String[] parsed = ChatHistorySchemaMigrationSupport.parseSummaryResponse(summaryText);
-                userSummary = parsed[0];
-                aiSummary = parsed[1];
+                if (existingSummary.isEmpty()) {
+                    toMerge = ChatHistorySchemaMigrationSupport.listOldestMessagesForMergeValidated(
+                            appId, ChatHistoryConstant.MESSAGES_PER_MERGE, ChatHistoryConstant.ROUNDS_TO_MERGE,
+                            this.getMapper(), excludeIds);
+                    if (toMerge == null) {
+                        log.warn("对话合并：不足两轮最早消息，跳过本次合并，appId={}", appId);
+                        break;
+                    }
+                    summaryText = ChatHistorySchemaMigrationSupport.summarizeTwoRoundsWithAi(toMerge, chatModel);
+                    anchorCreateTime = toMerge.getFirst().getCreateTime();
+                    sourceIds = toMerge.stream().map(ChatHistory::getId).filter(Objects::nonNull).toList();
+                } else {
+                    var pair = existingSummary.get();
+                    toMerge = ChatHistorySchemaMigrationSupport.listOldestMessagesForMergeValidated(
+                            appId, 2, 1, this.getMapper(), excludeIds);
+                    if (toMerge == null) {
+                        log.warn("对话合并：不足一轮最早消息用于滚动并入摘要，跳过本次合并，appId={}", appId);
+                        break;
+                    }
+                    summaryText = ChatHistorySchemaMigrationSupport.summarizeWithExistingSummary(
+                            pair.userSummary(), pair.aiSummary(), toMerge, chatModel);
+                    anchorCreateTime = pair.anchorCreateTime() != null
+                            ? pair.anchorCreateTime()
+                            : toMerge.getFirst().getCreateTime();
+                    sourceIds = new ArrayList<>(pair.sourceChatHistoryIds());
+                    for (ChatHistory row : toMerge) {
+                        if (row.getId() != null) {
+                            sourceIds.add(row.getId());
+                        }
+                    }
+                }
             } catch (Exception e) {
-                log.error("AI 总结前两轮对话失败，跳过本次合并，appId={}", appId, e);
+                log.error("AI 总结对话失败，跳过本次合并，appId={}", appId, e);
                 break;
             }
-            LocalDateTime anchorCreateTime = oldestFour.getFirst().getCreateTime();
-            List<Long> sourceIds = oldestFour.stream().map(ChatHistory::getId).filter(Objects::nonNull).toList();
-            memoryShrinkService.insertSummaryPair(appId, userId, anchorCreateTime, userSummary, aiSummary, sourceIds);
+            String[] parsed = ChatHistorySchemaMigrationSupport.parseSummaryResponse(summaryText);
+            memoryShrinkService.replaceConversationSummary(
+                    appId, userId, anchorCreateTime, parsed[0], parsed[1], sourceIds);
             mergedCount++;
-            log.info("已将最早两轮合并写入 memory_shrink（chat_history 保留原文），appId={}, mergedCount={}", appId, mergedCount);
+            log.info("已滚动合并写入 memory_shrink（唯一摘要对），appId={}, mergedCount={}", appId, mergedCount);
         }
-        int effectiveRoundsAfter = memoryShrinkService.countEffectiveUserRounds(appId, memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId));
-        log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeEffectiveRounds={}, afterEffectiveRounds={}, mergedIterations={}",
-                reason, appId, effectiveRoundsBefore, effectiveRoundsAfter, mergedCount);
+        Set<Long> mergedAfter = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+        int dbUsersAfter = memoryShrinkService.countUnmergedDbUserRounds(appId, mergedAfter);
+        int summaryUsers = memoryShrinkService.countSummaryUserRounds(appId);
+        log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeDbUsers={}, afterDbUsers={}, summaryUsers={}, mergedIterations={}",
+                reason, appId, dbUsersBefore, dbUsersAfter, summaryUsers, mergedCount);
         if (mergedCount > 0) {
             chatHistoryEchoRedisSupport.invalidate(appId);
             MessageWindowChatMemory rebuildMemory = MessageWindowChatMemory.builder()
@@ -812,6 +828,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                     .chatMemoryStore(chatMemoryStore)
                     .maxMessages(ChatHistoryConstant.CHAT_MEMORY_MAX_MESSAGES)
                     .build();
+            rebuildMemory.clear();
             App app = appService.getById(appId);
             CodeGenTypeEnum codeGenTypeEnum = app != null ? CodeGenTypeEnum.getEnumByValue(app.getCodeGenType()) : null;
             chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(

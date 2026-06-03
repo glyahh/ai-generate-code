@@ -10,6 +10,7 @@ import com.dbts.glyahhaigeneratecode.model.Entity.MemoryShrink;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.MemoryShrinkTypeEnum;
+import com.dbts.glyahhaigeneratecode.model.DTO.ConversationSummaryPair;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.MemoryShrinkService;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -23,12 +24,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.dbts.glyahhaigeneratecode.constant.ChatHistoryMemoryCompactionConstant.EMPTY_AI_MEMORY_PLACEHOLDER;
@@ -186,28 +187,35 @@ public class ChatHistoryAiMemoryRebuildSupport {
                 truncateByChatId.put(shrink.getChatHistoryId(), shrink.getMessage());
             }
         }
-        // 2. 将 conversation_summary 转为时间轴项
-        for (MemoryShrink shrink : shrinkRows) {
-            if (!MemoryShrinkTypeEnum.CONVERSATION_SUMMARY.getValue().equals(shrink.getShrinkType())) {
-                continue;
-            }
+        // 2. 将 conversation_summary 折叠为唯一一对时间轴项
+        Optional<ConversationSummaryPair> summaryPair = memoryShrinkService.getConversationSummaryPair(appId);
+        // 如果summaryPair不为空指针的话
+        summaryPair.ifPresent(pair -> {
             items.add(new AiMemoryTimelineItem(
-                    shrink.getAnchorCreateTime(),
-                    shrink.getMessageType(),
-                    shrink.getMessage(),
+                    pair.anchorCreateTime(),
+                    ChatHistoryMessageTypeEnum.USER.getValue(),
+                    pair.userSummary(),
                     null,
-                    shrink.getUserId(),
+                    null,
                     true));
-        }
+            items.add(new AiMemoryTimelineItem(
+                    pair.anchorCreateTime(),
+                    ChatHistoryMessageTypeEnum.AI.getValue(),
+                    pair.aiSummary(),
+                    null,
+                    null,
+                    true));
+        });
 
-        // 3. 查询未合并 chat_history 并与截断映射合流
+        // 3. 查询未合并 chat_history 并与截断映射合流（保留全部未合并轮，上限 MEMORY_PRELOAD）
+        int dbRowLimit = Math.max(maxCount, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS);
         QueryWrapper q = new QueryWrapper();
         q.eq(ChatHistory::getAppId, appId);
         if (mergedSourceIds != null && !mergedSourceIds.isEmpty()) {
             q.notIn(ChatHistory::getId, mergedSourceIds);
         }
         q.orderBy(ChatHistory::getCreateTime, false);
-        q.limit(maxCount * 2);
+        q.limit(dbRowLimit);
         List<ChatHistory> recent = chatHistoryMapper.selectListByQuery(q);
         if (recent != null) {
             for (int i = recent.size() - 1; i >= 0; i--) {
@@ -230,13 +238,14 @@ public class ChatHistoryAiMemoryRebuildSupport {
             }
         }
 
-        // 4. 统一排序后截取最近 maxCount 条
+        // 4. 统一排序；条数超过预加载上限时仅截断最旧部分，避免丢掉「上一轮完整」
         items.sort(Comparator.comparing((AiMemoryTimelineItem o) -> o.sortTime, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(o -> o.fromShrink ? 0 : 1));
-        if (items.size() <= maxCount) {
+        if (items.size() <= dbRowLimit) {
             return items;
         }
-        return new ArrayList<>(items.subList(items.size() - maxCount, items.size()));
+        // 超过预加载上限时仅截断最旧部分，避免丢掉「上一轮完整」
+        return new ArrayList<>(items.subList(items.size() - dbRowLimit, items.size()));
     }
 
     /**
@@ -343,37 +352,6 @@ public class ChatHistoryAiMemoryRebuildSupport {
             return ChatHistorySchemaMigrationSupport.readPromptFromClasspath(promptPath);
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    /** AI 重建时间轴上的单条消息视图（summary 行无 chatHistoryId） */
-    private static final class AiMemoryTimelineItem {
-        private final LocalDateTime sortTime;
-        private final String messageType;
-        private final String message;
-        private final Long chatHistoryId;
-        private final Long userId;
-        private final boolean fromShrink;
-
-        /**
-         * 构造时间轴消息项，统一承载 summary 与 chat_history 两类来源字段
-         *
-         * @param sortTime      用于排序的时间
-         * @param messageType   消息类型（USER/AI）
-         * @param message       消息正文
-         * @param chatHistoryId chat_history 主键，summary 行为 null
-         * @param userId        用户 id
-         * @param fromShrink    是否来自 memory_shrink
-         */
-        private AiMemoryTimelineItem(LocalDateTime sortTime, String messageType, String message,
-                                     Long chatHistoryId, Long userId, boolean fromShrink) {
-            // 1. 写入时间轴条目的全部只读字段，供外部按统一结构排序与重建
-            this.sortTime = sortTime;
-            this.messageType = messageType;
-            this.message = message;
-            this.chatHistoryId = chatHistoryId;
-            this.userId = userId;
-            this.fromShrink = fromShrink;
         }
     }
 }

@@ -28,15 +28,22 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.dbts.glyahhaigeneratecode.constant.ChatHistoryMemoryCompactionConstant.*;
 
+/**
+ * 历史分页回显补 workflow 五阶段标记 -> AI 长文按类型压缩并豁免本轮主 AI -> Redis/DB 轮数统计与最早消息选取 -> LLM 两轮合并摘要写库 -> 缺失 audit 列或 message 非 longtext 时 DDL 补齐
+ */
 public final class ChatHistorySchemaMigrationSupport {
 
     private static final Logger log = LoggerFactory.getLogger(ChatHistorySchemaMigrationSupport.class);
 
+    /**
+     * 禁止实例化，本类仅提供静态工具方法供会话记忆与历史回显链路调用。
+     */
     private ChatHistorySchemaMigrationSupport() {
     }
 
@@ -47,6 +54,11 @@ public final class ChatHistorySchemaMigrationSupport {
      * @return 无
      */
     public static void appendWorkflowStageStatusForHistoryPage(Page<ChatHistory> page) {
+        // 方法大纲：
+        // 1. 遍历分页 AI 记录，筛选 workflow 相关消息
+        // 2. 清理旧阶段标记并重建五阶段状态行拼接到 message 尾部（仅内存，不改 DB）
+
+        // 1. 遍历分页 AI 记录，筛选 workflow 相关消息
         if (page == null || page.getRecords() == null || page.getRecords().isEmpty()) {
             return;
         }
@@ -564,6 +576,7 @@ public final class ChatHistorySchemaMigrationSupport {
      * @return 最早的消息列表（通常 4 条，对应两轮 user+ai）
      */
     public static List<ChatHistory> listOldestMessagesForMerge(Long appId, int limit, ChatHistoryMapper chatHistoryMapper) {
+        // 1. 无排除 id 时委托四参重载，得到最早 limit 条未过滤 chat_history
         return listOldestMessagesForMerge(appId, limit, chatHistoryMapper, null);
     }
 
@@ -579,6 +592,11 @@ public final class ChatHistorySchemaMigrationSupport {
     public static List<ChatHistory> listOldestMessagesForMerge(Long appId, int limit,
                                                                ChatHistoryMapper chatHistoryMapper,
                                                                java.util.Set<Long> excludeChatHistoryIds) {
+        // 方法大纲：
+        // 1. 构造按 createTime/id 正序的查询，排除已纳入 memory_shrink 的 chat_history id
+        // 2. 限制条数并返回最早若干条 ChatHistory
+
+        // 1. 构造按 createTime/id 正序的查询，排除已纳入 memory_shrink 的 chat_history id
         QueryWrapper q = new QueryWrapper();
         q.eq(ChatHistory::getAppId, appId);
         if (excludeChatHistoryIds != null && !excludeChatHistoryIds.isEmpty()) {
@@ -589,6 +607,44 @@ public final class ChatHistorySchemaMigrationSupport {
         q.limit(limit);
         // 2. 执行 list 查询,得到最早 limit 条 ChatHistory 实体
         return chatHistoryMapper.selectListByQuery(q);
+    }
+
+    /**
+     * 取最早若干条未合并消息，并校验 USER 轮数（2 轮需 4 条且 2 个 USER；已有摘要再合并 1 轮需 2 条且 1 个 USER）。
+     *
+     * @param appId                 应用 id
+     * @param messageLimit          最多取几条（4 或 2）
+     * @param expectedUserRounds    期望的 USER 轮数（2 或 1）
+     * @param chatHistoryMapper     Mapper
+     * @param excludeChatHistoryIds 已合并 id
+     * @return 校验通过的消息列表；不足或轮数不符时返回 null
+     */
+    public static List<ChatHistory> listOldestMessagesForMergeValidated(Long appId, int messageLimit,
+                                                                        int expectedUserRounds,
+                                                                        ChatHistoryMapper chatHistoryMapper,
+                                                                        Set<Long> excludeChatHistoryIds) {
+        // 方法大纲：
+        // 1. 取最早 messageLimit 条未合并消息
+        // 2. 校验条数与 USER 轮数是否符合合并策略（2 轮需 4 条 2 USER，续合并 1 轮需 2 条 1 USER）
+
+        // 1. 取最早 messageLimit 条未合并消息
+        List<ChatHistory> rows = listOldestMessagesForMerge(appId, messageLimit, chatHistoryMapper, excludeChatHistoryIds);
+        if (rows == null || rows.size() < messageLimit) {
+            return null;
+        }
+        // 2. 统计 USER 条数并与期望值比对，不符则返回 null 阻断合并
+        int userCount = 0;
+        for (ChatHistory row : rows) {
+            if (ChatHistoryMessageTypeEnum.USER.getValue().equals(row.getMessageType())) {
+                userCount++;
+            }
+        }
+        if (userCount != expectedUserRounds) {
+            log.warn("对话合并：最早 {} 条消息中 USER 轮数为 {}，期望 {}，appId={}",
+                    messageLimit, userCount, expectedUserRounds, appId);
+            return null;
+        }
+        return rows;
     }
 
 
@@ -611,6 +667,40 @@ public final class ChatHistorySchemaMigrationSupport {
                 + "【AI总结】AI的回复要点摘要\n\n"
                 + "对话内容：\n" + content;
         // 2. 调用注入的 ChatModel 执行一次非流式 chat,得到模型输出的总结原文
+        return chatModel.chat(prompt);
+    }
+
+    /**
+     * 在已有会话摘要基础上，再合并若干条 chat_history（通常 1 轮 2 条或 2 轮 4 条）。
+     *
+     * @param existingUserSummary 已有用户摘要
+     * @param existingAiSummary   已有 AI 摘要
+     * @param messages            待并入的最早消息（正序）
+     * @param chatModel           总结模型
+     * @return 模型输出的总结原文
+     */
+    public static String summarizeWithExistingSummary(String existingUserSummary, String existingAiSummary,
+                                                      List<ChatHistory> messages, ChatModel chatModel) {
+        // 方法大纲：
+        // 1. 拼接已有 user/ai 摘要与待合并新对话正文
+        // 2. 构造增量合并提示词并调用 ChatModel，得到带固定标记的新摘要原文
+
+        // 1. 拼接已有 user/ai 摘要与待合并新对话正文
+        StringBuilder content = new StringBuilder();
+        content.append("【已有用户摘要】").append(StrUtil.blankToDefault(existingUserSummary, "")).append("\n");
+        content.append("【已有AI摘要】").append(StrUtil.blankToDefault(existingAiSummary, "")).append("\n\n");
+        content.append("【待合并的新对话】\n");
+        for (int i = 0; i < messages.size(); i++) {
+            ChatHistory m = messages.get(i);
+            String role = ChatHistoryMessageTypeEnum.USER.getValue().equals(m.getMessageType()) ? "用户" : "AI";
+            content.append("新对话-").append(role).append("：").append(m.getMessage()).append("\n");
+        }
+        // 2. 构造增量合并提示词并调用 ChatModel，得到带固定标记的新摘要原文
+        String prompt = "你是一个对话总结助手。请在「已有摘要」基础上，将「待合并的新对话」并入为一段更完整的摘要，"
+                + "严格按以下格式输出，不要其他内容：\n"
+                + "【用户总结】用户的主要问题和诉求摘要\n"
+                + "【AI总结】AI的回复要点摘要\n\n"
+                + content;
         return chatModel.chat(prompt);
     }
 
