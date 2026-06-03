@@ -227,7 +227,7 @@ type AssistantUiState = {
   activeToolIndex?: number
   /** 折叠重复的“选择工具”提示，避免流式阶段刷屏 */
   lastToolRequestName?: string
-  /** 流式进行中：底部「选择工具」胶囊（不入 segments 时间线） */
+  /** @deprecated 流式已统一用 segments；仅 drain/clear 时清零，避免遗留状态 */
   pendingToolRequest?: PendingToolRequest | null
 }
 
@@ -1247,8 +1247,6 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
       state.buffer = state.buffer.slice(next.idx)
 
       if (next.type === 'tool_request_any') {
-        // 证据：流式阶段会连续出现大量 `[选择工具] 写入文件`，导致 UI 被胶囊刷屏。
-        // 修复：同名工具请求仅展示一次，直到后续出现其它工具或实际工具执行头。
         trimTrailingNewlinesInLastMarkdown(state, 2)
 
         const mReqNow = TOOL_REQUEST_ANY_RE.exec(state.buffer)
@@ -1262,24 +1260,16 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         const matchLen = mReqNow[0].length
         const afterMatch = state.buffer.slice(matchStart + matchLen)
 
-        state.pendingToolRequest = { toolName, createdAt: Date.now() }
         state.lastToolRequestName = toolName
         toolSelectHintShown.value = true
 
-        // 根因修复：此前只写 pendingToolRequest，不创建 kind==='tool_request' 的 segments，
-        // 导致“选择工具”卡片无法在流结束/历史回放中稳定展示（只能短暂闪一下）。
         const rawLabel = mReqNow[0] ?? `[选择工具] ${toolName}`
-        const lastSeg = state.segments[state.segments.length - 1]
-        const alreadyHasSameToolRequest =
-          lastSeg?.kind === 'tool_request' && (lastSeg as UiToolRequestSegment).toolName === toolName
-        if (!alreadyHasSameToolRequest) {
-          state.segments.push({
-            kind: 'tool_request',
-            rawLabel,
-            toolName,
-            createdAt: Date.now(),
-          })
-        }
+        state.segments.push({
+          kind: 'tool_request',
+          rawLabel,
+          toolName,
+          createdAt: Date.now(),
+        })
 
         if (afterMatch.startsWith('\r\n')) {
           state.buffer = state.buffer.slice(matchStart + matchLen + 2)
@@ -2017,7 +2007,6 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
 
 function assistantHasNonWorkflowRenderableOutput(m: ChatMessage): boolean {
   if (m.role !== 'assistant') return true
-  if (getPendingToolRequest(m)) return true
   const segs = getMessageUiSegments(m)
   for (const s of segs) {
     if (s.kind === 'generation_status') return true
@@ -2277,42 +2266,32 @@ function isStreamActiveForMessage(m: ChatMessage): boolean {
   return !!activeStreamMeta.value[sid]
 }
 
-function getPendingToolRequest(m: ChatMessage): PendingToolRequest | null {
-  if (!isStreamActiveForMessage(m)) return null
-  return m.uiState?.pendingToolRequest ?? null
+function isToolExecutedUiSegmentKind(kind: UiSegment['kind'] | undefined): boolean {
+  return (
+    kind === 'tool_executed_write_file' ||
+    kind === 'tool_executed_modify_file' ||
+    kind === 'tool_executed_simple_tool'
+  )
 }
 
 function isToolRequestPending(m: ChatMessage, idx: number): boolean {
   if (!isStreamActiveForMessage(m)) return false
   const segs = getMessageUiSegments(m)
-  // 仅最后一个 tool_request 才显示动效，避免历史 pill 常驻闪烁
-  for (let i = segs.length - 1; i > idx; i--) {
-    if (segs[i]?.kind === 'tool_request') return false
+  for (let i = idx + 1; i < segs.length; i++) {
+    const kind = segs[i]?.kind
+    if (kind === 'tool_request' || isToolExecutedUiSegmentKind(kind)) return false
   }
   return true
-}
-
-function getPendingToolRequestShimmerText(m: ChatMessage): string {
-  const pending = getPendingToolRequest(m)
-  if (!pending) return '代码努力写入中'
-
-  const defaultText = '代码努力写入中'
-  if (pending.toolName !== '写入文件') return defaultText
-
-  const elapsed = workflowNowTs.value - pending.createdAt
-  if (elapsed < TOOL_WRITE_SHIMMER_TIER_2_MS) return defaultText
-  if (elapsed < TOOL_WRITE_SHIMMER_TIER_3_MS) return '文件有点大,正在努力写入中'
-  return '正在为您加速生成'
 }
 
 function getToolRequestShimmerText(m: ChatMessage, idx: number): string {
   const segs = getMessageUiSegments(m)
   const seg = segs[idx]
-  if (!seg || seg.kind !== 'tool_request') return '代码努力写入中'
+  if (!seg || seg.kind !== 'tool_request') return '工具执行中'
+
+  if (seg.toolName !== '写入文件') return '工具执行中'
 
   const defaultText = '代码努力写入中'
-  if (seg.toolName !== '写入文件') return defaultText
-
   const startedAt = seg.createdAt
   if (!startedAt) return defaultText
 
@@ -3048,9 +3027,9 @@ onBeforeUnmount(() => {
                         </div>
                       </div>
                       <template v-for="(segment, idx) in getMessageUiSegments(m)" :key="idx">
-                      <!-- TOOL_REQUEST：历史回放中的选择工具胶囊（流式进行中改由底部 pending 展示） -->
+                      <!-- TOOL_REQUEST：选择工具胶囊（流式与历史均走 segments 时间线） -->
                       <div
-                        v-if="segment.kind === 'tool_request' && !isStreamActiveForMessage(m)"
+                        v-if="segment.kind === 'tool_request'"
                         class="tool-hint-pill"
                       >
                         <span class="tool-hint-label">选择工具</span>
@@ -3188,21 +3167,6 @@ onBeforeUnmount(() => {
                         </template>
                       </template>
                       </template>
-                      <!-- 流式底部 pending：始终在 segments 列表最下方 -->
-                      <div
-                        v-if="getPendingToolRequest(m)"
-                        class="tool-hint-pill"
-                      >
-                        <span class="tool-hint-label">选择工具</span>
-                        <span class="tool-hint-main">{{ getPendingToolRequest(m)?.toolName }}</span>
-                        <span
-                          class="tool-hint-shimmer"
-                          :aria-label="getPendingToolRequestShimmerText(m)"
-                        >
-                          <i class="dot" /><i class="dot" /><i class="dot" />
-                          <span class="shimmer-text">{{ getPendingToolRequestShimmerText(m) }}</span>
-                        </span>
-                      </div>
                     </template>
                   </div>
                 </div>
