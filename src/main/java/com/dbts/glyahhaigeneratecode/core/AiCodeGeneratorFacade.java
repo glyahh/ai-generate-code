@@ -545,6 +545,8 @@ public class AiCodeGeneratorFacade {
         Set<String> warnedLargeIncompleteIds = new HashSet<>();
         // 一旦收到模型原生 onToolExecuted，就切回原生模式，不再继续合成 synthetic 消息
         AtomicBoolean nativeToolExecutedMode = new AtomicBoolean(false);
+        // 工具请求去重：每个 toolCallId 仅首次 emit ToolRequestMessage
+        Set<String> seenToolRequestIds = new HashSet<>();
 
         return Flux.create(sink -> tokenStream.onPartialResponse((String partialResponse) -> {
                     AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
@@ -559,7 +561,6 @@ public class AiCodeGeneratorFacade {
                     }
 
                     try {
-                        String toolCallId = toolExecutionRequest.id();
                         String toolName = toolExecutionRequest.name();
                         String argsPart = toolExecutionRequest.arguments();
                         if (!nativeToolExecutedMode.get()
@@ -586,6 +587,16 @@ public class AiCodeGeneratorFacade {
                         }
                     } catch (Exception ignore) {
                         // ignore
+                    }
+                })
+                // 
+                .onCompleteToolExecutionRequest((index, completeToolExecutionRequest) -> {
+                    // 兼容部分 API 仅在 complete 时给出完整 tool request；
+                    // 若该 toolCallId 尚未通过 partial 发出，则在此补发 ToolRequestMessage
+                    String toolCallId = completeToolExecutionRequest.id();
+                    if (toolCallId != null && seenToolRequestIds.add(toolCallId)) {
+                        ToolRequestMessage toolRequestMessage = new ToolRequestMessage(completeToolExecutionRequest);
+                        sink.next(JSONUtil.toJsonStr(toolRequestMessage));
                     }
                 })
                 .onToolExecuted((ToolExecution toolExecution) -> {
