@@ -39,6 +39,7 @@ import {
   extractToolModifyFileNewContentBlocksFromText,
   extractToolWriteFileBlocksFromText,
 } from '@/utils/toolOutputAdapters/toolOutputBlockParsers'
+import { loadProjectFilesEchoFromDisk } from '@/utils/projectFilesEcho'
 import CodeBlock from '@/components/CodeBlock.vue'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 import {
@@ -283,10 +284,12 @@ type GeneratedFileItem = {
   updatedAt: number
 }
 
-/** 从流式工具输出中提取到的“生成文件”列表（用于 Vue 项目文件回显） */
+/** 从流式工具输出中提取到的”生成文件”列表（用于 Vue 项目文件回显） */
 const generatedFiles = ref<GeneratedFileItem[]>([])
 const generatedFileMap = ref<Record<string, GeneratedFileItem>>({})
 const toolSelectHintShown = ref(false)
+const loadingEcho = ref(false)
+let pendingEchoRefresh = false
 
 const filesModalOpen = ref(false)
 const activeFilePath = ref<string>('')
@@ -2118,6 +2121,49 @@ function rebuildGeneratedFilesFromHistory() {
   }
 }
 
+async function refreshProjectFilesEchoFromDisk() {
+  if (!appId.value || !appInfo.value) return
+
+  // 仅 Vue 项目 + 已有生成结果时走磁盘全量，否则走历史解析
+  if (!isVueProject.value || (!hasGenerated.value && !appInfo.value?.hasGeneratedCode)) {
+    rebuildGeneratedFilesFromHistory()
+    return
+  }
+
+  if (loadingEcho.value) {
+    pendingEchoRefresh = true
+    return
+  }
+
+  loadingEcho.value = true
+  pendingEchoRefresh = false
+  try {
+    const codeGenType = normalizeCodeGenType(appInfo.value.codeGenType)
+    const items = await loadProjectFilesEchoFromDisk({
+      appId: appId.value,
+      codeGenType,
+      previewBaseUrl: PREVIEW_BASE_URL,
+      existingMap: { ...generatedFileMap.value },
+    })
+    if (items.length > 0) {
+      const nextMap: Record<string, GeneratedFileItem> = {}
+      for (const item of items) {
+        nextMap[item.path] = item
+      }
+      generatedFileMap.value = nextMap
+      generatedFiles.value = items
+    }
+  } catch {
+    rebuildGeneratedFilesFromHistory()
+  } finally {
+    loadingEcho.value = false
+    if (pendingEchoRefresh) {
+      pendingEchoRefresh = false
+      void refreshProjectFilesEchoFromDisk()
+    }
+  }
+}
+
 async function copyToClipboard(text: string) {
   try {
     await window.navigator.clipboard.writeText(text)
@@ -2463,6 +2509,7 @@ async function sendMessage(text?: string) {
       if (trimmed === '[DONE]' || trimmed === '__END__') {
         stopStream(streamId)
         hasGenerated.value = true
+        void refreshProjectFilesEchoFromDisk()
         void refreshPreviewWithRetry()
         void fetchRoundCount()
         return
@@ -2481,6 +2528,7 @@ async function sendMessage(text?: string) {
     es.addEventListener('done', () => {
       stopStream(streamId)
       hasGenerated.value = true
+      void refreshProjectFilesEchoFromDisk()
       void refreshPreviewWithRetry()
       void fetchRoundCount()
     })
@@ -2589,8 +2637,8 @@ async function loadChatHistory(lastCreateTime?: string) {
         loadedHistoryRecords.value = dedupHistoryRecords(records)
       }
       historyMessages.value = loadedHistoryRecords.value.map(historyToMessage)
-      // 历史回放需要重建工具输出（否则“查看项目回显/架构”按钮会丢失）
-      rebuildGeneratedFilesFromHistory()
+      // 历史回放需要重建工具输出（否则”查看项目回显/架构”按钮会丢失）
+      void refreshProjectFilesEchoFromDisk()
       const totalRow = page?.totalRow ?? 0
       const loaded = loadedHistoryRecords.value.length
       hasMoreHistory.value = loaded < totalRow
@@ -2643,8 +2691,8 @@ async function loadAppInfo() {
       filesModalOpen.value = false
       activeFilePath.value = ''
       await loadChatHistory()
-      // loadChatHistory 内已重建；这里再兜底一次，防止未来 loadChatHistory 被改动
-      rebuildGeneratedFilesFromHistory()
+      // loadChatHistory 内已走磁盘全量回显；这里再兜底一次
+      void refreshProjectFilesEchoFromDisk()
       void fetchRoundCount()
       // 从首页进入 Vue 项目页面：先探测一次静态入口，并显示托底“刷新应用”按钮（不强依赖 hasGeneratedCode 字段）
       if (isVueProject.value) {
