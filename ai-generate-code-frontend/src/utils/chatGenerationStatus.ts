@@ -11,6 +11,7 @@ export type GenerationStatusSegmentInput = {
   kind: 'generation_status'
   variant: GenerationStatusVariant
   message: string
+  segmentId?: string
 }
 
 type MarkdownLikeSegment = { kind: 'markdown'; content: string }

@@ -1,6 +1,7 @@
 package dev.langchain4j.model.openai;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.internal.ExceptionMapper;
 import dev.langchain4j.internal.ToolExecutionRequestBuilder;
@@ -19,8 +20,10 @@ import dev.langchain4j.model.openai.internal.shared.StreamOptions;
 import dev.langchain4j.model.openai.spi.OpenAiStreamingChatModelBuilderFactory;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static dev.langchain4j.internal.InternalStreamingChatResponseHandlerUtils.withLoggingExceptions;
 import static dev.langchain4j.internal.Utils.*;
@@ -107,6 +110,10 @@ public class OpenAiStreamingChatModel implements StreamingChatModel {
 
     @Override
     public void doChat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+        doChatWithRetry(chatRequest, handler, 0);
+    }
+
+    private void doChatWithRetry(ChatRequest chatRequest, StreamingChatResponseHandler handler, int attempt) {
 
         OpenAiChatRequestParameters parameters = (OpenAiChatRequestParameters) chatRequest.parameters();
         validate(parameters);
@@ -121,11 +128,12 @@ public class OpenAiStreamingChatModel implements StreamingChatModel {
 
         OpenAiStreamingResponseBuilder openAiResponseBuilder = new OpenAiStreamingResponseBuilder();
         ToolExecutionRequestBuilder toolBuilder = new ToolExecutionRequestBuilder();
+        Set<Integer> nameNotifiedIndices = new HashSet<>();
 
         client.chatCompletion(openAiRequest)
                 .onPartialResponse(partialResponse -> {
                     openAiResponseBuilder.append(partialResponse);
-                    handle(partialResponse, toolBuilder, handler);
+                    handle(partialResponse, toolBuilder, handler, nameNotifiedIndices);
                 })
                 .onComplete(() -> {
                     if (toolBuilder.hasToolExecutionRequests()) {
@@ -137,8 +145,16 @@ public class OpenAiStreamingChatModel implements StreamingChatModel {
                     }
                     ChatResponse chatResponse = openAiResponseBuilder.build();
                     // Debug修复：某些异常/中断场景下，SSE onClose 先于有效响应构建，build() 可能返回 null。
-                    // 若继续调用 onCompleteResponse(null)，下游会在 AiServiceStreamingResponseHandler 中触发 NPE。
+                    if (chatResponse == null && toolBuilder.hasToolExecutionRequests()) {
+                        chatResponse = ChatResponse.builder()
+                                .aiMessage(AiMessage.from(toolBuilder.build()))
+                                .build();
+                    }
                     if (chatResponse == null) {
+                        if (attempt == 0 && openAiResponseBuilder.isEmptyUpstreamStream()) {
+                            doChatWithRetry(chatRequest, handler, 1);
+                            return;
+                        }
                         withLoggingExceptions(() -> handler.onError(
                                 new IllegalStateException("流式响应结束时未构建出 ChatResponse（可能是上游提前关闭或返回空流）")));
                         return;
@@ -158,7 +174,8 @@ public class OpenAiStreamingChatModel implements StreamingChatModel {
 
     private static void handle(ChatCompletionResponse partialResponse,
                                ToolExecutionRequestBuilder toolBuilder,
-                               StreamingChatResponseHandler handler) {
+                               StreamingChatResponseHandler handler,
+                               Set<Integer> nameNotifiedIndices) {
         if (partialResponse == null) {
             return;
         }
@@ -202,6 +219,23 @@ public class OpenAiStreamingChatModel implements StreamingChatModel {
 
                 String id = toolBuilder.updateId(toolCall.id());
                 String name = toolBuilder.updateName(toolCall.function().name());
+
+                // 当 name/id 首次非空时立刻通知下游，前端可提前渲染「选择工具」卡片，
+                // 不必等到 arguments 片段到达。
+                if ((isNotNullOrEmpty(name) || isNotNullOrEmpty(id))
+                        && nameNotifiedIndices.add(index)) {
+                    ToolExecutionRequest earlyPartialRequest = ToolExecutionRequest.builder()
+                            .id(id)
+                            .name(name)
+                            .arguments(toolCall.function().arguments() != null
+                                    ? toolCall.function().arguments() : "")
+                            .build();
+                    try {
+                        handler.onPartialToolExecutionRequest(index, earlyPartialRequest);
+                    } catch (Exception e) {
+                        withLoggingExceptions(() -> handler.onError(e));
+                    }
+                }
 
                 String partialArguments = toolCall.function().arguments();
                 if (isNotNullOrEmpty(partialArguments)) {

@@ -133,6 +133,16 @@ public class OpenAiStreamingResponseBuilder {
         }
     }
 
+    /**
+     * 上游 SSE 已结束但未累积任何可构建 ChatResponse 的内容（常见于 DashScope 空流/仅 usage 分片）。
+     */
+    boolean isEmptyUpstreamStream() {
+        return contentBuilder.isEmpty()
+                && toolNameBuilder.isEmpty()
+                && toolArgumentsBuilder.isEmpty()
+                && indexToToolExecutionRequestBuilder.isEmpty();
+    }
+
     public void append(CompletionResponse partialResponse) {
         if (partialResponse == null) {
             return;

@@ -551,8 +551,12 @@ public class AiCodeGeneratorFacade {
                     sink.next(JSONUtil.toJsonStr(aiResponseMessage));
                 })
                 .onPartialToolExecutionRequest((index, toolExecutionRequest) -> {
-                    ToolRequestMessage toolRequestMessage = new ToolRequestMessage(toolExecutionRequest);
-                    sink.next(JSONUtil.toJsonStr(toolRequestMessage));
+                    String toolCallId = toolExecutionRequest.id();
+                    // 每个 toolCallId 仅首次 emit ToolRequestMessage，避免重复 JSON 行
+                    if (toolCallId != null && seenToolRequestIds.add(toolCallId)) {
+                        ToolRequestMessage toolRequestMessage = new ToolRequestMessage(toolExecutionRequest);
+                        sink.next(JSONUtil.toJsonStr(toolRequestMessage));
+                    }
 
                     try {
                         String toolCallId = toolExecutionRequest.id();

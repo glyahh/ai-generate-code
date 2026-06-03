@@ -116,7 +116,7 @@ langchain4j:
     reasoning-streaming-chat-model:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${langchain4j.open-ai.chat-model.api-key}
-      model-name: glm-5.1
+      model-name: qwen3.6-35b-a3b
       max-tokens: 32768
       temperature: 0.1 # 让AI 回答越稳定、保守、重复、确定性高
       log-requests: true

@@ -153,13 +153,14 @@ type ActiveStreamMeta = {
   mode: 'legacy' | 'workflow'
 }
 
-type UiMarkdownSegment = { kind: 'markdown'; content: string }
+type UiMarkdownSegment = { kind: 'markdown'; content: string; segmentId?: string }
 type UiToolRequestSegment = {
   kind: 'tool_request'
   rawLabel: string
   toolName: string
   /** pending 胶囊开始计时（流式 tool_request 创建时写入） */
   createdAt?: number
+  segmentId?: string
 }
 type UiToolExecutedWriteFileSegment = {
   kind: 'tool_executed_write_file'
@@ -167,6 +168,7 @@ type UiToolExecutedWriteFileSegment = {
   language: string
   content: string
   done: boolean
+  segmentId?: string
 }
 
 type UiToolExecutedModifyFileSegment = {
@@ -178,6 +180,7 @@ type UiToolExecutedModifyFileSegment = {
   beforeDone: boolean
   afterDone: boolean
   done: boolean
+  segmentId?: string
 }
 
 type UiToolExecutedSimpleToolSegment = {
@@ -186,12 +189,14 @@ type UiToolExecutedSimpleToolSegment = {
   filePath: string
   message: string
   done: boolean
+  segmentId?: string
 }
 
 type UiGenerationStatusSegment = GenerationStatusSegmentInput
 
 type UiVisualEditSelectionSegment = {
   kind: 'visual_edit_selection'
+  segmentId?: string
 } & ParsedVisualEditSelection
 
 type UiSegment =
@@ -230,6 +235,8 @@ type AssistantUiState = {
   lastToolRequestName?: string
   /** @deprecated 流式已统一用 segments；仅 drain/clear 时清零，避免遗留状态 */
   pendingToolRequest?: PendingToolRequest | null
+  /** 递增序号，为每个新 segment 生成稳定的 segmentId */
+  segmentSeq: number
 }
 
 /** 已加载的历史消息（来自接口） */
@@ -996,6 +1003,7 @@ function createAssistantUiState(): AssistantUiState {
     stage: 'markdown',
     lastToolRequestName: undefined,
     pendingToolRequest: null,
+    segmentSeq: 0,
   }
 }
 
@@ -1963,6 +1971,41 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
   if (m.role !== 'assistant') {
     return [{ kind: 'markdown', content: m.content ?? '' }]
   }
+  // 先查缓存（含流式消息），避免模板每次 render 都重新 slice/合并/归一化
+  const version = buildUiRenderVersion(m)
+  const cache = messageRenderCache.get(m)
+  if (cache?.uiVersion === version && cache.uiSegments) {
+    return normalizeFirstRoundUiSegments(m, cache.uiSegments)
+  }
+  const segments = computeMessageUiSegments(m)
+  messageRenderCache.set(m, {
+    ...cache,
+    uiVersion: version,
+    uiSegments: segments,
+  })
+  if (isHistoryMessage(m)) {
+    m.cachedUiSegments = segments
+  }
+  return normalizeFirstRoundUiSegments(m, segments)
+}
+
+/** 为每个 segment 生成稳定 segmentId，用作 :key，避免 idx 导致 remount */
+function stampSegmentIds(segments: UiSegment[]): UiSegment[] {
+  let seq = 0
+  return segments.map((seg) => {
+    if (seg.segmentId) return seg
+    const id =
+      seg.kind === 'tool_request'
+        ? `tool-req-${seq}`
+        : seg.kind === 'markdown'
+          ? `md-${seq}`
+          : `tool-exec-${seq}`
+    seq++
+    return { ...seg, segmentId: id }
+  })
+}
+
+function computeMessageUiSegments(m: ChatMessage): UiSegment[] {
   if (m.uiState) {
     // 流式 buffer 必须与最后一个 markdown segment 合并展示，否则
     // `flushSafeMarkdown` 在字符位置切分时会把开围栏 ```html``` 留在 segment[0]、
@@ -1989,23 +2032,9 @@ function getMessageUiSegments(m: ChatMessage): UiSegment[] {
         }
       }
     }
-    return normalizeFirstRoundUiSegments(m, applyGenerationStatusToSegments(segs, m.content ?? ''))
+    return stampSegmentIds(normalizeFirstRoundUiSegments(m, applyGenerationStatusToSegments(segs, m.content ?? '')))
   }
-  const version = buildUiRenderVersion(m)
-  const cache = messageRenderCache.get(m)
-  if (cache?.uiVersion === version && cache.uiSegments) {
-    return normalizeFirstRoundUiSegments(m, cache.uiSegments)
-  }
-  const segments = buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? ''))
-  messageRenderCache.set(m, {
-    ...cache,
-    uiVersion: version,
-    uiSegments: segments,
-  })
-  if (isHistoryMessage(m)) {
-    m.cachedUiSegments = segments
-  }
-  return normalizeFirstRoundUiSegments(m, segments)
+  return stampSegmentIds(buildUiSegmentsFromFullText(stripAssistantNoiseLines(m.content ?? '')))
 }
 
 function assistantHasNonWorkflowRenderableOutput(m: ChatMessage): boolean {
@@ -3074,7 +3103,7 @@ onBeforeUnmount(() => {
                           </div>
                         </div>
                       </div>
-                      <template v-for="(segment, idx) in getMessageUiSegments(m)" :key="idx">
+                      <template v-for="(segment, idx) in getMessageUiSegments(m)" :key="segment.segmentId ?? 'seg-' + idx">
                       <!-- TOOL_REQUEST：选择工具胶囊（流式与历史均走 segments 时间线） -->
                       <div
                         v-if="segment.kind === 'tool_request'"
@@ -3083,8 +3112,8 @@ onBeforeUnmount(() => {
                         <span class="tool-hint-label">选择工具</span>
                         <span class="tool-hint-main">{{ segment.toolName }}</span>
                         <span
-                          v-if="isToolRequestPending(m, idx)"
                           class="tool-hint-shimmer"
+                          :class="{ 'tool-hint-shimmer--hidden': !isToolRequestPending(m, idx) }"
                           :aria-label="getToolRequestShimmerText(m, idx)"
                         >
                           <i class="dot" /><i class="dot" /><i class="dot" />
@@ -4487,6 +4516,10 @@ onBeforeUnmount(() => {
   animation: tool-hint-shimmer-slide 1.6s linear infinite;
   font-size: 11px;
   color: #0f172a;
+}
+
+.tool-hint-shimmer--hidden {
+  display: none;
 }
 
 .tool-hint-shimmer .dot {
