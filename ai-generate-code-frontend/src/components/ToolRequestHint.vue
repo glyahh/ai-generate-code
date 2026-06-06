@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ToolInvokeGlyph from '@/components/ToolInvokeGlyph.vue'
-import type { ToolWaitStatusSpin } from '@/utils/toolWaitStatus'
+import type { ToolWaitStatusMotion } from '@/utils/toolWaitStatus'
 
 /**
  * 普通 [选择工具] 提示行：左图标 + 工具名 + 延迟 status（写入/修改文件为文案+图标，其它工具为光影文案）。
@@ -13,7 +13,7 @@ interface Props {
   showStatus?: boolean
   statusText?: string
   statusIconSrc?: string
-  statusIconSpin?: ToolWaitStatusSpin
+  statusIconMotion?: ToolWaitStatusMotion
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -21,7 +21,7 @@ const props = withDefaults(defineProps<Props>(), {
   showStatus: false,
   statusText: '工具执行中',
   statusIconSrc: '',
-  statusIconSpin: 'none',
+  statusIconMotion: 'none',
 })
 
 const ariaLabel = computed(() => {
@@ -31,9 +31,13 @@ const ariaLabel = computed(() => {
 
 const useIconStatus = computed(() => Boolean(props.statusIconSrc))
 
-const iconSpinClass = computed(() => {
-  if (props.statusIconSpin === 'fast') return 'tool-request-status__icon--spin-fast'
-  if (props.statusIconSpin === 'normal') return 'tool-request-status__icon--spin-normal'
+const iconMotionClass = computed(() => {
+  if (props.statusIconMotion === 'write-jitter-fast') {
+    return 'tool-request-status__icon--write-jitter-fast'
+  }
+  if (props.statusIconMotion === 'write-jitter') {
+    return 'tool-request-status__icon--write-jitter'
+  }
   return ''
 })
 </script>
@@ -60,7 +64,7 @@ const iconSpinClass = computed(() => {
             v-if="statusIconSrc"
             :src="statusIconSrc"
             class="tool-request-status__icon"
-            :class="iconSpinClass"
+            :class="iconMotionClass"
             alt=""
             aria-hidden="true"
           />
@@ -134,20 +138,20 @@ const iconSpinClass = computed(() => {
 }
 
 .tool-request-status__icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
   object-fit: contain;
   display: block;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .tool-request-status__icon--spin-normal {
-    animation: tool-status-icon-spin 1.1s linear infinite;
+  .tool-request-status__icon--write-jitter {
+    animation: tool-status-icon-write-jitter 1.15s ease-in-out infinite;
   }
 
-  .tool-request-status__icon--spin-fast {
-    animation: tool-status-icon-spin 0.75s linear infinite;
+  .tool-request-status__icon--write-jitter-fast {
+    animation: tool-status-icon-write-jitter-fast 0.85s ease-in-out infinite;
   }
 }
 
@@ -193,12 +197,41 @@ const iconSpinClass = computed(() => {
   }
 }
 
-@keyframes tool-status-icon-spin {
-  from {
-    transform: rotate(0deg);
+@keyframes tool-status-icon-write-jitter {
+  0%,
+  100% {
+    transform: translate(0, 0);
   }
-  to {
-    transform: rotate(360deg);
+  20% {
+    transform: translate(0.4px, -0.6px);
+  }
+  40% {
+    transform: translate(-0.5px, 0.3px);
+  }
+  60% {
+    transform: translate(0.6px, 0.5px);
+  }
+  80% {
+    transform: translate(-0.3px, -0.4px);
+  }
+}
+
+@keyframes tool-status-icon-write-jitter-fast {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(0.5px, -0.7px);
+  }
+  40% {
+    transform: translate(-0.6px, 0.4px);
+  }
+  60% {
+    transform: translate(0.7px, 0.6px);
+  }
+  80% {
+    transform: translate(-0.4px, -0.5px);
   }
 }
 
@@ -230,8 +263,8 @@ const iconSpinClass = computed(() => {
     background-clip: unset;
   }
 
-  .tool-request-status__icon--spin-normal,
-  .tool-request-status__icon--spin-fast {
+  .tool-request-status__icon--write-jitter,
+  .tool-request-status__icon--write-jitter-fast {
     animation: none;
   }
 

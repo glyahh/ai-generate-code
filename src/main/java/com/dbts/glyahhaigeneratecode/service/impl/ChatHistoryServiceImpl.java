@@ -61,6 +61,9 @@ import java.util.stream.Collectors;
  * {@link #trySummarizeOldestRoundsIfNeeded} 将最早两轮合并为摘要写入 memory_shrink（chat_history 保持全文）并重建 AI Redis；
  * HTML/MULTI_FILE 下更早的 AI 长文做片段压缩，但保留「最后一轮中主 AI 长文」以降低整站漂移。
  * </p>
+ * <p>
+ * 主链路：用户/AI 消息落库 chat_history -> 从 DB 与 memory_shrink 重建 Redis ChatMemory 并注入 memory_state -> 分页查询/导出/轮次统计 -> 超轮 AI 摘要合并与在线截断 -> 轮次完成收口同步快照。
+ * </p>
  *
  * @author <a href="https://github.com/glyahh">glyahh</a>
  */
@@ -93,9 +96,21 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Resource
     private ChatAiMemoryRedisSupport chatAiMemoryRedisSupport;
 
+    /**
+     * 添加一条对话消息并返回是否写入成功（默认审查占位 SKIP/NONE）
+     *
+     * @param appId       应用 id
+     * @param message     消息内容
+     * @param messageType 消息类型
+     * @param userId      用户 id
+     * @return 落库成功为 true，失败为 false
+     */
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId) {
-        // 委托可返回主键的写库方法,根据雪花 id 是否生成得到本次写入是否成功
+        // 方法大纲：
+        // 1. 委托带主键返回的写库重载，以雪花 id 是否生成为成功标志    L113-L114
+
+        // 1. 委托可返回主键的写库方法,根据雪花 id 是否生成得到本次写入是否成功
         return addChatMessageAndReturnId(appId, message, messageType, userId) != null;
     }
 
@@ -110,12 +125,29 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId) {
+        // 方法大纲：
+        // 1. 使用默认审查占位 SKIP/NONE，委托带审计字段的完整写库重载    L131-L132
+
         // 使用默认审计占位 SKIP/NONE,将实际写库委托给带审计参数的重载方法
         return addChatMessageAndReturnId(appId, message, messageType, userId, "SKIP", "NONE");
     }
 
+    /**
+     * 添加一条带审查字段的对话消息并返回是否写入成功
+     *
+     * @param appId        应用 id
+     * @param message      消息内容
+     * @param messageType  消息类型
+     * @param userId       用户 id
+     * @param auditAction  审查动作
+     * @param auditHitRule 命中规则
+     * @return 落库成功为 true，失败为 false
+     */
     @Override
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule) {
+        // 方法大纲：
+        // 1. 委托带主键返回的写库重载，以雪花 id 是否生成为成功标志    L151-L152
+
         // 委托带审查字段的写库方法,根据主键是否生成得到布尔成功标志
         return addChatMessageAndReturnId(appId, message, messageType, userId, auditAction, auditHitRule) != null;
     }
@@ -134,6 +166,12 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule) {
+        // 方法大纲：
+        // 1. 校验 appId、消息内容、类型、用户与审查字段合法性    L174-L183
+        // 2. 确保 audit 列与 longtext 兼容后组装实体并落库    L184-L199
+        // 3. 失效 echo 缓存；USER 消息时刷新 AI Redis TTL 并返回主键    L200-L205
+
+        // 1. 校验 appId、消息内容、类型、用户与审查字段合法性
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "消息内容不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(messageType), ErrorCode.PARAMS_ERROR, "消息类型不能为空");
@@ -143,6 +181,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 验证消息类型是否有效
         ChatHistoryMessageTypeEnum messageTypeEnum = ChatHistoryMessageTypeEnum.getEnumByValue(messageType);
         ThrowUtils.throwIf(messageTypeEnum == null, ErrorCode.PARAMS_ERROR, "不支持的消息类型: " + messageType);
+        // 2. 确保 audit 列与 longtext 兼容后组装实体并落库
         // 写库前检查 audit 列，并将 message 升级为 longtext（老库兼容）
         ChatHistorySchemaMigrationSupport.ensureAuditColumnsIfMissing(appId, this.getMapper());
         ChatHistory chatHistory = ChatHistory.builder()
@@ -158,6 +197,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         if (!saved || chatHistory.getId() == null || chatHistory.getId() <= 0) {
             return null;
         }
+        // 3. 失效 echo 缓存；USER 消息时刷新 AI Redis TTL 并返回主键
         chatHistoryEchoRedisSupport.invalidate(appId);
         if (ChatHistoryMessageTypeEnum.USER.getValue().equals(messageType)) {
             chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
@@ -167,15 +207,30 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
 
 
+    /**
+     * 分页查询指定应用的对话历史（游标分页，优先 echo 缓存）
+     *
+     * @param appId          应用 id
+     * @param pageSize       每页条数（1-50）
+     * @param lastCreateTime 游标：仅返回 createTime 小于等于该时间的记录；首页为 null
+     * @param loginUser      当前登录用户
+     * @return 带 beta 标记的分页 VO
+     */
     @Override
     public AppChatHistoryPageVO listAppChatHistoryByPage(Long appId, int pageSize,
                                                       LocalDateTime lastCreateTime,
                                                       User loginUser) {
+        // 方法大纲：
+        // 1. 校验 appId、分页大小与登录态    L228-L230
+        // 2. 校验应用存在性与创建者/管理员权限    L232-L238
+        // 3. 从 echo 或 DB 加载分页并补 workflow 阶段状态后组装 VO    L240-L243
+
         // 1. 校验应用 id、分页大小与登录态,得到可继续鉴权与查库的前置条件
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
         ThrowUtils.throwIf(pageSize <= 0 || pageSize > 50, ErrorCode.PARAMS_ERROR, "页面大小必须在1-50之间");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
 
+        // 2. 校验应用存在性与创建者/管理员权限
         // 验证权限：只有应用创建者和管理员可以查看
         App app = appService.getById(appId);
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
@@ -183,6 +238,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         boolean isCreator = app.getUserId().equals(loginUser.getId());
         ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权查看该应用的对话历史");
 
+        // 3. 从 echo 或 DB 加载分页并补 workflow 阶段状态后组装 VO
         Page<ChatHistory> page = loadAppChatHistoryPageFromEchoOrDb(appId, pageSize, lastCreateTime);
 
         ChatHistorySchemaMigrationSupport.appendWorkflowStageStatusForHistoryPage(page);
@@ -198,6 +254,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      * @return 内存分页结果，records 为当前页、totalRow 为全文条数
      */
     private Page<ChatHistory> loadAppChatHistoryPageFromEchoOrDb(Long appId, int pageSize, LocalDateTime lastCreateTime) {
+        // 方法大纲：
+        // 1. 尝试 echo_memory 命中全文列表，miss 时从 DB 升序拉全量并回填    L262-L278
+        // 2. 按 lastCreateTime 过滤并在内存中倒序分页    L279-L305
+        // 3. 组装 Page 对象（records 为当前页、totalRow 为全文条数）    L306-L310
+
         // 1. 尝试 echo_memory 命中全文列表
         List<ChatHistory> fullList = chatHistoryEchoRedisSupport.getCachedFullHistory(appId);
         if (fullList == null) {
@@ -211,7 +272,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             }
             chatHistoryEchoRedisSupport.putFullHistory(appId, fullList);
         }
-        // 3. 按 lastCreateTime 过滤并在内存中倒序分页，得到与旧 SQL 语义一致的当前页
+        // 2. 按 lastCreateTime 过滤并在内存中倒序分页，得到与旧 SQL 语义一致的当前页
         List<ChatHistory> filtered = fullList.stream()
                 .filter(row -> lastCreateTime == null
                         || row.getCreateTime() == null
@@ -238,6 +299,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 })
                 .limit(pageSize)
                 .toList();
+        // 3. 组装 Page 对象（records 为当前页、totalRow 为全文条数）
         Page<ChatHistory> page = new Page<>(1, pageSize);
         page.setRecords(new ArrayList<>(filtered));
         page.setTotalRow(fullList.size());
@@ -245,8 +307,21 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
 
+    /**
+     * 分页查询当前登录用户自己的对话历史，并批量补全应用名称
+     *
+     * @param queryRequest 查询条件（pageNum/pageSize/messageType/appId 等）
+     * @param loginUser    当前登录用户
+     * @return 带 appName 的用户对话历史分页 VO
+     */
     @Override
     public Page<UserChatHistoryItemVO> listMyChatHistoryByPage(ChatHistoryQueryRequest queryRequest, User loginUser) {
+        // 方法大纲：
+        // 1. 校验查询参数与登录态    L325-L327
+        // 2. 构造安全查询对象并强制写入当前用户 id    L329-L338
+        // 3. 分页查库并批量补全 appName    L340-L374
+        // 4. 实体转 VO 并组装分页结果返回    L376-L379
+
         // 1. 校验查询参数和登录态，确保只在合法请求下继续执行分页查询。
         ThrowUtils.throwIf(queryRequest == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
@@ -264,6 +339,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         safeRequest.setAppId(queryRequest.getAppId());
         safeRequest.setUserId(loginUser.getId());
 
+        // 3. 分页查库并批量补全 appName
         // 4. 生成查询条件并执行分页查询，得到当前页的对话历史实体数据。
         QueryWrapper queryWrapper = buildQueryWrapper(safeRequest);
         Page<ChatHistory> page = this.page(Page.of(pageNum, pageSize), queryWrapper);
@@ -300,14 +376,25 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             return vo;
         }).toList();
 
+        // 4. 实体转 VO 并组装分页结果返回
         // 8. 组装VO分页对象并返回，保持总条数与分页参数和原始查询结果一致。
         Page<UserChatHistoryItemVO> voPage = new Page<>(pageNum, pageSize, page.getTotalRow());
         voPage.setRecords(voList);
         return voPage;
     }
 
+    /**
+     * 按应用 id 删除该应用下的全部对话历史
+     *
+     * @param appId 应用 id
+     * @return 删除成功为 true；非法 appId 返回 false
+     */
     @Override
     public boolean removeByAppId(Long appId) {
+        // 方法大纲：
+        // 1. 非法 appId 直接返回 false（幂等）    L398-L401
+        // 2. 构造按 appId 匹配的删除条件并执行 remove    L402-L406
+
         // 1. 非法 appId 直接视为无需删除,得到幂等 false 结果
         if (appId == null || appId <= 0) {
             return false;
@@ -319,8 +406,19 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         return this.remove(queryWrapper);
     }
 
+    /**
+     * 根据查询请求组装 MyBatis-Flex QueryWrapper（支持 eq/like/le/orderBy）
+     *
+     * @param queryRequest 查询条件
+     * @return 可交给分页或列表查询的 QueryWrapper
+     */
     @Override
     public QueryWrapper buildQueryWrapper(ChatHistoryQueryRequest queryRequest) {
+        // 方法大纲：
+        // 1. 请求体为空时抛业务异常    L422-L425
+        // 2. 逐字段叠加 eq/like/le 条件    L427-L455
+        // 3. 设置排序（自定义字段或默认 createTime 降序）并返回    L457-L464
+
         // 1. 请求体为空时直接抛业务异常,得到明确的参数错误反馈而非空指针
         if (queryRequest == null) {
             throw new MyException(ErrorCode.PARAMS_ERROR, "查询请求参数为空");
@@ -370,8 +468,18 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         return queryWrapper;
     }
 
+    /**
+     * 将 ChatHistory 实体转换为前端展示 VO
+     *
+     * @param chatHistory 对话历史实体
+     * @return 转换后的 VO；入参为 null 时返回 null
+     */
     @Override
     public ChatHistoryVO getChatHistoryVO(ChatHistory chatHistory) {
+        // 方法大纲：
+        // 1. 空实体直接返回 null    L483-L486
+        // 2. 复制同名字段到 VO 并返回    L487-L490
+
         // 1. 实体入参为空时无 VO 可组装,直接返回 null 表示无数据
         if (chatHistory == null) {
             return null;
@@ -384,8 +492,18 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
 
+    /**
+     * 批量将 ChatHistory 实体列表转换为 VO 列表
+     *
+     * @param chatHistoryList 对话历史实体列表
+     * @return 与输入同序的 VO 列表；空或 null 时返回不可变空集合
+     */
     @Override
     public List<ChatHistoryVO> getChatHistoryVOList(List<ChatHistory> chatHistoryList) {
+        // 方法大纲：
+        // 1. 空列表返回 Collections.emptyList()    L507-L510
+        // 2. 逐条 map 为 VO 并收集返回    L511-L514
+
         // 1. 空或空列表直接返回不可变空集合,得到调用方无需再判空的流式安全结果
         if (chatHistoryList == null || chatHistoryList.isEmpty()) {
             return Collections.emptyList();
@@ -397,8 +515,22 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
 
+    /**
+     * 从 chat_history 倒序拉取最近 maxCount 条并重建 Redis ChatMemory（含 AI 长文压缩与系统提示词过滤）
+     *
+     * @param addId                   应用 id（同时作为 ChatMemory 的 memoryId）
+     * @param messageWindowChatMemory 待写入的 LangChain4j 窗口记忆实例
+     * @param maxCount                最多拉取的历史条数
+     * @return 成功写入 ChatMemory 的消息条数；无历史时返回 0
+     */
     @Override
     public int turnHistoryToMemory(Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount) {
+        // 方法大纲：
+        // 1. 校验 appId、内存实例与 maxCount    L534-L537
+        // 2. 从 DB 倒序拉最近 maxCount 条并反转为时间正序    L539-L552
+        // 3. 清空旧 Redis 记忆并加载系统提示词用于过滤    L554-L590
+        // 4. 计算豁免压缩的主 AI 下标并按类型逐条写入 ChatMemory    L592-L634
+
         // 1. 校验应用 id、内存实例与拉取条数,得到可安全访问 DB 与 Redis 的前置条件
         // 校验参数
         ThrowUtils.throwIf(addId == null || addId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
@@ -514,12 +646,19 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum) {
+        // 方法大纲：
+        // 1. 清空 ChatMemory 并从 shrink+DB 重建 AI 轨历史    L654-L658
+        // 2. 委托 ConversationMemoryStateService 注入 memory_state（失败降级）    L663-L673
+        // 3. 汇总 restored + injected 条数并打日志返回    L675-L681
+
+        // 1. 清空 ChatMemory 并从 shrink+DB 重建 AI 轨历史
         messageWindowChatMemory.clear();
         int restored = chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(
                 appId, messageWindowChatMemory, maxCount, codeGenTypeEnum);
         // 注入数量
         int injectedCount = 0;
 
+        // 2. 委托 ConversationMemoryStateService 注入 memory_state（失败降级）
         // 2. 再执行新链路 memory_state 注入；该步骤失败不影响主生成链路。
         try {
             injectedCount = conversationMemoryStateService
@@ -531,6 +670,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             log.warn("loadConversationMemoryStateAndInject 执行失败，已降级为仅历史恢复，appId={}", appId, e);
         }
 
+        // 3. 汇总 restored + injected 条数并打日志返回
         // 3. 返回“注入后总条数”，避免和注释语义不一致。
         int finalCount = restored + Math.max(0, injectedCount);
         log.info("会话记忆预加载完成，appId={}, restoredCount={}, injectedCount={}, finalCount={}",
@@ -549,8 +689,20 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
 
 
+    /**
+     * 分页查询指定应用的全部对话历史（导出用，需创建者或管理员权限）
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户
+     * @return 该应用全部对话历史的 VO 列表
+     */
     @Override
     public List<ChatHistoryVO> listAllByAppIdForExport(Long appId, User loginUser) {
+        // 方法大纲：
+        // 1. 校验 appId 与登录态并校验创建者/管理员权限    L706-L714
+        // 2. 优先 echo 缓存，miss 时从 DB 升序拉全量并回填    L716-L727
+        // 3. 批量转 VO 列表返回    L728-L730
+
         // 1. 校验 appId 与登录态,得到可继续鉴权的前提
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
@@ -561,6 +713,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         boolean isCreator = app.getUserId().equals(loginUser.getId());
         ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权导出该应用的对话历史");
 
+        // 2. 优先 echo 缓存，miss 时从 DB 升序拉全量并回填
         List<ChatHistory> list = chatHistoryEchoRedisSupport.getCachedFullHistory(appId);
         if (list == null) {
             QueryWrapper queryWrapper = new QueryWrapper();
@@ -587,6 +740,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     private void syncTruncateShrinksAfterRedisCompact(Long appId, List<ChatMessage> before, List<ChatMessage> after,
                                                       CodeGenTypeEnum codeGenTypeEnum) {
+        // 方法大纲：
+        // 1. 校验 before/after 等长，否则直接返回    L747-L749
+        // 2. 委托 internal 实现，异常时打 warn 吞掉    L750-L754
+
+        // 1. 校验 before/after 等长，否则直接返回
         if (before == null || after == null || before.size() != after.size()) {
             return;
         }
@@ -607,6 +765,11 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     private void syncTruncateShrinksAfterRedisCompactInternal(Long appId, List<ChatMessage> before, List<ChatMessage> after,
                                                               CodeGenTypeEnum codeGenTypeEnum) {
+        // 方法大纲：
+        // 1. 拉取未合并的 DB 行并按时间序对齐 Redis AiMessage    L772-L795
+        // 2. 遍历 after 序列，对发生 compact 的 AI 行 upsert message_truncate    L796-L837
+
+        // 1. 拉取未合并的 DB 行并按时间序对齐 Redis AiMessage
         memoryShrinkService.ensureTableExists();
         Set<Long> mergedSourceIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
         QueryWrapper q = new QueryWrapper();
@@ -629,6 +792,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 .reduce((first, second) -> second)
                 .map(ChatHistory::getUserId)
                 .orElse(null);
+        // 2. 遍历 after 序列，对发生 compact 的 AI 行 upsert message_truncate
         for (int i = 0; i < after.size(); i++) {
             ChatMessage msg = after.get(i);
             if (msg instanceof UserMessage) {
@@ -673,8 +837,21 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
     }
 
+    /**
+     * 统计指定应用的对话轮数（以 DB 中 USER 条数为准），并比对 echo 缓存一致性
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户
+     * @return DB 中 USER 消息条数（对话轮数）
+     */
     @Override
     public int countRoundsByAppId(Long appId, User loginUser) {
+        // 方法大纲：
+        // 1. 校验 appId、登录态与创建者/管理员权限    L855-L863
+        // 2. 统计 DB 中 USER 条数作为权威轮数    L865-L869
+        // 3. 与 echo_memory 全文缓存比对，偏差时自愈一次    L871-L918
+        // 4. 仍以 DB 统计为准返回 int    L920-L921
+
         // 1. 校验 appId 与登录态,得到可统计轮数的安全上下文
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
@@ -744,10 +921,22 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         return (int) count;
     }
 
+    /**
+     * 当未合并 DB USER 轮数超过阈值时，将最早轮次 AI 摘要合并写入 memory_shrink 并重建 AI Redis
+     *
+     * @param appId         应用 id
+     * @param userId        用户 id
+     * @param triggerReason 触发原因（日志用）
+     */
     @Override
     // 只要抛出 Exception（及子类），就回滚数据库操作
     @Transactional(rollbackFor = Exception.class)
     public void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason) {
+        // 方法大纲：
+        // 1. 非法入参或 DB 未合并 USER 轮数未超阈值则跳过    L940-L952
+        // 2. 循环合并最早轮次：AI 摘要后写入 memory_shrink 唯一摘要对    L955-L1008
+        // 3. 若有合并则失效 echo 并重建 AI Redis ChatMemory    L1014-L1027
+
         // 1. 非法入参直接返回,得到幂等无操作的收口
         if (appId == null || appId <= 0 || userId == null) {
             return;
@@ -763,6 +952,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
         ChatHistorySchemaMigrationSupport.ensureAuditColumnsIfMissing(appId, this.getMapper());
         int mergedCount = 0;
+        // 2. 循环合并最早轮次：AI 摘要后写入 memory_shrink 唯一摘要对
         while (true) {
             Set<Long> excludeIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
             int dbUsers = memoryShrinkService.countUnmergedDbUserRounds(appId, excludeIds);
@@ -821,6 +1011,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         int summaryUsers = memoryShrinkService.countSummaryUserRounds(appId);
         log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeDbUsers={}, afterDbUsers={}, summaryUsers={}, mergedIterations={}",
                 reason, appId, dbUsersBefore, dbUsersAfter, summaryUsers, mergedCount);
+        // 3. 若有合并则失效 echo 并重建 AI Redis ChatMemory
         if (mergedCount > 0) {
             chatHistoryEchoRedisSupport.invalidate(appId);
             MessageWindowChatMemory rebuildMemory = MessageWindowChatMemory.builder()
@@ -840,13 +1031,35 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
 
 
+    /**
+     * 单测反射入口：将 AI 长文压缩为适合 Redis 记忆的摘要片段
+     *
+     * @param rawMessage      原始 AI 消息正文
+     * @param codeGenTypeEnum 代码生成类型（决定压缩策略）
+     * @return 压缩后的文本
+     */
     private String compactAiMessageForMemory(String rawMessage, CodeGenTypeEnum codeGenTypeEnum) {
+        // 方法大纲：
+        // 1. 转发到 ChatHistorySchemaMigrationSupport 执行 AI 长文压缩    L1045-L1046
+
         // 单测反射入口：转发到 support 做 AI 长文压缩
         return ChatHistorySchemaMigrationSupport.compactAiMessageForMemory(rawMessage, codeGenTypeEnum);
     }
 
+    /**
+     * HTML/MULTI_FILE 下对 Redis ChatMemory 中的非主 AI 长文做在线截断，并同步 message_truncate 到 memory_shrink
+     *
+     * @param appId           应用 id
+     * @param codeGenTypeEnum 代码生成类型
+     * @param triggerReason   触发原因（日志用）
+     */
     @Override
     public void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason) {
+        // 方法大纲：
+        // 1. 非法 appId 或非 HTML/MULTI_FILE 类型直接跳过    L1063-L1073
+        // 2. 从 Redis 读取消息序列，对非豁免 AI 行应用 compact    L1074-L1103
+        // 3. 若有变更则写回 Redis、同步 shrink 并刷新 TTL    L1104-L1117
+
         // 1. 非法 appId 直接返回,得到幂等无操作
         if (appId == null || appId <= 0) {
             return;
@@ -911,11 +1124,27 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public void refreshAiChatMemoryTtl(Long appId) {
+        // 方法大纲：
+        // 1. 委托 ChatAiMemoryRedisSupport 刷新 AI 轨 Redis TTL    L1130
+
         chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
     }
 
+    /**
+     * 移除 Redis ChatMemory 尾部首个超长 AiMessage，用于失败轮重试前清理
+     *
+     * @param appId           应用 id
+     * @param codeGenTypeEnum 代码生成类型（仅 HTML/MULTI_FILE 生效）
+     * @param triggerReason   触发原因（日志用）
+     * @return 成功移除目标 AI 消息为 true；未命中或跳过为 false
+     */
     @Override
     public boolean removeLatestFailedAiMessageForRetry(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason) {
+        // 方法大纲：
+        // 1. 非法 appId 或非 HTML/MULTI_FILE 类型直接返回 false    L1148-L1158
+        // 2. 从 Redis 尾部向前扫描首个超长 AiMessage 下标    L1159-L1181
+        // 3. 命中则移除并写回 Redis，返回 true    L1182-L1188
+
         // 1. 非法 appId 直接返回 false,表示未执行任何清理
         if (appId == null || appId <= 0) {
             return false;
@@ -963,8 +1192,22 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
     }
 
+
+    /**
+     * 按内容精确匹配删除最新一条 USER 消息，并清理 echo 缓存与 AI ChatMemory
+     *
+     * @param appId   应用 id
+     * @param userId  用户 id
+     * @param message 待匹配的用户消息正文
+     * @return 成功删除为 true；未命中或失败为 false
+     */
     @Override
     public boolean removeUserMessageByContent(Long appId, Long userId, String message) {
+        // 方法大纲：
+        // 1. 入参非法时直接 false    L1211-L1214
+        // 2. 查最新一条MySQL同内容 USER 消息并按主键删除    L1215-L1232
+        // 3. 删除Redis成功后失效 echo 缓存并清除 AI ChatMemory    L1233-L1246
+
         // 1. 入参非法时直接 false,避免构造无意义查询
         if (appId == null || appId <= 0 || userId == null || userId <= 0 || StrUtil.isBlank(message)) {
             return false;
@@ -982,8 +1225,25 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             if (latestMatches == null || latestMatches.isEmpty()) {
                 return false;
             }
-            // 3. 命中则按主键删除该条用户消息,得到回滚发送动作后的持久化结果
-            return this.removeById(latestMatches.getFirst().getId());
+            // 3. 命中则按主键删除该条用户消息
+            boolean removed = this.removeById(latestMatches.getFirst().getId());
+            if (!removed) {
+                return false;
+            }
+            // 4. 删除成功后：失效 echo 缓存 + 清除 AI ChatMemory，防止 Redis 残留取消轮 UserMessage
+            try {
+                chatHistoryEchoRedisSupport.invalidate(appId);
+            } catch (Exception e) {
+                log.warn("没有成功的清理本应删除的失效的 echo 缓存，appId={}", appId, e);
+            }
+            try {
+                // 先全部删除ai自带的mmemorystore,再后续获取aiservice的时候懒加载
+                chatMemoryStore.deleteMessages(appId);
+                log.info("AI ChatMemory 已清除（取消轮回滚后重建），appId={}", appId);
+            } catch (Exception e) {
+                log.warn("清除 AI ChatMemory 失败已忽略，appId={}", appId, e);
+            }
+            return true;
         } catch (Exception e) {
             log.warn("按内容回滚用户消息失败, appId={}, userId={}", appId, userId, e);
             return false;
@@ -1002,6 +1262,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum, boolean workflowMode) {
+        // 方法大纲：
+        // 1. 无 buffer 与耗时指标时，以 0 委托带指标的重载实现    L1268-L1269
+
         // 1. 无 buffer 与耗时的默认收口,将指标置零后委托重载实现
         onRoundCompleted(appId, roundId, userId, codeGenTypeEnum, workflowMode, 0, 0L);
     }
@@ -1019,11 +1282,16 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      * @return 无
      */
     public void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum, boolean workflowMode, int bufferChars, long elapsedMs) {
+        // 方法大纲：
+        // 1. 关键主键缺失时直接返回（幂等）    L1289-L1292
+        // 2. 委托 ConversationMemoryStateService 收口（失败自吞）    L1293-L1301
+
         // 1. 关键主键缺失时直接返回,得到幂等无操作的收口
         if (appId == null || appId <= 0 || roundId == null || roundId <= 0 || userId == null || userId <= 0) {
             return;
         }
         try {
+            // 2. 委托 ConversationMemoryStateService 收口（失败自吞）
             // 1. 收口逻辑委托给独立 memory_state 服务，隔离主会话入库与 SSE 输出。
             // 2. 透传执行器采集的真实 bufferChars/elapsedMs，满足 E 指标口径。
             conversationMemoryStateService.onRoundCompleted(appId, roundId, userId, codeGenTypeEnum, workflowMode, bufferChars, elapsedMs);
@@ -1033,8 +1301,18 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
     }
 
+    /**
+     * 判断 workflow 下一轮生成前是否应触发会话级总结（依据最新 AI 消息状态）
+     *
+     * @param appId 应用 id
+     * @return 最新 AI 含成功完成标记且非失败态时为 true
+     */
     @Override
     public boolean shouldSummarizeBeforeWorkflowGeneration(Long appId) {
+        // 方法大纲：
+        // 1. 非法 appId 直接 false    L1316-L1319
+        // 2. 查最新一条 AI 消息并判断是否含失败/成功标记    L1320-L1343
+
         // 1. 非法 appId 不做判断,直接 false 表示不触发前置总结
         if (appId == null || appId <= 0) {
             return false;

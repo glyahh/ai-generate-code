@@ -6,6 +6,7 @@ import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 
@@ -18,7 +19,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 并对疑似截断的 HTML 追加 {@link LegacyHtmlStreamIntegrity} 提示。
  */
 @Slf4j
+@Component
 public class SimpleTextStreamHandler {
+
 
     /**
      * 包装原始文本流：透传分片、完成/错误/取消时写入一条 AI 聊天记录
@@ -77,21 +80,9 @@ public class SimpleTextStreamHandler {
                     }
                 })
                 .doFinally(signal -> {
-                    // 1. 取消时打日志，便于排查客户端断开
+                    // 取消时仅打日志；本轮未完成输出不写入历史/Redis，避免后续轮次被旧信息污染
                     if (signal == SignalType.CANCEL) {
-                        log.warn("SimpleTextStreamHandler flux CANCEL appId={} bufferedChars={}", appId, aiResponseBuilder.length());
-                    }
-                    // 2. 取消且尚未持久化时，把已缓冲片段（加中断标记）写入历史
-                    if (signal == SignalType.CANCEL && persisted.compareAndSet(false, true)) {
-                        String partial = LegacyHtmlStreamIntegrity.appendIntegrityNoticeIfNeeded(aiResponseBuilder.toString());
-                        if (!partial.isBlank()) {
-                            chatHistoryService.addChatMessage(
-                                    appId,
-                                    partial + "\n\n" + ChatHistoryConstant.GENERATION_INTERRUPTED_MARKER,
-                                    ChatHistoryMessageTypeEnum.AI.getValue(),
-                                    loginUser.getId()
-                            );
-                        }
+                        log.warn("/gen/code 代码类型:HTML 用户取消 落库 appId={} bufferedChars={}", appId, aiResponseBuilder.length());
                     }
                 });
     }

@@ -16,6 +16,8 @@ import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.guardrail.RetryOutputGuardrail;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +40,9 @@ public class JsonMessageStreamHandler {
 
     @Resource
     private ToolManager toolManager;
+
+    @Resource
+    private AppService appService;
 
     private final RetryOutputGuardrail retryOutputGuardrail = new RetryOutputGuardrail();
 
@@ -96,17 +101,10 @@ public class JsonMessageStreamHandler {
                     }
                 })
                 .doFinally(signal -> {
-                    // 1. 订阅被取消且尚未持久化：把已有片段加 [中断] 落库
-                    if (signal == SignalType.CANCEL && persisted.compareAndSet(false, true)) {
-                        String partial = chatHistoryStringBuilder.toString();
-                        if (StrUtil.isNotBlank(partial)) {
-                            chatHistoryService.addChatMessage(
-                                    appId,
-                                    partial + "\n\n" + ChatHistoryConstant.GENERATION_INTERRUPTED_MARKER,
-                                    ChatHistoryMessageTypeEnum.AI.getValue(),
-                                    loginUser.getId()
-                            );
-                        }
+                    CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.valueOf(appService.getById(appId).getCodeGenType());
+                    // 取消时仅打日志；本轮未完成输出不写入历史/Redis，避免后续轮次被旧信息污染
+                    if (signal == SignalType.CANCEL) {
+                        log.warn("JSON消息代码类型:{} 用户取消 落库 appId={} bufferedChars={}", codeGenTypeEnum, appId, chatHistoryStringBuilder.length());
                     }
                 });
 

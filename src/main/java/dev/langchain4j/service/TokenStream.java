@@ -80,4 +80,10 @@ public interface TokenStream {
      * Will send a request to LLM and start response streaming.
      */
     void start();
+
+    /**
+     * Cancels the ongoing token stream. After calling this, the underlying handler
+     * stops accepting partial responses, tool execution, and recursive continuations.
+     */
+    void cancel();
 }

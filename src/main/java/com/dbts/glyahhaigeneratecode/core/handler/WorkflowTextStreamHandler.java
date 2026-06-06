@@ -5,6 +5,8 @@ import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.guardrail.UserFacingOutputSanitizer;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
+import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,9 @@ public class WorkflowTextStreamHandler {
 
     @Resource
     private UserFacingOutputSanitizer userFacingOutputSanitizer;
+
+    @Resource
+    private AppService appService;
     // 历史会话记录不再做硬截断：避免超长代码在入库阶段丢失，导致后续“修改/增量编辑”无法基于完整原文进行。
 
     /**
@@ -77,17 +82,10 @@ public class WorkflowTextStreamHandler {
                     }
                 })
                 .doFinally(signal -> {
-                    if (signal == SignalType.CANCEL && persisted.compareAndSet(false, true)) {
-                        // 在会话中毒截断时,清理消息
-                        String partial = sanitizeBeforePersist(aiResponseBuilder.toString());
-                        if (StrUtil.isNotBlank(partial)) {
-                            chatHistoryService.addChatMessage(
-                                    appId,
-                                    partial + "\n\n" + ChatHistoryConstant.GENERATION_INTERRUPTED_MARKER,
-                                    ChatHistoryMessageTypeEnum.AI.getValue(),
-                                    loginUser.getId()
-                            );
-                        }
+                    CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.valueOf(appService.getById(appId).getCodeGenType());
+                    // 取消时仅打日志；本轮未完成输出不写入历史/Redis，避免后续轮次被旧信息污染
+                    if (signal == SignalType.CANCEL) {
+                        log.warn("工作流代码类型:{} 用户取消 落库 appId={} bufferedChars={}", codeGenTypeEnum, appId, aiResponseBuilder.length());
                     }
                 });
     }

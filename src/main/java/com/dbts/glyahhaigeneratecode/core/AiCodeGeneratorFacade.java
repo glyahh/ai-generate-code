@@ -255,6 +255,11 @@ public class AiCodeGeneratorFacade {
         AtomicBoolean nativeToolExecutedMode = new AtomicBoolean(false);
 
         return Flux.<String>create(sink -> {
+                    // 前端停止 → 取消底层 TokenStream, 防止旧流继续写入 ChatMemory/Redis
+                    sink.onCancel(() -> {
+                        try { tokenStream.cancel(); } catch (Exception ignore) { }
+                    });
+
                     // 工具轮次门禁：工具执行阶段禁止输出普通 AI 文本，
                     // 仅当 exit 工具已执行后才放行最终总结文本
                     AtomicBoolean toolRound = new AtomicBoolean(false);
@@ -384,6 +389,7 @@ public class AiCodeGeneratorFacade {
                                 appId,
                                 codeGenTypeEnum,
                                 persistOnComplete);
+                        try { tokenStream.cancel(); } catch (Exception ignore) { }
                     }
                 });
     }
@@ -534,7 +540,11 @@ public class AiCodeGeneratorFacade {
         // 工具请求去重：每个 toolCallId 仅首次 emit ToolRequestMessage
         Set<String> seenToolRequestIds = new HashSet<>();
 
-        return Flux.create(sink -> tokenStream.onPartialResponse((String partialResponse) -> {
+        return Flux.create(sink -> {
+                    sink.onCancel(() -> {
+                        try { tokenStream.cancel(); } catch (Exception ignore) { }
+                    });
+                    tokenStream.onPartialResponse((String partialResponse) -> {
                     AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
                     sink.next(JSONUtil.toJsonStr(aiResponseMessage));
                 })
@@ -617,7 +627,8 @@ public class AiCodeGeneratorFacade {
                     error.printStackTrace();
                     sink.error(error);
                 })
-                .start());
+                .start();
+        });
     }
 
     /**

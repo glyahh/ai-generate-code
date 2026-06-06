@@ -51,6 +51,8 @@ public class AiServiceTokenStream implements TokenStream {
     private int onErrorInvoked;
     private int ignoreErrorsInvoked;
 
+    private volatile boolean cancelled;
+
     /**
      * Creates a new instance of {@link AiServiceTokenStream} with the given parameters.
      *
@@ -152,13 +154,23 @@ public class AiServiceTokenStream implements TokenStream {
                 toolSpecifications,
                 toolExecutors,
                 commonGuardrailParams,
-                methodKey);
+                methodKey,
+                this::isCancelled);
 
         if (contentsHandler != null && retrievedContents != null) {
             contentsHandler.accept(retrievedContents);
         }
 
         context.streamingChatModel.chat(chatRequest, handler);
+    }
+
+    @Override
+    public void cancel() {
+        this.cancelled = true;
+    }
+
+    private boolean isCancelled() {
+        return cancelled;
     }
 
     private void validateConfiguration() {

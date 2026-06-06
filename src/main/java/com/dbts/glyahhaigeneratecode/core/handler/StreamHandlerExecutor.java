@@ -32,7 +32,8 @@ public class StreamHandlerExecutor {
     @Resource
     private WorkflowTextStreamHandler workflowTextStreamHandler;
 
-    private final SimpleTextStreamHandler simpleTextStreamHandler = new SimpleTextStreamHandler();
+    @Resource
+    private SimpleTextStreamHandler simpleTextStreamHandler;
 
     /**
      * 按生成类型与工作流开关选择具体 Handler，并在流上挂载「轮次结束」统计回调
@@ -77,7 +78,7 @@ public class StreamHandlerExecutor {
             handledFlux = switch (codeGenType) {
                 case VUE -> // 使用注入的组件实例
                         jsonMessageStreamHandler.handle(userFacingFlux, chatHistoryService, appId, loginUser, firstRound, userMessage);
-                case HTML, MULTI_FILE -> // 简单文本处理器不需要依赖注入
+                case HTML, MULTI_FILE ->
                         simpleTextStreamHandler.handle(userFacingFlux, chatHistoryService, appId, loginUser);
             };
         }
@@ -100,6 +101,18 @@ public class StreamHandlerExecutor {
                      *  值已是 true → CAS 失败 → 返回 false → !false 为真 → 直接 return，后面的收尾不会再跑。
                      */
                     if (!once.compareAndSet(false, true)) {
+                        return;
+                    }
+                    // CANCEL：跳过 onRoundCompleted，回滚已入库的 user 消息，
+                    // 避免本轮 canceled round 进入后续会话记忆（Redis/DB）。
+                    if (signal == SignalType.CANCEL) {
+                        log.warn("代码类型:{} 用户取消 跳过 onRoundCompleted，回滚用户消息 appId={} roundId={} bufferedChars={}",
+                                codeGenType, appId, roundId, bufferChars[0]);
+                        try {
+                            chatHistoryService.removeUserMessageByContent(appId, loginUser.getId(), userMessage);
+                        } catch (Exception e) {
+                            log.warn("回滚用户消息失败，appId={}, roundId={}", appId, roundId, e);
+                        }
                         return;
                     }
                     // 2. roundId 非法则跳过统计回调（避免脏数据）

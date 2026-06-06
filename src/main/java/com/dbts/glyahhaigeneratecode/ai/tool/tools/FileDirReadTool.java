@@ -1,9 +1,9 @@
 package com.dbts.glyahhaigeneratecode.ai.tool.tools;
 
-import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
+import com.dbts.glyahhaigeneratecode.ai.tool.tool_assist.FileDirRead_Assist;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -15,9 +15,9 @@ import org.springframework.stereotype.Component;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 文件目录读取工具
@@ -36,20 +36,8 @@ public class FileDirReadTool extends BaseTool {
     @Resource
     private AppService appService;
 
-    /**
-     * 需要忽略的文件和目录
-     */
-    private static final Set<String> IGNORED_NAMES = Set.of(
-            "node_modules", ".git", "dist", "build", ".DS_Store",
-            ".env", "target", ".mvn", ".idea", ".vscode", "coverage"
-    );
-
-    /**
-     * 需要忽略的文件扩展名
-     */
-    private static final Set<String> IGNORED_EXTENSIONS = Set.of(
-            ".log", ".tmp", ".cache", ".lock"
-    );
+    @Resource
+    private FileDirRead_Assist fileDirReadAssist;
 
     @Tool("读取目录结构，获取指定目录下的所有文件和子目录信息")
     public String readDir(
@@ -80,21 +68,28 @@ public class FileDirReadTool extends BaseTool {
             StringBuilder structure = new StringBuilder();
             structure.append("项目目录结构:\n");
 
-            // 使用 Hutool 递归获取所有文件（已按忽略规则过滤）
-            List<File> allFiles = FileUtil.loopFiles(targetDir, file -> !shouldIgnore(file.getName()));
+            // 从 targetDir 开始递归遍历，遇到 node_modules / dist / build / .git 等目录直接跳过子树
+            List<Path> allPaths = new ArrayList<>();
+            fileDirReadAssist.collectFilesWithPruning(targetDir.toPath(), projectRoot, allPaths);
 
-            // 按路径深度和名称排序显示，靠前展示上层结构
-            allFiles.stream()
-                    .sorted(Comparator
-                            .comparingInt((File f) -> getRelativeDepth(targetDir, f))
-                            .thenComparing(f -> f.getPath().toLowerCase()))
-                    .forEach(file -> {
-                        int depth = getRelativeDepth(targetDir, file);
-                        String indent = "  ".repeat(Math.max(depth, 0));
-                        structure.append(indent)
-                                .append(file.getName())
-                                .append('\n');
-                    });
+            // 按相对路径深度和名称排序显示，靠前展示上层结构
+            // 这里 allPaths 已经是告诉Comparator泛型是Path
+            allPaths.sort(Comparator
+                    // 相对根目录的深度
+                    .comparingInt((Path p) -> fileDirReadAssist.getRelativePathDepth(projectRoot, p))
+                    // 路径字符串小写字母序
+                    .thenComparing(p -> p.toString().toLowerCase()));
+
+            // 根据排序的path添加缩进拼接返回给ai
+            for (Path filePath : allPaths) {
+                int depth = fileDirReadAssist.getRelativePathDepth(projectRoot, filePath);
+                String indent = "  ".repeat(Math.max(depth, 0));
+                // 输出项目内相对路径，便于模型定位真实文件
+                String relativePath = toRelativePath(projectRoot, filePath);
+                structure.append(indent)
+                        .append(relativePath != null ? relativePath : filePath.getFileName())
+                        .append('\n');
+            }
 
             return structure.toString();
         } catch (Exception e) {
@@ -102,27 +97,6 @@ public class FileDirReadTool extends BaseTool {
             log.error(errorMessage, e);
             return errorMessage;
         }
-    }
-
-    /**
-     * 计算文件相对于根目录的深度
-     */
-    private int getRelativeDepth(File root, File file) {
-        Path rootPath = root.toPath();
-        Path filePath = file.toPath();
-        return Math.max(0, rootPath.relativize(filePath).getNameCount() - 1);
-    }
-
-    /**
-     * 判断是否应该忽略该文件或目录
-     */
-    private boolean shouldIgnore(String fileName) {
-        // 检查是否在忽略名称列表中
-        if (IGNORED_NAMES.contains(fileName)) {
-            return true;
-        }
-        // 检查文件扩展名
-        return IGNORED_EXTENSIONS.stream().anyMatch(fileName::endsWith);
     }
 
     @Override
@@ -145,4 +119,3 @@ public class FileDirReadTool extends BaseTool {
             """, getDisplayName(), dir);
     }
 }
-

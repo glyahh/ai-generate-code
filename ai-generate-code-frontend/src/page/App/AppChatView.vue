@@ -3176,7 +3176,7 @@ onBeforeUnmount(() => {
                         :show-status="shouldShowToolRequestStatus(m, idx)"
                         :status-text="getToolRequestStatusView(m, idx)?.text ?? getToolRequestShimmerText(m, idx)"
                         :status-icon-src="getToolRequestStatusView(m, idx)?.iconSrc"
-                        :status-icon-spin="getToolRequestStatusView(m, idx)?.spin ?? 'none'"
+                        :status-icon-motion="getToolRequestStatusView(m, idx)?.motion ?? 'none'"
                       />
 
                       <!-- 生成失败 / 用户中断 -->

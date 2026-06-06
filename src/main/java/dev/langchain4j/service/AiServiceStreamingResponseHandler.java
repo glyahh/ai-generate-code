@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import static dev.langchain4j.internal.Utils.copy;
@@ -57,6 +58,7 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
     private final Map<String, ToolExecutor> toolExecutors;
     private final List<String> responseBuffer = new ArrayList<>();
     private final boolean hasOutputGuardrails;
+    private final BooleanSupplier cancelledChecker;
 
     AiServiceStreamingResponseHandler(
             ChatExecutor chatExecutor,
@@ -73,7 +75,8 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
             List<ToolSpecification> toolSpecifications,
             Map<String, ToolExecutor> toolExecutors,
             GuardrailRequestParams commonGuardrailParams,
-            Object methodKey) {
+            Object methodKey,
+            BooleanSupplier cancelledChecker) {
         this.chatExecutor = ensureNotNull(chatExecutor, "chatExecutor");
         this.context = ensureNotNull(context, "context");
         this.memoryId = ensureNotNull(memoryId, "memoryId");
@@ -93,10 +96,12 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
         this.toolSpecifications = copy(toolSpecifications);
         this.toolExecutors = copy(toolExecutors);
         this.hasOutputGuardrails = context.guardrailService().hasOutputGuardrails(methodKey);
+        this.cancelledChecker = cancelledChecker != null ? cancelledChecker : () -> false;
     }
 
     @Override
     public void onPartialResponse(String partialResponse) {
+        if (cancelledChecker.getAsBoolean()) return;
         // If we're using output guardrails, then buffer the partial response until the guardrails have completed
         if (hasOutputGuardrails) {
             responseBuffer.add(partialResponse);
@@ -107,6 +112,7 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
 
     @Override
     public void onPartialToolExecutionRequest(int index, ToolExecutionRequest partialToolExecutionRequest) {
+        if (cancelledChecker.getAsBoolean()) return;
         if (partialToolExecutionRequestHandler == null) {
             return;
         }
@@ -128,6 +134,8 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
 
     @Override
     public void onCompleteResponse(ChatResponse completeResponse) {
+        // 取消后停止 partial、工具执行、递归续聊和最终 complete 回调
+        if (cancelledChecker.getAsBoolean()) return;
         AiMessage aiMessage = completeResponse.aiMessage();
         addToMemory(aiMessage);
 
@@ -177,7 +185,8 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
                     toolSpecifications,
                     toolExecutors,
                     commonGuardrailParams,
-                    methodKey);
+                    methodKey,
+                    cancelledChecker);
 
             context.streamingChatModel.chat(chatRequest, handler);
         } else {

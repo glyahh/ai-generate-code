@@ -7,13 +7,13 @@ export const TOOL_WAIT_STATUS_DELAY_MS = 3_000
 export const TOOL_WRITE_STATUS_TIER_2_MS = 15_000
 export const TOOL_MODIFY_STATUS_TIER_2_MS = 7_000
 
-export type ToolWaitStatusSpin = 'none' | 'normal' | 'fast'
+export type ToolWaitStatusMotion = 'none' | 'write-jitter' | 'write-jitter-fast'
 
 export type ToolWaitStatusView = {
   show: boolean
   text: string
   iconSrc: string
-  spin: ToolWaitStatusSpin
+  motion: ToolWaitStatusMotion
 }
 
 const WRITE_FILE = '写入文件'
@@ -29,7 +29,7 @@ export function resolveToolWaitStatus(
 ): ToolWaitStatusView | null {
   if (!isToolWaitStatusTool(toolName)) return null
   if (elapsedMs < TOOL_WAIT_STATUS_DELAY_MS) {
-    return { show: false, text: '', iconSrc: '', spin: 'none' }
+    return { show: false, text: '', iconSrc: '', motion: 'none' }
   }
 
   if (toolName === WRITE_FILE) {
@@ -38,14 +38,14 @@ export function resolveToolWaitStatus(
         show: true,
         text: '正在写文件中',
         iconSrc: writeNormalIcon,
-        spin: 'normal',
+        motion: 'write-jitter',
       }
     }
     return {
       show: true,
       text: '文件有点大 已增加算力',
       iconSrc: writeBoostIcon,
-      spin: 'fast',
+      motion: 'write-jitter-fast',
     }
   }
 
@@ -54,13 +54,13 @@ export function resolveToolWaitStatus(
       show: true,
       text: '正在思考修改区域',
       iconSrc: modifyThinkingIcon,
-      spin: 'none',
+      motion: 'none',
     }
   }
   return {
     show: true,
     text: '修改即将完成',
     iconSrc: modifyDoneIcon,
-    spin: 'none',
+    motion: 'none',
   }
 }
