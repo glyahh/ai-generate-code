@@ -58,12 +58,20 @@ public class SimpleTextStreamHandler {
                     }
                 })
                 .doOnError(error -> {
-                    // 1. 错误路径同样只写一次；真实异常仅打日志
+                    // 1. 错误路径同样只写一次；保留已累积内容，末尾追加失败提示
                     if (persisted.compareAndSet(false, true)) {
                         log.warn("simple text stream failed, appId={}, type={}", appId, error.getClass().getSimpleName(), error);
+                        String partial = aiResponseBuilder.toString();
+                        String message;
+                        if (!partial.isBlank()) {
+                            // 保留工具卡片 + AI 自然语言，末尾追加失败标识
+                            message = partial + "\n\n" + ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE;
+                        } else {
+                            message = ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE;
+                        }
                         chatHistoryService.addChatMessage(
                                 appId,
-                                ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE,
+                                message,
                                 ChatHistoryMessageTypeEnum.AI.getValue(),
                                 loginUser.getId());
                     }

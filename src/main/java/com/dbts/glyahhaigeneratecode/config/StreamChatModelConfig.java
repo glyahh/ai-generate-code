@@ -2,6 +2,7 @@ package com.dbts.glyahhaigeneratecode.config;
 
 import com.dbts.glyahhaigeneratecode.Listener.ai.StreamingChatModelDiagnosticsListener;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -35,7 +36,17 @@ public class StreamChatModelConfig {
     // 返回多例的Bean
     @Scope("prototype")
     public StreamingChatModel prototypeStreamingChatModel() {
+        // 显式设置 reasoningEffort 为 null，不启用 reasoning/reasoning_effort 参数。
+        // qwen3.6-plus 不是 reasoning 模型（已在 application.yml 注释中说明），
+        // 但 DashScope API 默认启用 thinking 导致推理阶段 delta.content 为空。
+        // 此参数确保 API 不会将非 reasoning 模型当作 reasoning 模型对待。
+        OpenAiChatRequestParameters defaultParams = OpenAiChatRequestParameters.builder()
+                .reasoningEffort(null)
+                .build();
+
         return OpenAiStreamingChatModel.builder()
+                .defaultRequestParameters(defaultParams)
+                .thinkingDisabled(true)
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .modelName(modelName)

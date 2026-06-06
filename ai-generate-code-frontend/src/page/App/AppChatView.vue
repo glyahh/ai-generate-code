@@ -41,6 +41,18 @@ import {
 } from '@/utils/toolOutputAdapters/toolOutputBlockParsers'
 import { loadProjectFilesEchoFromDisk } from '@/utils/projectFilesEcho'
 import CodeBlock from '@/components/CodeBlock.vue'
+import ToolExitHint from '@/components/ToolExitHint.vue'
+import ToolRequestHint from '@/components/ToolRequestHint.vue'
+import ToolExecCardHeader from '@/components/ToolExecCardHeader.vue'
+import {
+  getToolExecHeaderTargetPath,
+  stripToolCallPrefix,
+} from '@/utils/toolExecDisplay'
+import {
+  isToolWaitStatusTool,
+  resolveToolWaitStatus,
+  type ToolWaitStatusView,
+} from '@/utils/toolWaitStatus'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 import {
   attachVisualWebsiteEditor,
@@ -260,8 +272,7 @@ const eventSourceMap = new Map<string, EventSource>()
 const activeStreamOrder = ref<string[]>([])
 const activeStreamMeta = ref<Record<string, ActiveStreamMeta>>({})
 const WORKFLOW_SLOW_HINT_DELAY_MS = 120_000
-const TOOL_WRITE_SHIMMER_TIER_2_MS = 15_000
-const TOOL_WRITE_SHIMMER_TIER_3_MS = 30_000
+const TOOL_REQUEST_STATUS_DELAY_MS = 5_000
 const workflowNowTs = ref(Date.now())
 let workflowSlowHintTicker: number | null = null
 
@@ -383,8 +394,11 @@ function buildWorkflowRenderVersion(
 
 function buildUiRenderVersion(m: ChatMessage): string {
   if (m.uiState) {
-    // 流式消息直接走 uiState，不使用历史缓存
-    return `stream:${m.uiState.segments.length}:${m.uiState.buffer.length}:${m.uiState.stage}`
+    // 流式消息：segments.length + buffer.length 在 flushSafeMarkdown 追加到已有
+    // markdown segment 时可能都不变，导致缓存版本 key 不变、getMessageUiSegments
+    // 返回旧 segments（画面卡在早期代码位置）。纳入 content.length 确保内容增长
+    // 时缓存一定失效。
+    return `stream:${m.content.length}:${m.uiState.segments.length}:${m.uiState.buffer.length}:${m.uiState.stage}`
   }
   return `hist:${m.content ?? ''}`
 }
@@ -1130,7 +1144,27 @@ function inferLanguageFromFilePath(p: string): string {
 function flushSafeMarkdown(state: AssistantUiState, keepTail = 80) {
   if (!state.buffer) return
   if (state.buffer.length <= keepTail) return
-  const flushLen = state.buffer.length - keepTail
+
+  // 代码围栏感知：当 buffer 包含 ``` 围栏标记时，确保不会把围栏开口留在 buffer
+  // 中导致前端 markdown 渲染器长时间看不到代码块内容（Issue #1 流式空白）。
+  // 策略：检查 keepTail 保留部分是否包含未闭合的围栏；若是，则缩小 keepTail
+  // 使得围栏内容可以被 flush 到渲染器（渲染器容忍未闭合围栏，会以纯文本展示）。
+  let effectiveKeepTail = keepTail
+  const tailPart = state.buffer.slice(state.buffer.length - keepTail)
+  const fenceOpenCount = (tailPart.match(/```\w*/g) || []).length
+  const fenceCloseCount = (tailPart.match(/```(?:\s|$)/g) || []).length
+  // 如果 keepTail 部分有围栏开口但没有对应闭合，说明代码块内容被阻塞
+  if (fenceOpenCount > fenceCloseCount) {
+    // 缩小 keepTail 到围栏开口之前，让代码内容流出
+    const lastFenceOpen = tailPart.lastIndexOf('```')
+    if (lastFenceOpen >= 0) {
+      effectiveKeepTail = keepTail - lastFenceOpen
+      if (effectiveKeepTail < 20) effectiveKeepTail = 20
+    }
+  }
+
+  const flushLen = state.buffer.length - effectiveKeepTail
+  if (flushLen <= 0) return
   const part = state.buffer.slice(0, flushLen)
   state.buffer = state.buffer.slice(flushLen)
   appendMarkdown(state, part)
@@ -1267,6 +1301,16 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
         }
 
         const toolName = (mReqNow[1] ?? next.toolName ?? '').trim() || '未知工具'
+
+        // 去重：同轮相同工具名只保留第一次出现，避免模型重复调用产生多个相同卡片
+        if (state.lastToolRequestName === toolName) {
+          // 消费掉匹配文本但不创建新 segment
+          const matchLen2 = mReqNow[0].length
+          state.buffer = state.buffer.slice((mReqNow.index ?? 0) + matchLen2)
+          state.buffer = consumeLeadingNewlines(state.buffer, 2)
+          continue
+        }
+
         const matchStart = mReqNow.index ?? 0
         const matchLen = mReqNow[0].length
         const afterMatch = state.buffer.slice(matchStart + matchLen)
@@ -2150,11 +2194,20 @@ function rebuildGeneratedFilesFromHistory() {
   }
 }
 
+function getCodeGenTypeLabel(): string {
+  if (!appInfo.value) return ''
+  const t = normalizeCodeGenType(appInfo.value.codeGenType)
+  if (t === CodeGenTypeEnum.HTML) return 'HTML 项目'
+  if (t === CodeGenTypeEnum.MULTI_FILE) return '多文件项目'
+  if (t === CodeGenTypeEnum.VUE_PROJECT) return 'Vue 项目'
+  return '项目'
+}
+
 async function refreshProjectFilesEchoFromDisk() {
   if (!appId.value || !appInfo.value) return
 
-  // 仅 Vue 项目 + 已有生成结果时走磁盘全量，否则走历史解析
-  if (!isVueProject.value || (!hasGenerated.value && !appInfo.value?.hasGeneratedCode)) {
+  // 所有生成类型统一走磁盘项目快照，不再按类型区分回显来源
+  if (!hasGenerated.value && !appInfo.value?.hasGeneratedCode) {
     rebuildGeneratedFilesFromHistory()
     return
   }
@@ -2167,12 +2220,9 @@ async function refreshProjectFilesEchoFromDisk() {
   loadingEcho.value = true
   pendingEchoRefresh = false
   try {
-    const codeGenType = normalizeCodeGenType(appInfo.value.codeGenType)
     const items = await loadProjectFilesEchoFromDisk({
       appId: appId.value,
-      codeGenType,
-      previewBaseUrl: PREVIEW_BASE_URL,
-      existingMap: { ...generatedFileMap.value },
+      apiBaseUrl: API_BASE_URL,
     })
     if (items.length > 0) {
       const nextMap: Record<string, GeneratedFileItem> = {}
@@ -2359,21 +2409,31 @@ function isToolRequestPending(m: ChatMessage, idx: number): boolean {
   return true
 }
 
+function getToolRequestStatusView(m: ChatMessage, idx: number): ToolWaitStatusView | null {
+  const segs = getMessageUiSegments(m)
+  const seg = segs[idx]
+  if (!seg || seg.kind !== 'tool_request' || !seg.createdAt) return null
+  return resolveToolWaitStatus(seg.toolName, workflowNowTs.value - seg.createdAt)
+}
+
+function shouldShowToolRequestStatus(m: ChatMessage, idx: number): boolean {
+  if (!isToolRequestPending(m, idx)) return false
+  const segs = getMessageUiSegments(m)
+  const seg = segs[idx]
+  if (!seg || seg.kind !== 'tool_request' || !seg.createdAt) return false
+
+  const elapsed = workflowNowTs.value - seg.createdAt
+  if (isToolWaitStatusTool(seg.toolName)) {
+    return getToolRequestStatusView(m, idx)?.show ?? false
+  }
+  return elapsed >= TOOL_REQUEST_STATUS_DELAY_MS
+}
+
 function getToolRequestShimmerText(m: ChatMessage, idx: number): string {
   const segs = getMessageUiSegments(m)
   const seg = segs[idx]
   if (!seg || seg.kind !== 'tool_request') return '工具执行中'
-
-  if (seg.toolName !== '写入文件') return '工具执行中'
-
-  const defaultText = '代码努力写入中'
-  const startedAt = seg.createdAt
-  if (!startedAt) return defaultText
-
-  const elapsed = workflowNowTs.value - startedAt
-  if (elapsed < TOOL_WRITE_SHIMMER_TIER_2_MS) return defaultText
-  if (elapsed < TOOL_WRITE_SHIMMER_TIER_3_MS) return '文件有点大,正在努力写入中'
-  return '正在为您加速生成'
+  return '工具执行中'
 }
 
 function appendAssistantChunkToStream(streamId: string, chunk: string) {
@@ -2898,7 +2958,7 @@ onBeforeUnmount(() => {
           编辑应用
         </a-button>
         <a-button
-          v-if="!isReadOnly && isVueProject && generatedFiles.length > 0"
+          v-if="!isReadOnly && generatedFiles.length > 0"
           class="ghost-btn"
           @click="showGeneratedFilesModal"
         >
@@ -2915,7 +2975,7 @@ onBeforeUnmount(() => {
         <div v-if="generatedFiles.length > 0" class="generated-files-bar">
           <div class="generated-files-left">
             <span class="generated-files-dot" aria-hidden="true" />
-            <span class="generated-files-text">已回显 {{ generatedFiles.length }} 个文件（Vue 项目）</span>
+            <span class="generated-files-text">已回显 {{ generatedFiles.length }} 个文件（{{ getCodeGenTypeLabel() }}）</span>
           </div>
           <a-button size="small" class="ghost-btn" @click="showGeneratedFilesModal">查看回显</a-button>
         </div>
@@ -3104,22 +3164,20 @@ onBeforeUnmount(() => {
                         </div>
                       </div>
                       <template v-for="(segment, idx) in getMessageUiSegments(m)" :key="segment.segmentId ?? 'seg-' + idx">
-                      <!-- TOOL_REQUEST：选择工具胶囊（流式与历史均走 segments 时间线） -->
-                      <div
-                        v-if="segment.kind === 'tool_request'"
-                        class="tool-hint-pill"
-                      >
-                        <span class="tool-hint-label">选择工具</span>
-                        <span class="tool-hint-main">{{ segment.toolName }}</span>
-                        <span
-                          class="tool-hint-shimmer"
-                          :class="{ 'tool-hint-shimmer--hidden': !isToolRequestPending(m, idx) }"
-                          :aria-label="getToolRequestShimmerText(m, idx)"
-                        >
-                          <i class="dot" /><i class="dot" /><i class="dot" />
-                          <span class="shimmer-text">{{ getToolRequestShimmerText(m, idx) }}</span>
-                        </span>
-                      </div>
+                      <!-- TOOL_REQUEST：结束工具 → ToolExitHint；其它 → list-row + 延迟光影 -->
+                      <ToolExitHint
+                        v-if="segment.kind === 'tool_request' && segment.toolName === '结束工具调用'"
+                        :pending="isToolRequestPending(m, idx)"
+                      />
+                      <ToolRequestHint
+                        v-else-if="segment.kind === 'tool_request'"
+                        :tool-name="segment.toolName"
+                        :pending="isToolRequestPending(m, idx)"
+                        :show-status="shouldShowToolRequestStatus(m, idx)"
+                        :status-text="getToolRequestStatusView(m, idx)?.text ?? getToolRequestShimmerText(m, idx)"
+                        :status-icon-src="getToolRequestStatusView(m, idx)?.iconSrc"
+                        :status-icon-spin="getToolRequestStatusView(m, idx)?.spin ?? 'none'"
+                      />
 
                       <!-- 生成失败 / 用户中断 -->
                       <div
@@ -3145,18 +3203,13 @@ onBeforeUnmount(() => {
 
                       <!-- TOOL_EXECUTED：写入文件卡片（可流式追加） -->
                       <div v-else-if="segment.kind === 'tool_executed_write_file'" class="tool-exec-card">
-                        <div class="tool-exec-header">
-                          <div class="tool-call-badge">使用工具</div>
-                          <div class="tool-exec-meta">
-                            <div class="tool-call-title">[工具调用] 写入文件</div>
-                            <div class="tool-call-path">{{ segment.filePath }}</div>
-                          </div>
-                          <div class="tool-exec-actions">
+                        <ToolExecCardHeader action-label="写入文件" :target-path="segment.filePath">
+                          <template #actions>
                             <a-button size="small" class="ghost-btn" @click="copyToClipboard(segment.content)">
                               复制内容
                             </a-button>
-                          </div>
-                        </div>
+                          </template>
+                        </ToolExecCardHeader>
                         <CodeBlock
                           :code="segment.content"
                           :language="segment.language"
@@ -3166,13 +3219,8 @@ onBeforeUnmount(() => {
 
                       <!-- TOOL_EXECUTED：修改文件卡片（替换前/替换后） -->
                       <div v-else-if="segment.kind === 'tool_executed_modify_file'" class="tool-exec-card">
-                        <div class="tool-exec-header">
-                          <div class="tool-call-badge">使用工具</div>
-                          <div class="tool-exec-meta">
-                            <div class="tool-call-title">[工具调用] 修改文件</div>
-                            <div class="tool-call-path">{{ segment.filePath }}</div>
-                          </div>
-                          <div class="tool-exec-actions">
+                        <ToolExecCardHeader action-label="修改文件" :target-path="segment.filePath">
+                          <template #actions>
                             <a-button
                               size="small"
                               class="ghost-btn"
@@ -3180,8 +3228,8 @@ onBeforeUnmount(() => {
                             >
                               复制替换后
                             </a-button>
-                          </div>
-                        </div>
+                          </template>
+                        </ToolExecCardHeader>
 
                         <div style="display: flex; flex-direction: column; gap: 8px">
                           <div class="tool-call-title" style="font-size: 12px; font-weight: 600; color: #111827">
@@ -3206,24 +3254,10 @@ onBeforeUnmount(() => {
 
                       <!-- TOOL_EXECUTED：其它工具简单输出卡片 -->
                       <div v-else-if="segment.kind === 'tool_executed_simple_tool'" class="tool-exec-card">
-                        <div class="tool-exec-header">
-                          <div class="tool-call-badge">使用工具</div>
-                          <div class="tool-exec-meta">
-                            <div class="tool-call-title">{{ segment.toolTitle }}</div>
-                            <div class="tool-call-path">{{ segment.filePath }}</div>
-                          </div>
-                        </div>
-                        <div
-                          style="
-                            margin-top: 2px;
-                            font-size: 12px;
-                            color: #4b5563;
-                            white-space: pre-wrap;
-                            line-height: 1.5;
-                          "
-                        >
-                          {{ segment.message }}
-                        </div>
+                        <ToolExecCardHeader
+                          :action-label="stripToolCallPrefix(segment.toolTitle)"
+                          :target-path="getToolExecHeaderTargetPath(segment.toolTitle, segment.filePath)"
+                        />
                       </div>
 
                       <!-- 普通 markdown：仍保持流式解析与代码块渲染（仅助手消息） -->
@@ -4468,105 +4502,6 @@ onBeforeUnmount(() => {
   color: #7f1d1d;
 }
 
-.tool-hint-pill {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid #d4d4d8;
-  background:
-    radial-gradient(circle at 0 0, rgba(148, 163, 184, 0.2), transparent 55%),
-    #f9fafb;
-  box-shadow:
-    0 0 0 1px rgba(15, 23, 42, 0.02),
-    0 6px 14px rgba(15, 23, 42, 0.08);
-  font-size: 12px;
-  color: #111827;
-}
-
-.tool-hint-label {
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: #e5e7eb;
-  color: #4b5563;
-  font-size: 11px;
-}
-
-.tool-hint-main {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.tool-hint-shimmer {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 1px 8px 1px 6px;
-  margin-left: 4px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    rgba(34, 197, 94, 0.12) 0%,
-    rgba(14, 165, 233, 0.18) 50%,
-    rgba(34, 197, 94, 0.12) 100%
-  );
-  background-size: 200% 100%;
-  animation: tool-hint-shimmer-slide 1.6s linear infinite;
-  font-size: 11px;
-  color: #0f172a;
-}
-
-.tool-hint-shimmer--hidden {
-  display: none;
-}
-
-.tool-hint-shimmer .dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #22c55e;
-  animation: tool-hint-dot-blink 1.2s ease-in-out infinite;
-}
-
-.tool-hint-shimmer .dot:nth-child(2) {
-  animation-delay: 0.18s;
-  background: #0ea5e9;
-}
-
-.tool-hint-shimmer .dot:nth-child(3) {
-  animation-delay: 0.36s;
-  background: #22c55e;
-}
-
-.tool-hint-shimmer .shimmer-text {
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-@keyframes tool-hint-shimmer-slide {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-@keyframes tool-hint-dot-blink {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.1);
-  }
-}
-
 .tool-call-card {
   align-self: stretch;
   display: flex;
@@ -4599,55 +4534,10 @@ onBeforeUnmount(() => {
     0 0 0 1px rgba(15, 23, 42, 0.02);
 }
 
-.tool-exec-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.tool-exec-meta {
-  min-width: 0;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.tool-exec-actions {
-  flex: 0 0 auto;
-}
-
-.tool-call-badge {
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: #0f172a;
-  color: #f9fafb;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.tool-call-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
 .tool-call-title {
   font-size: 13px;
   font-weight: 600;
   color: #111827;
-}
-
-.tool-call-path {
-  font-size: 11px;
-  color: #4b5563;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
-  word-break: break-all;
 }
 
 .bubble-content :deep(.code-block-container) {

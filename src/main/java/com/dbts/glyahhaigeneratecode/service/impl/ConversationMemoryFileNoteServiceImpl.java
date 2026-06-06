@@ -57,15 +57,18 @@ public class ConversationMemoryFileNoteServiceImpl implements ConversationMemory
         if (!properties.isFileNoteEnabled() || appId == null || appId <= 0 || StrUtil.isBlank(relativePath)) {
             return;
         }
+
         // 2. 规范化相对路径，拒绝含 .. 的路径穿越
         String normalized = relativePath.trim().replace('\\', '/');
         if (normalized.contains("..")) {
             return;
         }
+
         // 3. 截断变更片段至配置上限，得到写入 pending 的 hint
         String hint = ConversationMemoryFileNoteSupport.truncateHint(
                 StrUtil.blankToDefault(changeHint, ""),
                 properties.getFileNoteInputChars());
+
         // 4. 按 appId 放入 pending 队列，同一路径本轮以最新 hint 覆盖
         pendingByApp
                 // pendingByApp 里找有没有这个 appId, 没有则生成

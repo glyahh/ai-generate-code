@@ -1,12 +1,17 @@
 package com.dbts.glyahhaigeneratecode.service;
 
 import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
+import com.dbts.glyahhaigeneratecode.model.DTO.AppAdminUpdateRequest;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppQueryRequest;
+import com.dbts.glyahhaigeneratecode.model.DTO.AppUpdateRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.mybatisflex.core.service.IService;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
+import com.dbts.glyahhaigeneratecode.model.VO.ProjectFileVO;
+import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.List;
 
@@ -82,4 +87,59 @@ public interface AppService extends IService<App> {
      * @param appUrl 应用访问URL
      */
     public void generateAppScreenshotAsync(Long appId, String appUrl);
+
+    /**
+     * 【用户】根据 id 修改自己的应用（目前只支持修改应用名称）
+     */
+    Boolean updateMyApp(User loginUser, AppUpdateRequest appUpdateRequest);
+
+    /**
+     * 【用户】根据 id 删除自己的应用
+     */
+    Boolean deleteMyApp(User loginUser, Long appId);
+
+    /**
+     * 【用户】根据 id 查看自己的应用详情
+     */
+    AppVO getMyAppVOById(User loginUser, String id);
+
+    /**
+     * 【用户】分页查询自己的应用列表
+     */
+    Page<AppVO> listMyAppVOByPage(User loginUser, AppQueryRequest appQueryRequest);
+
+    /**
+     * 分页获取精选应用列表
+     */
+    Page<AppVO> listGoodAppVOByPage(AppQueryRequest appQueryRequest);
+
+    /**
+     * 【管理员】根据 id 删除任意应用
+     */
+    Boolean deleteAppByAdmin(Long appId);
+
+    /**
+     * 【管理员】根据 id 更新任意应用（支持更新应用名称、应用封面、优先级）
+     */
+    Boolean updateAppByAdmin(AppAdminUpdateRequest appAdminUpdateRequest);
+
+    /**
+     * 【管理员】分页查询应用列表
+     */
+    Page<AppVO> listAppVOByPageAdmin(AppQueryRequest appQueryRequest);
+
+    /**
+     * 【管理员】根据 id 查看应用详情
+     */
+    AppVO getAppVOByIdAdmin(long id);
+
+    /**
+     * 【用户】下载应用对应的生成项目（打包为 zip）
+     */
+    void downloadProject(User loginUser, Long appId, HttpServletResponse response);
+
+    /**
+     * 【用户】获取应用项目文件列表（回显用）
+     */
+    List<ProjectFileVO> getProjectFiles(User loginUser, Long appId);
 }

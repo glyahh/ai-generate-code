@@ -39,6 +39,7 @@ public class HtmlMultiFileEditContextBuilder {
             "添加", "插入", "补充", "补丁", "改成", "hotfix", "hot fix",
             "重做", "返工", "微调", "微调一下", "精修", "对齐", "校正",
             "定向修改", "局部修改", "局部更新", "只改", "只需要改", "只改动",
+            "着重", "突出", "强调", "侧重", "偏向", "重点",
             "modify", "change", "update", "fix", "refactor", "tune", "improve",
             "enhance", "refine", "tweak", "implement", "add", "remove", "delete",
             "insert", "patch", "hotfix", "upgrade", "improve"
@@ -238,13 +239,10 @@ public class HtmlMultiFileEditContextBuilder {
             count++;
         }
 
-        // 3. 写输出格式要求尾段
-        sb.append("输出要求（保持原有格式规则）：\n");
-        if (type == CodeGenTypeEnum.HTML) {
-            sb.append("- 只输出 1 个完整的 ```html``` 代码块（index.html）。\n");
-        } else {
-            sb.append("- 输出完整的 ```html```（index.html）、```css```（style.css）、```javascript```（script.js）代码块。\n");
-        }
+        // 3. 写修改要求尾段, 这里暂时采用工具调用修改文件内容的方案
+        sb.append("修改要求：\n");
+        sb.append("- 必须使用 modifyFile / deleteFile 等工具对现有文件进行精确修改，禁止重新输出完整代码块。\n");
+        sb.append("- 修改完毕确认无误后调用 exit 工具结束。\n");
         return sb.toString();
     }
 

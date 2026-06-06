@@ -57,8 +57,9 @@ public class StreamHandlerExecutor {
         int[] bufferChars = new int[]{0};
 
         // 用户可见输出脱敏：仅对“纯文本流”生效，避免破坏 VUE(JSON 工具协议)流式解析
+        // 目的是让用户看到的回复更干净，少暴露内部实现细节。
         Flux<String> userFacingFlux = originFlux;
-        if (workflowMode || codeGenType != CodeGenTypeEnum.VUE) {
+        if (workflowMode) {
             UserFacingOutputSanitizer.StreamBuffer streamBuffer = userFacingOutputSanitizer.newStreamBuffer();
             userFacingFlux = originFlux
                     .map(chunk -> userFacingOutputSanitizer.sanitizeChunk(streamBuffer, chunk))

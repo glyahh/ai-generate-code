@@ -1,30 +1,23 @@
 package com.dbts.glyahhaigeneratecode.controller;
 
 import cn.hutool.core.util.StrUtil;
-import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineService;
 import com.dbts.glyahhaigeneratecode.annotation.MyRole;
 import com.dbts.glyahhaigeneratecode.common.BaseResponse;
 import com.dbts.glyahhaigeneratecode.common.DeleteRequest;
 import com.dbts.glyahhaigeneratecode.common.ResultUtils;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
-import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.DTO.*;
-import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.VO.ApplyHistoryVO;
 import com.dbts.glyahhaigeneratecode.model.VO.ApplyVO;
 import com.dbts.glyahhaigeneratecode.model.VO.AppVO;
-import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import com.dbts.glyahhaigeneratecode.model.VO.ProjectFileVO;
 import com.dbts.glyahhaigeneratecode.service.AppService;
-import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.UserAppApplyService;
 import com.dbts.glyahhaigeneratecode.service.UserService;
-import com.dbts.glyahhaigeneratecode.service.ProjectDownloadService;
 import com.mybatisflex.core.paginate.Page;
-import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -32,13 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Stream;
 
 /**
  * 应用 控制层。
@@ -54,10 +41,6 @@ public class AppController {
     private final AppService appService;
     private final UserService userService;
     private final UserAppApplyService userAppApplyService;
-    private final ChatHistoryService chatHistoryService;
-    private final ProjectDownloadService projectDownloadService;
-    private final aiCodeGeneratorRoutineService aiCodeGeneratorRoutine;
-
 
     /**
      * 【用户】创建应用（须填写 initPrompt）
@@ -80,20 +63,8 @@ public class AppController {
      */
     @PostMapping("/update")
     public BaseResponse<Boolean> updateMyApp(@RequestBody AppUpdateRequest appUpdateRequest, HttpServletRequest request) {
-        ThrowUtils.throwIf(appUpdateRequest == null || appUpdateRequest.getId() == null,
-                ErrorCode.PARAMS_ERROR, "更新应用请求参数异常");
-        ThrowUtils.throwIf(StrUtil.isBlank(appUpdateRequest.getAppName()), ErrorCode.PARAMS_ERROR, "应用名称不能为空");
-
         User loginUser = userService.getUserInSession(request);
-        App app = appService.getById(appUpdateRequest.getId());
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE), ErrorCode.NO_AUTH_ERROR, "只能修改自己的应用");
-
-        app.setAppName(appUpdateRequest.getAppName());
-        app.setUpdateTime(LocalDateTime.now());
-        boolean result = appService.updateById(app);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新应用失败");
-        return ResultUtils.success(true);
+        return ResultUtils.success(appService.updateMyApp(loginUser, appUpdateRequest));
     }
 
     /**
@@ -101,24 +72,8 @@ public class AppController {
      */
     @PostMapping("/delete")
     public BaseResponse<Boolean> deleteMyApp(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
-        ThrowUtils.throwIf(deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0,
-                ErrorCode.PARAMS_ERROR, "删除应用请求参数异常");
-
         User loginUser = userService.getUserInSession(request);
-        App app = appService.getById(deleteRequest.getId());
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE), ErrorCode.NO_AUTH_ERROR, "只能删除自己的应用");
-
-        boolean result = appService.removeById(deleteRequest.getId());
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除应用失败");
-        // 关联删除该应用的所有对话历史，失败不影响应用删除
-        try {
-            chatHistoryService.removeByAppId(deleteRequest.getId());
-        } catch (Exception e) {
-            log.warn("删除应用对话历史失败, appId={}", deleteRequest.getId(), e);
-        }
-        removeCodeOutputDirByAppId(deleteRequest.getId());
-        return ResultUtils.success(true);
+        return ResultUtils.success(appService.deleteMyApp(loginUser, deleteRequest.getId()));
     }
 
     /**
@@ -126,46 +81,18 @@ public class AppController {
      */
     @GetMapping("/get/vo")
     public BaseResponse<AppVO> getMyAppVOById(@RequestParam String id, HttpServletRequest request) {
-        // 其实这里后端可以不用转化的,但是写都写了(
-        // 接收字符串类型的 id，避免前端 number 精度丢失问题
-        Long appId;
-        try {
-            appId = Long.parseLong(id);
-        } catch (NumberFormatException e) {
-            throw new MyException(ErrorCode.PARAMS_ERROR, "应用 id 格式错误");
-        }
-        ThrowUtils.throwIf(appId <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
-
         User loginUser = userService.getUserInSession(request);
-        App app = appService.getById(appId);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE) && app.getPriority()==0, ErrorCode.NO_AUTH_ERROR, "只能查看自己的应用");
-
-        return ResultUtils.success(appService.getAppVO(app));
+        return ResultUtils.success(appService.getMyAppVOById(loginUser, id));
     }
 
     /**
-     * 【用户】分页查询自己的应用列表（支持根据名称查询，每页最多 {@link AppConstant#MAX_APP_LIST_PAGE_SIZE} 条）
+     * 【用户】分页查询自己的应用列表（支持根据名称查询，每页最多 {@link com.dbts.glyahhaigeneratecode.constant.AppConstant#MAX_APP_LIST_PAGE_SIZE} 条）
      */
     @PostMapping("/my/list/page/vo")
     public BaseResponse<Page<AppVO>> listMyAppVOByPage(@RequestBody AppQueryRequest appQueryRequest,
                                                        HttpServletRequest request) {
-        ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR, "分页查询请求参数为空");
-
-        int pageNum = appQueryRequest.getPageNum();
-        int pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize <= 0 || pageSize > AppConstant.MAX_APP_LIST_PAGE_SIZE,
-                ErrorCode.PARAMS_ERROR, "每页最多 " + AppConstant.MAX_APP_LIST_PAGE_SIZE + " 条");
-
         User loginUser = userService.getUserInSession(request);
-
-        // 构造当前用户自己的应用查询条件
-        QueryWrapper queryWrapper = appService.buildMyAppQueryWrapper(appQueryRequest, loginUser.getId());
-
-        Page<App> appPage = appService.page(Page.of(pageNum, pageSize), queryWrapper);
-        Page<AppVO> appVOPage = new Page<>(pageNum, pageSize, appPage.getTotalRow());
-        appVOPage.setRecords(appService.getAppVOList(appPage.getRecords()));
-        return ResultUtils.success(appVOPage);
+        return ResultUtils.success(appService.listMyAppVOByPage(loginUser, appQueryRequest));
     }
 
     /**
@@ -181,29 +108,7 @@ public class AppController {
             condition = "#appQueryRequest.pageNum <= 10"
     )
     public BaseResponse<Page<AppVO>> listGoodAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {
-        ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
-        long pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize <= 0 || pageSize > AppConstant.MAX_APP_LIST_PAGE_SIZE,
-                ErrorCode.PARAMS_ERROR, "每页最多查询 " + AppConstant.MAX_APP_LIST_PAGE_SIZE + " 个应用");
-        long pageNum = appQueryRequest.getPageNum();
-        // 只查询精选的应用,管理员没有声明按99,否则按照管理员设置的
-        if (appQueryRequest.getPriority() != null){
-            appQueryRequest.setPriority(appQueryRequest.getPriority());
-        }
-        else{
-            appQueryRequest.setPriority(AppConstant.GOOD_APP_PRIORITY);
-        }
-        log.info("查询精选应用列表, appQueryRequest: {}", appQueryRequest);
-
-        QueryWrapper queryWrapper = appService.buildAppQueryWrapper(appQueryRequest);
-        // 分页查询
-        Page<App> appPage = appService.page(Page.of(pageNum, pageSize), queryWrapper);
-        // 数据封装
-        List<AppVO> appVOList = appService.getAppVOList(appPage.getRecords());
-
-        Page<AppVO> appVOPage = new Page<>(pageNum, pageSize, appPage.getTotalRow());
-        appVOPage.setRecords(appVOList);
-        return ResultUtils.success(appVOPage);
+        return ResultUtils.success(appService.listGoodAppVOByPage(appQueryRequest));
     }
 
 
@@ -213,54 +118,7 @@ public class AppController {
     @PostMapping("/admin/delete")
     @MyRole(role = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteAppByAdmin(@RequestBody DeleteRequest deleteRequest) {
-        ThrowUtils.throwIf(deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0,
-                ErrorCode.PARAMS_ERROR, "删除应用请求参数异常");
-        boolean result = appService.removeById(deleteRequest.getId());
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除应用失败");
-        // 关联删除该应用的所有对话历史，失败不影响应用删除
-        try {
-            chatHistoryService.removeByAppId(deleteRequest.getId());
-        } catch (Exception e) {
-            log.warn("管理员删除应用对话历史失败, appId={}", deleteRequest.getId(), e);
-        }
-        removeCodeOutputDirByAppId(deleteRequest.getId());
-        return ResultUtils.success(true);
-    }
-
-    /**
-     * 按 appId 删除本地 code_output 下对应应用目录（失败不影响主流程）
-     */
-    private void removeCodeOutputDirByAppId(Long appId) {
-        Path codeOutputRootPath = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR);
-        if (!Files.isDirectory(codeOutputRootPath)) {
-            return;
-        }
-        String suffix = "_" + appId;
-        try (Stream<Path> stream = Files.list(codeOutputRootPath)) {
-            stream.filter(Files::isDirectory)
-                    .filter(path -> {
-                        String dirName = path.getFileName().toString();
-                        return dirName.endsWith(suffix) || dirName.endsWith("_project_" + appId);
-                    })
-                    .forEach(this::deleteDirectoryQuietly);
-        } catch (Exception e) {
-            log.warn("扫描 code_output 目录失败, appId={}", appId, e);
-        }
-    }
-
-    private void deleteDirectoryQuietly(Path dir) {
-        try (Stream<Path> pathStream = Files.walk(dir)) {
-            pathStream.sorted((a, b) -> b.getNameCount() - a.getNameCount())
-                    .forEach(path -> {
-                        try {
-                            Files.deleteIfExists(path);
-                        } catch (IOException e) {
-                            log.warn("删除目录内容失败, path={}", path, e);
-                        }
-                    });
-        } catch (Exception e) {
-            log.warn("删除应用目录失败, dir={}", dir, e);
-        }
+        return ResultUtils.success(appService.deleteAppByAdmin(deleteRequest.getId()));
     }
 
     /**
@@ -269,26 +127,7 @@ public class AppController {
     @PostMapping("/admin/update")
     @MyRole(role = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateAppByAdmin(@RequestBody AppAdminUpdateRequest appAdminUpdateRequest) {
-        ThrowUtils.throwIf(appAdminUpdateRequest == null || appAdminUpdateRequest.getId() == null,
-                ErrorCode.PARAMS_ERROR, "更新应用请求参数异常");
-
-        App app = appService.getById(appAdminUpdateRequest.getId());
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-
-        if (StrUtil.isNotBlank(appAdminUpdateRequest.getAppName())) {
-            app.setAppName(appAdminUpdateRequest.getAppName());
-        }
-        if (StrUtil.isNotBlank(appAdminUpdateRequest.getCover())) {
-            app.setCover(appAdminUpdateRequest.getCover());
-        }
-        if (appAdminUpdateRequest.getPriority() != null) {
-            app.setPriority(appAdminUpdateRequest.getPriority());
-        }
-        app.setUpdateTime(LocalDateTime.now());
-
-        boolean result = appService.updateById(app);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "管理员更新应用失败");
-        return ResultUtils.success(true);
+        return ResultUtils.success(appService.updateAppByAdmin(appAdminUpdateRequest));
     }
 
     /**
@@ -297,18 +136,7 @@ public class AppController {
     @PostMapping("/admin/list/page/vo")
     @MyRole(role = UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<AppVO>> listAppVOByPageAdmin(@RequestBody AppQueryRequest appQueryRequest) {
-        ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR, "分页查询请求参数为空");
-
-        int pageNum = appQueryRequest.getPageNum();
-        int pageSize = appQueryRequest.getPageSize();
-        ThrowUtils.throwIf(pageSize <= 0, ErrorCode.PARAMS_ERROR, "pageSize 必须大于 0");
-
-        QueryWrapper queryWrapper = appService.buildAppQueryWrapper(appQueryRequest);
-        Page<App> appPage = appService.page(Page.of(pageNum, pageSize), queryWrapper);
-
-        Page<AppVO> appVOPage = new Page<>(pageNum, pageSize, appPage.getTotalRow());
-        appVOPage.setRecords(appService.getAppVOList(appPage.getRecords()));
-        return ResultUtils.success(appVOPage);
+        return ResultUtils.success(appService.listAppVOByPageAdmin(appQueryRequest));
     }
 
     /**
@@ -317,10 +145,7 @@ public class AppController {
     @GetMapping("/admin/get/vo")
     @MyRole(role = UserConstant.ADMIN_ROLE)
     public BaseResponse<AppVO> getAppVOByIdAdmin(long id) {
-        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
-        App app = appService.getById(id);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        return ResultUtils.success(appService.getAppVO(app));
+        return ResultUtils.success(appService.getAppVOByIdAdmin(id));
     }
 
     /**
@@ -398,42 +223,24 @@ public class AppController {
     public void downloadProject(@PathVariable Long appId,
                                 HttpServletRequest request,
                                 HttpServletResponse response) {
-        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
-
-        // 校验登录用户
         User loginUser = userService.getUserInSession(request);
-
-        // 获取应用并校验归属
-        App app = appService.getById(appId);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
-        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId())
-                        && !UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()),
-                ErrorCode.NO_AUTH_ERROR, "只能下载自己的应用");
-
-        // 组装 service 所需参数：appName + 项目路径
-        String appName = app.getAppName();
-
-        String codeGenType = app.getCodeGenType();
-        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
-        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
-            try {
-                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
-            } catch (IllegalArgumentException ignored) {
-            }
-        }
-        ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
-
-        String projectPath;
-        switch (codeGenTypeEnum) {
-            case VUE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_project_" + appId;
-            // debug 修复：下载路径与生成目录命名保持一致，避免“目录不存在”误报。
-            case HTML, MULTI_FILE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_" + appId;
-            default -> throw new MyException(ErrorCode.PARAMS_ERROR, "暂不支持的 codeGenType");
-        }
-
-        projectDownloadService.downloadProject(response, appName, projectPath);
+        appService.downloadProject(loginUser, appId, response);
     }
 
+
+    /**
+     * 【用户】获取应用项目文件列表（回显用）
+     *
+     * @param appId   应用 id
+     * @param request 请求
+     * @return 项目文件列表（路径、语言、内容、更新时间）
+     */
+    @GetMapping("/static/project-files/{appId}")
+    public BaseResponse<List<ProjectFileVO>> getProjectFiles(@PathVariable Long appId,
+                                                              HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        return ResultUtils.success(appService.getProjectFiles(loginUser, appId));
+    }
 
     /**
      * 【用户】提交应用 / 权限申请

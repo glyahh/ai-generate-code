@@ -143,6 +143,21 @@ public class OpenAiStreamingResponseBuilder {
                 && indexToToolExecutionRequestBuilder.isEmpty();
     }
 
+    /**
+     * 返回已累积的文本内容长度，用于诊断 build() 返回 null 但内容已到达的情况。
+     */
+    int contentLength() {
+        return contentBuilder.length();
+    }
+
+    /**
+     * 返回纯文本内容（不含工具调用），用于在 build() 返回 null 但文本内容已到达时
+     * 构造降级 ChatResponse。
+     */
+    String buildContent() {
+        return contentBuilder.toString();
+    }
+
     public void append(CompletionResponse partialResponse) {
         if (partialResponse == null) {
             return;

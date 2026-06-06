@@ -35,6 +35,8 @@ public final class LegacyHtmlToolStreamSupport {
      * 说明：部分兼容接口在流式阶段从不触发 {@code onPartialToolExecutionRequest}（arguments 只在流结束帧出现），
      * 但 {@link dev.langchain4j.model.openai.OpenAiStreamingChatModel} 会在收尾调用 {@code onCompleteToolExecutionRequest}；
      * 若仅监听 partial，则前端永远收不到「选择工具 / 写入文件」段落（已由 {@link AiServiceStreamingResponseHandler} 转发 complete）。
+     * <p>
+     * exit 工具卡片不再缓存，直接 emit，确保「结束工具调用」卡片排在最终总结之前。
      *
      * @param toolManager               工具注册表
      * @param sink                      SSE sink
@@ -61,15 +63,25 @@ public final class LegacyHtmlToolStreamSupport {
             AtomicBoolean nativeToolExecutedMode,
             boolean isPartialDelta) {
         try {
+            // 方法大纲：
+            // 1. 从 ToolExecutionRequest 解包 toolCallId / toolName / arguments 片段    L74-L77
+            // 2. 每个 toolCallId 首次出现时经 BaseTool 模板推「选择工具」纯文本到 SSE    L79-L94
+            // 3. 不满足 writeFile 合成条件则提前返回（HTML/MULTI_FILE 路径拦截幻觉写入卡片）    L96-L106
+            // 4. partial 模式把 arguments 片段追加到 toolArgsById，complete 模式直接取整段    L108-L119
+            // 5. 累积串能提取 relativeFilePath+content 时合成 tool_executed 并推 sink，成功后标记 syntheticExecutedIds    L121-L138
+            // 6. partial 且 buffer 超阈值仍无法提取字段时，同 toolCallId 仅 warn 一次    L140-L149
+
             // 1. 取出工具调用 id / 名 / 参数字片段
             String toolCallId = toolExecutionRequest.id();
             String toolName = toolExecutionRequest.name();
             String argsPart = toolExecutionRequest.arguments();
 
             // 2. 每个 toolCallId 首次出现时，向前端推「选择工具」类展示（与 JSON 流形态对齐）
+            // exit 工具卡片立即 emit，不缓存，确保「结束工具调用」排在最终总结之前
             if (toolCallId != null
                     && StrUtil.isNotBlank(toolName)
                     && seenToolRequestIds.add(toolCallId)) {
+                // seenToolRequestIds.add 返回 true 表示本 id 首次出现，避免重复推「选择工具」卡片
                 BaseTool tool = toolManager.getTool(toolName);
                 String reqText = tool != null
                         ? tool.generateToolRequestResponse()
@@ -82,10 +94,14 @@ public final class LegacyHtmlToolStreamSupport {
             }
 
             // 3. 非 writeFile、或已走原生 executed、或已合成过：不再拼 synthetic executed
+            // HTML/MULTI_FILE 路径从不注册 writeFile 工具，
+            // 合成 [工具调用] 写入文件 卡片在此路径下属于幻觉输出，必须拦截。
             if (nativeToolExecutedMode.get()
                     || toolCallId == null
                     || !"writeFile".equals(toolName)
-                    || syntheticExecutedIds.contains(toolCallId)) {
+                    || syntheticExecutedIds.contains(toolCallId)
+                    || codeGenTypeEnum == CodeGenTypeEnum.HTML
+                    || codeGenTypeEnum == CodeGenTypeEnum.MULTI_FILE) {
                 return;
             }
 
@@ -95,6 +111,7 @@ public final class LegacyHtmlToolStreamSupport {
                 if (argsPart == null) {
                     return;
                 }
+                // 拿到每个工具id对应的string拼接器
                 StringBuilder buf = toolArgsById.computeIfAbsent(toolCallId, k -> new StringBuilder());
                 buf.append(argsPart);
                 accumulated = buf.toString();
@@ -105,6 +122,7 @@ public final class LegacyHtmlToolStreamSupport {
             // 5. 若能从累积串提取 path+content，则合成 tool_executed 文本推给 sink
             String syntheticJson = buildSyntheticWriteFileToolExecutedMessage(toolCallId, accumulated);
             if (syntheticJson != null) {
+                // 标记已合成，后续 partial/complete 帧不再重复 emit 同 id 的写入卡片
                 syntheticExecutedIds.add(toolCallId);
                 JSONObject syn = JSONUtil.parseObj(syntheticJson);
                 JSONObject argsObj = syn.getJSONObject("arguments");
@@ -121,6 +139,7 @@ public final class LegacyHtmlToolStreamSupport {
             }
 
             if (isPartialDelta) {
+                // 流式 arguments 过长仍缺 path/content 时告警，便于排查模型输出或解析容错边界
                 int bufLen = toolArgsById.getOrDefault(toolCallId, new StringBuilder()).length();
                 if (bufLen >= WRITE_FILE_EXTRACT_WARN_THRESHOLD && warnedLargeIncompleteIds.add(toolCallId)) {
                     log.warn(
@@ -133,6 +152,7 @@ public final class LegacyHtmlToolStreamSupport {
             log.warn("emitLegacyHtmlToolStreamChunk 异常 appId={} partial={}", appId, isPartialDelta, e);
         }
     }
+
 
     /**
      * 流式阶段解析工具 arguments 字符串；非严格 JSON 时放入 _rawArguments
@@ -156,6 +176,7 @@ public final class LegacyHtmlToolStreamSupport {
         }
     }
 
+
     /**
      * 找不到 BaseTool 时的工具执行结果占位文本
      *
@@ -173,6 +194,7 @@ public final class LegacyHtmlToolStreamSupport {
                 StrUtil.blankToDefault(toolName, "滚木"),
                 StrUtil.blankToDefault(path, "-"));
     }
+
 
     /**
      * 从流式累积的 writeFile arguments 中若能提取 path+content，则拼出一条 tool_executed JSON 供前端渲染
@@ -202,6 +224,7 @@ public final class LegacyHtmlToolStreamSupport {
         return JSONUtil.toJsonStr(synthetic);
     }
 
+
     /**
      * 从 writeFile 的原始 arguments 串中提取 relativeFilePath + content（先严格后容错）
      *
@@ -217,6 +240,7 @@ public final class LegacyHtmlToolStreamSupport {
         // 2. 失败则走手写扫描容错
         return extractWriteFileArgumentsTolerant(rawArguments);
     }
+
 
     /**
      * 严格 JSON 解析 writeFile arguments
@@ -237,6 +261,7 @@ public final class LegacyHtmlToolStreamSupport {
             return null;
         }
     }
+
 
     /**
      * 在 JSON 可能截断或不合法时，扫描字符串手工提取 relativeFilePath / content
@@ -326,6 +351,7 @@ public final class LegacyHtmlToolStreamSupport {
         return normalizeWriteFileArguments(relativeFilePath, content);
     }
 
+
     /**
      * 仅当 path 与 content 均非 null 时组装 JSONObject
      *
@@ -343,6 +369,7 @@ public final class LegacyHtmlToolStreamSupport {
         return normalized;
     }
 
+
     /**
      * 从 idx 起跳过空白字符，返回新下标
      *
@@ -357,6 +384,7 @@ public final class LegacyHtmlToolStreamSupport {
         }
         return cursor;
     }
+
 
     /**
      * 自 quoteStart 起解析 JSON 字符串字面量（支持常见转义）
@@ -413,6 +441,7 @@ public final class LegacyHtmlToolStreamSupport {
 
         return null;
     }
+
 
     /**
      * 跳过从 start 开始的完整 JSON 值（字符串/对象/数组/字面量），返回结束后的下标
@@ -480,6 +509,7 @@ public final class LegacyHtmlToolStreamSupport {
         }
         return idx;
     }
+
 
     /**
      * parseJsonString 的解析结果：字符串值与下一读取下标

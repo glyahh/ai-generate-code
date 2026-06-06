@@ -3,7 +3,6 @@ package com.dbts.glyahhaigeneratecode.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.core.util.RandomUtil;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineService;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorRoutineServiceFactory;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
@@ -12,8 +11,17 @@ import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.manage.OssManager;
+import com.dbts.glyahhaigeneratecode.constant.UserConstant;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
+import com.dbts.glyahhaigeneratecode.model.DTO.AppAdminUpdateRequest;
+import com.dbts.glyahhaigeneratecode.model.DTO.AppUpdateRequest;
+import com.dbts.glyahhaigeneratecode.model.VO.ProjectFileVO;
+import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
+import com.dbts.glyahhaigeneratecode.service.ProjectDownloadService;
 import com.dbts.glyahhaigeneratecode.service.ScreenshotService;
+import com.dbts.glyahhaigeneratecode.service.support.AppServiceSupport;
+import com.mybatisflex.core.paginate.Page;
+import jakarta.servlet.http.HttpServletResponse;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.mybatisflex.core.update.UpdateChain;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
@@ -71,6 +79,15 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private OssManager ossManager;
 
+    @Resource
+    private AppServiceSupport appServiceSupport;
+
+    @Resource
+    private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private ProjectDownloadService projectDownloadService;
+
     @Override
     public long createApp (User loginUser, AppAddRequest appAddRequest) {
         App app = new App();
@@ -106,33 +123,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         AppVO appVO = new AppVO();
         BeanUtil.copyProperties(app, appVO);
-        appVO.setHasGeneratedCode(hasGeneratedCode(app));
+        // 按 code_output 目录判定是否已有生成产物
+        appVO.setHasGeneratedCode(appServiceSupport.hasGeneratedCode(app));
         return appVO;
-    }
-
-    /**
-     * 判断应用是否已有生成代码（code_output 下存在对应目录及 index.html）
-     */
-    private boolean hasGeneratedCode(App app) {
-        if (app == null || app.getId() == null) {
-            return false;
-        }
-        String codeGenType = app.getCodeGenType();
-        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
-        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
-            try {
-                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
-            } catch (IllegalArgumentException ignored) {
-            }
-        }
-        if (codeGenTypeEnum == null) {
-            return false;
-        }
-        Path sourceDir = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue() + "_" + app.getId());
-        if (!Files.isDirectory(sourceDir)) {
-            return false;
-        }
-        return Files.isRegularFile(sourceDir.resolve("index.html"));
     }
 
     /**
@@ -172,7 +165,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                     AppVO appVO = new AppVO();
                     BeanUtil.copyProperties(app, appVO);
                     appVO.setUserVO(finalUserIdToUserVO.get(app.getUserId()));
-                    appVO.setHasGeneratedCode(hasGeneratedCode(app));
+                    // 批量列表项同样走 support 判定生成产物
+                    appVO.setHasGeneratedCode(appServiceSupport.hasGeneratedCode(app));
                     return appVO;
                 })
                 .collect(Collectors.toList());
@@ -281,7 +275,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 4. 校验deployKey是否存在,不存在则生成deployKey(8为 字母+数字)
         String deployKey = app.getDeployKey();
         if (StrUtil.isBlank(deployKey)) {
-            deployKey = generateUniqueDeployKey();
+            // 生成全局唯一的 deployKey
+            deployKey = appServiceSupport.generateUniqueDeployKey();
             app.setDeployKey(deployKey);
         }
 
@@ -437,22 +432,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return true;
     }
 
-    private String generateUniqueDeployKey() {
-        // 尝试多次避免极小概率碰撞
-        for (int i = 0; i < 10; i++) {
-            String candidate = RandomUtil.randomString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 8);
-            QueryWrapper queryWrapper = new QueryWrapper();
-            queryWrapper.eq(App::getDeployKey, candidate);
-            long count = this.count(queryWrapper);
-            if (count == 0) {
-                return candidate;
-            }
-        }
-        throw new MyException(ErrorCode.SYSTEM_ERROR, "生成 deployKey 失败，请重试");
-    }
-
-
-
     /**
      * 异步生成应用截图并更新封面
      *
@@ -472,6 +451,247 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             boolean updated = this.updateById(updateApp);
             ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "更新应用封面字段失败");
         });
+    }
+
+    @Override
+    public Boolean updateMyApp(User loginUser, AppUpdateRequest appUpdateRequest) {
+        ThrowUtils.throwIf(appUpdateRequest == null || appUpdateRequest.getId() == null,
+                ErrorCode.PARAMS_ERROR, "更新应用请求参数异常");
+        ThrowUtils.throwIf(StrUtil.isBlank(appUpdateRequest.getAppName()), ErrorCode.PARAMS_ERROR, "应用名称不能为空");
+
+        App app = this.getById(appUpdateRequest.getId());
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE), ErrorCode.NO_AUTH_ERROR, "只能修改自己的应用");
+
+        app.setAppName(appUpdateRequest.getAppName());
+        app.setUpdateTime(LocalDateTime.now());
+        boolean result = this.updateById(app);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新应用失败");
+        return true;
+    }
+
+    @Override
+    public Boolean deleteMyApp(User loginUser, Long appId) {
+        ThrowUtils.throwIf(appId == null || appId <= 0,
+                ErrorCode.PARAMS_ERROR, "删除应用请求参数异常");
+
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE), ErrorCode.NO_AUTH_ERROR, "只能删除自己的应用");
+
+        boolean result = this.removeById(appId);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除应用失败");
+        // 关联删除该应用的所有对话历史，失败不影响应用删除
+        try {
+            chatHistoryService.removeByAppId(appId);
+        } catch (Exception e) {
+            log.warn("删除应用对话历史失败, appId={}", appId, e);
+        }
+        // 清理 code_output 下该应用产物目录
+        appServiceSupport.removeCodeOutputDirByAppId(appId);
+        return true;
+    }
+
+    @Override
+    public AppVO getMyAppVOById(User loginUser, String id) {
+        // 其实这里后端可以不用转化的,但是写都写了(
+        // 接收字符串类型的 id，避免前端 number 精度丢失问题
+        Long appId;
+        try {
+            appId = Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            throw new MyException(ErrorCode.PARAMS_ERROR, "应用 id 格式错误");
+        }
+        ThrowUtils.throwIf(appId <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
+
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId()) && !loginUser.getUserRole().equals(UserConstant.ADMIN_ROLE) && app.getPriority()==0, ErrorCode.NO_AUTH_ERROR, "只能查看自己的应用");
+
+        return this.getAppVO(app);
+    }
+
+    @Override
+    public Page<AppVO> listMyAppVOByPage(User loginUser, AppQueryRequest appQueryRequest) {
+        ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR, "分页查询请求参数为空");
+
+        int pageNum = appQueryRequest.getPageNum();
+        int pageSize = appQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > AppConstant.MAX_APP_LIST_PAGE_SIZE,
+                ErrorCode.PARAMS_ERROR, "每页最多 " + AppConstant.MAX_APP_LIST_PAGE_SIZE + " 条");
+
+        // 构造当前用户自己的应用查询条件
+        QueryWrapper queryWrapper = this.buildMyAppQueryWrapper(appQueryRequest, loginUser.getId());
+
+        Page<App> appPage = this.page(Page.of(pageNum, pageSize), queryWrapper);
+        Page<AppVO> appVOPage = new Page<>(pageNum, pageSize, appPage.getTotalRow());
+        appVOPage.setRecords(this.getAppVOList(appPage.getRecords()));
+        return appVOPage;
+    }
+
+    @Override
+    public Page<AppVO> listGoodAppVOByPage(AppQueryRequest appQueryRequest) {
+        ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        long pageSize = appQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0 || pageSize > AppConstant.MAX_APP_LIST_PAGE_SIZE,
+                ErrorCode.PARAMS_ERROR, "每页最多查询 " + AppConstant.MAX_APP_LIST_PAGE_SIZE + " 个应用");
+        long pageNum = appQueryRequest.getPageNum();
+        // 只查询精选的应用,管理员没有声明按99,否则按照管理员设置的
+        if (appQueryRequest.getPriority() != null){
+            appQueryRequest.setPriority(appQueryRequest.getPriority());
+        }
+        else{
+            appQueryRequest.setPriority(AppConstant.GOOD_APP_PRIORITY);
+        }
+        log.info("查询精选应用列表, appQueryRequest: {}", appQueryRequest);
+
+        QueryWrapper queryWrapper = this.buildAppQueryWrapper(appQueryRequest);
+        // 分页查询
+        Page<App> appPage = this.page(Page.of(pageNum, pageSize), queryWrapper);
+        // 数据封装
+        List<AppVO> appVOList = this.getAppVOList(appPage.getRecords());
+
+        Page<AppVO> appVOPage = new Page<>(pageNum, pageSize, appPage.getTotalRow());
+        appVOPage.setRecords(appVOList);
+        return appVOPage;
+    }
+
+    @Override
+    public Boolean deleteAppByAdmin(Long appId) {
+        ThrowUtils.throwIf(appId == null || appId <= 0,
+                ErrorCode.PARAMS_ERROR, "删除应用请求参数异常");
+        boolean result = this.removeById(appId);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除应用失败");
+        // 关联删除该应用的所有对话历史，失败不影响应用删除
+        try {
+            chatHistoryService.removeByAppId(appId);
+        } catch (Exception e) {
+            log.warn("管理员删除应用对话历史失败, appId={}", appId, e);
+        }
+        // 清理 code_output 下该应用产物目录
+        appServiceSupport.removeCodeOutputDirByAppId(appId);
+        return true;
+    }
+
+    @Override
+    public Boolean updateAppByAdmin(AppAdminUpdateRequest appAdminUpdateRequest) {
+        ThrowUtils.throwIf(appAdminUpdateRequest == null || appAdminUpdateRequest.getId() == null,
+                ErrorCode.PARAMS_ERROR, "更新应用请求参数异常");
+
+        App app = this.getById(appAdminUpdateRequest.getId());
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+
+        if (StrUtil.isNotBlank(appAdminUpdateRequest.getAppName())) {
+            app.setAppName(appAdminUpdateRequest.getAppName());
+        }
+        if (StrUtil.isNotBlank(appAdminUpdateRequest.getCover())) {
+            app.setCover(appAdminUpdateRequest.getCover());
+        }
+        if (appAdminUpdateRequest.getPriority() != null) {
+            app.setPriority(appAdminUpdateRequest.getPriority());
+        }
+        app.setUpdateTime(LocalDateTime.now());
+
+        boolean result = this.updateById(app);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "管理员更新应用失败");
+        return true;
+    }
+
+    @Override
+    public Page<AppVO> listAppVOByPageAdmin(AppQueryRequest appQueryRequest) {
+        ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR, "分页查询请求参数为空");
+
+        int pageNum = appQueryRequest.getPageNum();
+        int pageSize = appQueryRequest.getPageSize();
+        ThrowUtils.throwIf(pageSize <= 0, ErrorCode.PARAMS_ERROR, "pageSize 必须大于 0");
+
+        QueryWrapper queryWrapper = this.buildAppQueryWrapper(appQueryRequest);
+        Page<App> appPage = this.page(Page.of(pageNum, pageSize), queryWrapper);
+
+        Page<AppVO> appVOPage = new Page<>(pageNum, pageSize, appPage.getTotalRow());
+        appVOPage.setRecords(this.getAppVOList(appPage.getRecords()));
+        return appVOPage;
+    }
+
+    @Override
+    public AppVO getAppVOByIdAdmin(long id) {
+        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR, "应用 id 异常");
+        App app = this.getById(id);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        return this.getAppVO(app);
+    }
+
+    @Override
+    public void downloadProject(User loginUser, Long appId, HttpServletResponse response) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+
+        // 获取应用并校验归属
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId())
+                        && !UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()),
+                ErrorCode.NO_AUTH_ERROR, "只能下载自己的应用");
+
+        // 组装 service 所需参数：appName + 项目路径
+        String appName = app.getAppName();
+
+        String codeGenType = app.getCodeGenType();
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
+            try {
+                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
+
+        String projectPath;
+        switch (codeGenTypeEnum) {
+            case VUE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_project_" + appId;
+            // debug 修复：下载路径与生成目录命名保持一致，避免“目录不存在”误报。
+            case HTML, MULTI_FILE -> projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/" + codeGenTypeEnum.getValue() + "_" + appId;
+            default -> throw new MyException(ErrorCode.PARAMS_ERROR, "暂不支持的 codeGenType");
+        }
+
+        projectDownloadService.downloadProject(response, appName, projectPath);
+    }
+
+    @Override
+    public List<ProjectFileVO> getProjectFiles(User loginUser, Long appId) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!loginUser.getId().equals(app.getUserId())
+                        && !UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()),
+                ErrorCode.NO_AUTH_ERROR, "只能查看自己的应用");
+
+        // 根据 codeGenType 定位项目根目录
+        String codeGenType = app.getCodeGenType();
+        CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (codeGenTypeEnum == null && StrUtil.isNotBlank(codeGenType)) {
+            try {
+                codeGenTypeEnum = CodeGenTypeEnum.valueOf(codeGenType);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用配置的 codeGenType 无效");
+
+        String projectRootPath;
+        switch (codeGenTypeEnum) {
+            case VUE -> projectRootPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId;
+            case HTML -> projectRootPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/html_" + appId;
+            case MULTI_FILE -> projectRootPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/multi_file_" + appId;
+            default -> throw new MyException(ErrorCode.PARAMS_ERROR, "暂不支持的 codeGenType");
+        }
+
+        Path projectRoot = Paths.get(projectRootPath);
+        if (!Files.isDirectory(projectRoot)) {
+            return List.of();
+        }
+
+        // 遍历目录收集文本代码文件
+        return appServiceSupport.collectProjectFiles(projectRoot);
     }
 
 }

@@ -1,6 +1,5 @@
 package com.dbts.glyahhaigeneratecode.core;
 
-import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -13,6 +12,7 @@ import com.dbts.glyahhaigeneratecode.ai.model.message.ToolExecutedMessage;
 import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
+import com.dbts.glyahhaigeneratecode.ai.tool.tools.FileModifyTool;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.core.context.HtmlMultiFileEditContextBuilder;
@@ -30,7 +30,6 @@ import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecution;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.Constants;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
@@ -160,6 +159,16 @@ public class AiCodeGeneratorFacade {
             throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
 
+        // 每轮开始时清空 modifyFile 同轮去重集合（修复：防止上一轮的记录影响本轮）
+        try {
+            FileModifyTool fmt = toolManager.getTool("modifyFile") instanceof FileModifyTool f ? f : null;
+            if (fmt != null) {
+                fmt.clearRoundDedup();
+            }
+        } catch (Exception ignore) {
+            log.error("每轮清空工具modifyFile失败");
+        }
+
         // 2. 按类型分发到各自私有方法
         return switch (codeGenTypeEnum) {
             case HTML -> generateAndSaveHtmlCodeStream(userMessage, appId, firstRound, compactMemoryOnCacheHit);
@@ -246,9 +255,21 @@ public class AiCodeGeneratorFacade {
         AtomicBoolean nativeToolExecutedMode = new AtomicBoolean(false);
 
         return Flux.<String>create(sink -> {
+                    // 工具轮次门禁：工具执行阶段禁止输出普通 AI 文本，
+                    // 仅当 exit 工具已执行后才放行最终总结文本
+                    AtomicBoolean toolRound = new AtomicBoolean(false);
+                    AtomicBoolean exitExecuted = new AtomicBoolean(false);
+                    // 本轮是否已通过写/改/删工具落盘；有则流结束不再从回复抠代码存盘
+                    AtomicBoolean toolWroteDisk = new AtomicBoolean(false);
+
                     StringBuilder codeBuilder = persistOnComplete ? new StringBuilder() : null;
                     tokenStream.onPartialResponse(partial -> {
                                 if (partial == null || partial.isEmpty()) {
+                                    return;
+                                }
+                                // 工具轮次中间禁止输出普通 AI 文本；
+                                // 仅当 exit 工具已执行后（模型收到总结指令后）才放行最终总结文本
+                                if (toolRound.get() && !exitExecuted.get()) {
                                     return;
                                 }
                                 if (codeBuilder != null) {
@@ -257,11 +278,14 @@ public class AiCodeGeneratorFacade {
                                 try {
                                     sink.next(partial);
                                 } catch (Exception ignore) {
-                                    ThrowUtils.throwIf(true, ErrorCode.NOT_FOUND_ERROR, "未再Html/MultiFile中将sink->partial");
+                                    log.warn("未再Html/MultiFile中将sink->partial");
+                                    //ThrowUtils.throwIf(true, ErrorCode.NOT_FOUND_ERROR, "未再Html/MultiFile中将sink->partial");
                                 }
                             })
                             // index -> 第几个调用的工具
                             .onPartialToolExecutionRequest((Integer index, ToolExecutionRequest toolExecutionRequest) -> {
+                                // 标记已进入工具轮次，抑制后续普通 AI 文本直到 exit 执行
+                                toolRound.set(true);
                                 // 按 toolCallId 第一次出现时往 sink 推 [选择工具] %s
                                 // 一旦toolArgsById能解析出路径和内容，就 合成一段[执行工具] %s
                                 // 这样就算没有onCompleteToolExecutionRequest也能正常返回Flux<string>
@@ -279,7 +303,6 @@ public class AiCodeGeneratorFacade {
                                         true);
                             })
                             .onCompleteToolExecutionRequest((Integer index, ToolExecutionRequest completeToolExecutionRequest) -> {
-                                //
                                 LegacyHtmlToolStreamSupport.emitLegacyHtmlToolStreamChunk(
                                         toolManager,
                                         sink,
@@ -308,24 +331,43 @@ public class AiCodeGeneratorFacade {
                                     JSONObject args = LegacyHtmlToolStreamSupport.safeParseToolArgumentsForStream(
                                             toolExecution.request().arguments());
                                     BaseTool t = toolManager.getTool(name);
-                                    String out = t != null
-                                            // 获取path
+                                    boolean isExit = "exit".equals(name);
+                                    if ("modifyFile".equals(name) || "writeFile".equals(name) || "deleteFile".equals(name)) {
+                                        toolWroteDisk.set(true);
+                                    }
+                                    // exit 执行后放行后续普通 AI 文本（模型被告知输出最终总结）
+                                    if (isExit) {
+                                        exitExecuted.set(true);
+                                    }
+                                    String out = t!=null
+                                            // 获取使用工具的返回string
                                             ? t.generateToolExecutedResult(args)
-                                            // 找不到工具的占位
+                                            // 找不到工具的占位(滚木工具/doge)
                                             : LegacyHtmlToolStreamSupport.fallbackToolExecutedPlain(name, args);
-                                    try {
-                                        sink.next(out);
-                                    } catch (Exception ignore) {
-                                        // downstream closed
+                                    // 空字符串跳过（如 ExitTool 返回 ""）
+                                    if (!out.isEmpty()) {
+                                        try {
+                                            // 吐出真正使用工具的文本 string chunk
+                                            sink.next(out);
+                                        } catch (Exception ignore) {
+                                            // downstream closed
+                                        }
                                     }
                                 } catch (Exception ignore) {
-                                    // ignore
+                                    log.warn("使用工具创建flux源头出现问题");
                                 }
                             })
                             .onCompleteResponse((ChatResponse response) -> {
                                 try {
                                     if (persistOnComplete && codeBuilder != null) {
-                                        persistParsedResult(codeGenTypeEnum, codeBuilder.toString(), appId);
+                                        if (toolWroteDisk.get()) {
+                                            log.info(
+                                                    "本轮已通过工具写盘，跳过流结束解析落盘 appId={} codeGenType={}",
+                                                    appId,
+                                                    codeGenTypeEnum);
+                                        } else {
+                                            persistParsedResult(codeGenTypeEnum, codeBuilder.toString(), appId);
+                                        }
                                     }
                                     sink.complete();
                                 } catch (Exception e) {
@@ -373,52 +415,7 @@ public class AiCodeGeneratorFacade {
     }
 
     /**
-     * 当模型通过工具写入非 index.html 的页面时，从输出目录回读最长/ index 的 html 作为兜底内容
-     *
-     * @param appId 应用主键
-     * @return 读到的 HTML 字符串；无法恢复则 null
-     */
-    private String tryRecoverHtmlFromOutputDir(Long appId) {
-        // 1. 定位 html_{appId} 目录
-        Path dir = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, CodeGenTypeEnum.HTML.getValue() + "_" + appId);
-        File d = dir.toFile();
-        if (!d.isDirectory()) {
-            return null;
-        }
-        // 2. 列出所有 .html
-        File[] list = d.listFiles((__, name) -> name.toLowerCase().endsWith(".html"));
-        if (list == null || list.length == 0) {
-            return null;
-        }
-        // 3. 优先读 index.html
-        File index = new File(d, "index.html");
-        if (index.isFile()) {
-            String idx = FileUtil.readUtf8String(index);
-            if (StrUtil.isNotBlank(idx)) {
-                return idx.trim();
-            }
-        }
-        // 4. 否则选内容最长的 html 文件
-        File best = null;
-        int bestLen = 0;
-        for (File f : list) {
-            if (!f.isFile()) {
-                continue;
-            }
-            String c = FileUtil.readUtf8String(f);
-            if (StrUtil.isBlank(c)) {
-                continue;
-            }
-            if (c.length() > bestLen) {
-                bestLen = c.length();
-                best = f;
-            }
-        }
-        return best == null ? null : FileUtil.readUtf8String(best).trim();
-    }
-
-    /**
-     * 将聚合后的模型输出解析为结果对象并写入磁盘；HTML 空内容时尝试从目录恢复
+     * 将聚合后的模型输出解析为结果对象并写入磁盘
      *
      * @param codeGenTypeEnum 生成类型
      * @param full            聚合全文
@@ -428,28 +425,17 @@ public class AiCodeGeneratorFacade {
         // 1. 打日志（长度、尾部、是否疑似截断）
         int len = full == null ? 0 : full.length();
         String safeFull = full == null ? "" : full;
-        String tail = len > 200 ? safeFull.substring(len - 200) : safeFull;
         log.info(
                 "legacy 流式聚合完成 appId={} codeGenType={} charLen={} possibleTruncatedTail={}\ntailSample=\n{}",
                 appId,
                 codeGenTypeEnum,
                 len,
-                LegacyHtmlStreamIntegrity.looksLikeIncompleteTrailingTag(safeFull),
-                tail
+                LegacyHtmlStreamIntegrity.looksLikeIncompleteTrailingTag(safeFull)
         );
         try {
-            // 2. 解析
+            // 2. 解析并保存
             Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, safeFull);
-            // 3. HTML 且解析结果正文为空：尝试从磁盘恢复
-            if (codeGenTypeEnum == CodeGenTypeEnum.HTML && executeResult instanceof HtmlCodeResult hcr) {
-                if (StrUtil.isBlank(hcr.getHtmlCode())) {
-                    String recovered = tryRecoverHtmlFromOutputDir(appId);
-                    if (StrUtil.isNotBlank(recovered)) {
-                        hcr.setHtmlCode(recovered);
-                    }
-                }
-            }
-            // 4. 保存
+            // 3. 保存
             File file = codeFileSaverExecutor.execute(codeGenTypeEnum, executeResult, appId);
             log.info("保存目录: {}", file.getAbsolutePath());
         } catch (Exception e) {
@@ -589,7 +575,7 @@ public class AiCodeGeneratorFacade {
                         // ignore
                     }
                 })
-                // 
+                //
                 .onCompleteToolExecutionRequest((index, completeToolExecutionRequest) -> {
                     // 兼容部分 API 仅在 complete 时给出完整 tool request；
                     // 若该 toolCallId 尚未通过 partial 发出，则在此补发 ToolRequestMessage
