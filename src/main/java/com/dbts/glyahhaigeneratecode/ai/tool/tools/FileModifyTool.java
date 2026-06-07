@@ -261,12 +261,12 @@ public class FileModifyTool extends BaseTool {
      */
     @Override
     public String generateToolExecutedResult(JSONObject arguments) {
-        // 1. 从参数中取出替换前后内容
+        // 1. 从参数中取出替换前后内容（null 安全：按空串展示）
         String oldContent = arguments.getStr("oldContent");
         String newContent = arguments.getStr("newContent");
-        // 2. 截断后嵌入卡片，避免超大代码块拖慢前端渲染
-        String oldTruncated = fileModifyToolAssist.truncateForCard(oldContent, 1024);
-        String newTruncated = fileModifyToolAssist.truncateForCard(newContent, 1024);
+        // 2. 直接使用完整内容嵌入卡片，不做截断，供聊天历史与前端工具卡片完整回显
+        String oldDisplay = oldContent != null ? oldContent : "";
+        String newDisplay = newContent != null ? newContent : "";
         return String.format("""
             [工具调用] %s %s
             替换前:
@@ -278,6 +278,6 @@ public class FileModifyTool extends BaseTool {
             %s
             ```
             """, getDisplayName(), arguments.getStr("relativeFilePath"),
-                oldTruncated, newTruncated);
+                oldDisplay, newDisplay);
     }
 }

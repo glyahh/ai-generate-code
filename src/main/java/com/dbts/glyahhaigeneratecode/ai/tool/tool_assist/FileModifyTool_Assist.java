@@ -373,24 +373,4 @@ public class FileModifyTool_Assist {
         }
         return null;
     }
-
-    /**
-     * 截断卡片展示内容，避免前端渲染超大代码块导致卡顿。
-     *
-     * @param content 原始展示文本
-     * @param maxLen  最大保留字符数
-     * @return 未超长则原文；超长则截断并附总长度提示
-     */
-    public String truncateForCard(String content, int maxLen) {
-        // 1. null 按空串处理
-        if (content == null) {
-            return "";
-        }
-        // 2. 未超长直接返回
-        if (content.length() <= maxLen) {
-            return content;
-        }
-        // 3. 超长则截取前缀并标注原长度
-        return content.substring(0, maxLen) + "\n... (已截断，共" + content.length() + "字符)";
-    }
 }
