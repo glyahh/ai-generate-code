@@ -108,14 +108,6 @@ public class CodeGenWorkflow {
             return "retry";
         }
 
-        // 仅在当前轮质检通过后压缩一次 Redis 记忆；失败轮不做任何压缩。
-        try {
-            ChatHistoryService chatHistoryService = SpringContextUtil.getBean(ChatHistoryService.class);
-            chatHistoryService.compactMemoryMessagesIfNeeded(ctx.getAppId(), ctx.getGenerationType(), "workflow_quality_pass");
-        } catch (Exception e) {
-            log.warn("质检通过后压缩 Redis 记忆失败，appId={}", ctx.getAppId(), e);
-        }
-
         if (ctx.getGenerationType() == CodeGenTypeEnum.VUE) {
             log.info("质检通过且为 Vue 项目，执行 project_builder");
             return "vue";

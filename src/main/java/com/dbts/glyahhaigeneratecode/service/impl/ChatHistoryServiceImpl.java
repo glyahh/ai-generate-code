@@ -64,6 +64,9 @@ import java.util.stream.Collectors;
  * <p>
  * 主链路：用户/AI 消息落库 chat_history -> 从 DB 与 memory_shrink 重建 Redis ChatMemory 并注入 memory_state -> 分页查询/导出/轮次统计 -> 超轮 AI 摘要合并与在线截断 -> 轮次完成收口同步快照。
  * </p>
+ * <p>
+ * 流程串联：USER/AI 落库 chat_history -> echo_memory 全文供前端回显 -> rebuildAiChatMemoryFromShrink 写 AI Redis -> trySummarize 写 memory_shrink 摘要 -> onRoundCompleted 收口 conversation_memory_state。
+ * </p>
  *
  * @author <a href="https://github.com/glyahh">glyahh</a>
  */
@@ -517,6 +520,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
     /**
      * 从 chat_history 倒序拉取最近 maxCount 条并重建 Redis ChatMemory（含 AI 长文压缩与系统提示词过滤）
+     * <p>遗留路径：当前生产预加载已改用 rebuildAiChatMemoryFromShrink，调用方应优先使用 {@link #loadConversationMemoryStateAndInject}。</p>
      *
      * @param addId                   应用 id（同时作为 ChatMemory 的 memoryId）
      * @param messageWindowChatMemory 待写入的 LangChain4j 窗口记忆实例
@@ -526,10 +530,10 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Override
     public int turnHistoryToMemory(Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount) {
         // 方法大纲：
-        // 1. 校验 appId、内存实例与 maxCount    L534-L537
-        // 2. 从 DB 倒序拉最近 maxCount 条并反转为时间正序    L539-L552
-        // 3. 清空旧 Redis 记忆并加载系统提示词用于过滤    L554-L590
-        // 4. 计算豁免压缩的主 AI 下标并按类型逐条写入 ChatMemory    L592-L634
+        // 1. 校验 appId、内存实例与 maxCount    L538-L541
+        // 2. 从 DB 倒序拉最近 maxCount 条并反转为时间正序    L543-L555
+        // 3. 清空旧 Redis 记忆并加载系统提示词用于过滤    L561-L591
+        // 4. 计算豁免压缩的主 AI 下标并按类型逐条写入 ChatMemory    L595-L633
 
         // 1. 校验应用 id、内存实例与拉取条数,得到可安全访问 DB 与 Redis 的前置条件
         // 校验参数
@@ -636,7 +640,8 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     /**
-     * 加载 memory_state 并按需注入文件内容到 Redis ChatMemory。
+     * 生成前预加载：清空窗口后由 rebuild 组装 AI 轨历史，再委托 memory_state 注入索引类 SystemMessage。
+     * <p>生产路径走 {@link ChatHistoryAiMemoryRebuildSupport#rebuildAiChatMemoryFromShrink}，非 {@link #turnHistoryToMemory}。</p>
      *
      * @param appId 应用 id
      * @param messageWindowChatMemory 聊天内存
@@ -647,9 +652,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Override
     public int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum) {
         // 方法大纲：
-        // 1. 清空 ChatMemory 并从 shrink+DB 重建 AI 轨历史    L654-L658
-        // 2. 委托 ConversationMemoryStateService 注入 memory_state（失败降级）    L663-L673
-        // 3. 汇总 restored + injected 条数并打日志返回    L675-L681
+        // 1. 清空 ChatMemory 并从 shrink+DB 重建 AI 轨历史    L659-L662
+        // 2. 委托 ConversationMemoryStateService 注入 memory_state（失败降级）    L667-L675
+        // 3. 汇总 restored + injected 条数并打日志返回    L679-L682
 
         // 1. 清空 ChatMemory 并从 shrink+DB 重建 AI 轨历史
         messageWindowChatMemory.clear();
@@ -731,7 +736,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     /**
-     * 在线截断 Redis 后，将变更的 AI 行 upsert 到 memory_shrink。
+     * 在线截断 Redis 后，将变更的 AI 行 upsert 到 memory_shrink（与 compactMemoryMessagesIfNeeded 配套，记忆轨改造后计划停用）。
      *
      * @param appId           应用 id
      * @param before          截断前 Redis 消息列表
@@ -1048,6 +1053,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
     /**
      * HTML/MULTI_FILE 下对 Redis ChatMemory 中的非主 AI 长文做在线截断，并同步 message_truncate 到 memory_shrink
+     * <p>典型触发：缓存命中 cache_hit、Workflow 质检通过 workflow_quality_pass；记忆轨改造后计划移除此类生产调用。</p>
      *
      * @param appId           应用 id
      * @param codeGenTypeEnum 代码生成类型
@@ -1056,9 +1062,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Override
     public void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason) {
         // 方法大纲：
-        // 1. 非法 appId 或非 HTML/MULTI_FILE 类型直接跳过    L1063-L1073
-        // 2. 从 Redis 读取消息序列，对非豁免 AI 行应用 compact    L1074-L1103
-        // 3. 若有变更则写回 Redis、同步 shrink 并刷新 TTL    L1104-L1117
+        // 1. 非法 appId 或非 HTML/MULTI_FILE 类型直接跳过    L1070-L1079
+        // 2. 从 Redis 读取消息序列，对非豁免 AI 行应用 compact    L1080-L1109
+        // 3. 若有变更则写回 Redis、同步 shrink 并刷新 TTL    L1110-L1120
 
         // 1. 非法 appId 直接返回,得到幂等无操作
         if (appId == null || appId <= 0) {
@@ -1125,8 +1131,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Override
     public void refreshAiChatMemoryTtl(Long appId) {
         // 方法大纲：
-        // 1. 委托 ChatAiMemoryRedisSupport 刷新 AI 轨 Redis TTL    L1130
+        // 1. 委托 ChatAiMemoryRedisSupport 原样回写 Redis 消息以续期 AI 轨 TTL    L1133-L1134
 
+        // 1. 原样 updateMessages 触发 LangChain4j Store 续期，不修改 ChatMemory 正文
         chatAiMemoryRedisSupport.refreshAiMemoryTtl(appId);
     }
 
@@ -1141,9 +1148,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     @Override
     public boolean removeLatestFailedAiMessageForRetry(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason) {
         // 方法大纲：
-        // 1. 非法 appId 或非 HTML/MULTI_FILE 类型直接返回 false    L1148-L1158
-        // 2. 从 Redis 尾部向前扫描首个超长 AiMessage 下标    L1159-L1181
-        // 3. 命中则移除并写回 Redis，返回 true    L1182-L1188
+        // 1. 非法 appId 或非 HTML/MULTI_FILE 类型直接返回 false    L1155-L1165
+        // 2. 从 Redis 尾部向前扫描首个超长 AiMessage 下标    L1166-L1188
+        // 3. 命中则移除并写回 Redis，返回 true    L1189-L1195
 
         // 1. 非法 appId 直接返回 false,表示未执行任何清理
         if (appId == null || appId <= 0) {

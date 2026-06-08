@@ -53,9 +53,11 @@ conversation:
     # --- 方式 2：工具写盘后 fileNote（批量 LLM 摘要，见 ConversationMemoryFileNoteService）---
     file-note-enabled: true
     file-note-debounce-ms: 400
-    file-note-max-paths-per-round: 20
+    # 每轮最多总结的filenote数
+    file-note-max-paths-per-round: 40
     file-note-input-chars: 2000
-    file-note-max-note-chars: 120
+    # mysql/redis中存储的filenote长度
+    file-note-max-note-chars: 200
     # LangChain4j ChatMemory（AI 压缩上下文）TTL，秒
     chat-ttl-seconds: 600
     # 用户回显全文 echo Redis TTL，秒

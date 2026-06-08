@@ -468,9 +468,10 @@ public class AiCodeGeneratorFacade {
         aiCodeGeneratorService aiCodeGeneratorService =
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
                         appId, CodeGenTypeEnum.MULTI_FILE, htmlMultiToollessBootstrap, compactMemoryOnCacheHit);
-        // 3. 可能拼接片段修改上下文
-        String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.MULTI_FILE, appId);
-        TokenStream tokenStream = aiCodeGeneratorService.generateCodeMultiFileTokenStream(appId, finalPrompt);
+
+        // 3. 编辑轮依靠 changedFiles + fileNote + readFile 工具获取代码内容
+        TokenStream tokenStream = aiCodeGeneratorService.generateCodeMultiFileTokenStream(appId, userMessage);
+
         // 4. 编辑走仅透传；否则流结束 persist
         if (editIntent) {
             return adaptCodeTokenStream(CodeGenTypeEnum.MULTI_FILE, tokenStream, appId);
@@ -494,8 +495,9 @@ public class AiCodeGeneratorFacade {
         aiCodeGeneratorService aiCodeGeneratorService =
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
                         appId, CodeGenTypeEnum.HTML, htmlMultiToollessBootstrap, compactMemoryOnCacheHit);
-        String finalPrompt = htmlMultiFileEditContextBuilder.buildPromptIfNeed(userMessage, CodeGenTypeEnum.HTML, appId);
-        TokenStream tokenStream = aiCodeGeneratorService.generateCodeHTMLTokenStream(appId, finalPrompt);
+        // F 项：不再使用 HtmlMultiFileEditContextBuilder 拼接磁盘片段到 user 消息
+        // 3. 编辑轮依靠 changedFiles + fileNote + readFile 工具获取代码内容
+        TokenStream tokenStream = aiCodeGeneratorService.generateCodeHTMLTokenStream(appId, userMessage);
         if (editIntent) {
             return adaptCodeTokenStream(CodeGenTypeEnum.HTML, tokenStream, appId);
         }

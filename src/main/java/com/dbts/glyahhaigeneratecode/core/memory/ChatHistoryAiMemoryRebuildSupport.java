@@ -6,10 +6,8 @@ import com.dbts.glyahhaigeneratecode.core.util.ChatHistorySchemaMigrationSupport
 import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
-import com.dbts.glyahhaigeneratecode.model.Entity.MemoryShrink;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
-import com.dbts.glyahhaigeneratecode.model.enums.MemoryShrinkTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.DTO.ConversationSummaryPair;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.MemoryShrinkService;
@@ -26,9 +24,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -118,10 +114,8 @@ public class ChatHistoryAiMemoryRebuildSupport {
         String systemPromptForFilter = resolveSystemPromptFilter(appCodeGenType);
 
         messageWindowChatMemory.clear();
-        // 计算本轮ai下标
-        int exemptAiIdx = indexExemptAiInTimeline(timeline, appCodeGenType);
 
-        // 3. 逐条回填 User/AI 消息到窗口，并按需回写 message_truncate
+        // 3. 逐条回填 User/AI 消息到窗口（不再 compact / 不再 upsert message_truncate）
         int restored = 0;
         Long userIdForTruncate = null;
         for (int i = 0; i < timeline.size(); i++) {
@@ -140,17 +134,7 @@ public class ChatHistoryAiMemoryRebuildSupport {
                         && item.message.trim().equals(systemPromptForFilter.trim())) {
                     continue;
                 }
-                boolean keepFull = i == exemptAiIdx;
-                String aiForMemory = keepFull
-                        ? item.message
-                        : ChatHistorySchemaMigrationSupport.compactAiMessageForMemory(item.message, appCodeGenType);
-                String safeAi = StrUtil.blankToDefault(aiForMemory, EMPTY_AI_MEMORY_PLACEHOLDER);
-                if (!keepFull && item.chatHistoryId != null && userIdForTruncate != null
-                        && !StrUtil.equals(item.message, safeAi)) {
-                    memoryShrinkService.upsertMessageTruncate(
-                            appId, userIdForTruncate, item.chatHistoryId, item.sortTime, safeAi,
-                            ChatHistoryMessageTypeEnum.AI.getValue());
-                }
+                String safeAi = StrUtil.blankToDefault(item.message, EMPTY_AI_MEMORY_PLACEHOLDER);
                 messageWindowChatMemory.add(new AiMessage(safeAi));
                 restored++;
             }
@@ -176,17 +160,8 @@ public class ChatHistoryAiMemoryRebuildSupport {
         // 3. 查询未合并 chat_history 并与截断映射合流
         // 4. 统一排序后截取最近 maxCount 条
 
-        // 1. 读取 shrink 行并提取 AI 截断映射
+        // 1. 不再读取 MESSAGE_TRUNCATE 截断版
         List<AiMemoryTimelineItem> items = new ArrayList<>();
-
-        List<MemoryShrink> shrinkRows = memoryShrinkService.listByAppIdOrderByAnchorAsc(appId);
-        Map<Long, String> truncateByChatId = new HashMap<>();
-        for (MemoryShrink shrink : shrinkRows) {
-            if (MemoryShrinkTypeEnum.MESSAGE_TRUNCATE.getValue().equals(shrink.getShrinkType())
-                    && shrink.getChatHistoryId() != null) {
-                truncateByChatId.put(shrink.getChatHistoryId(), shrink.getMessage());
-            }
-        }
         // 2. 将 conversation_summary 折叠为唯一一对时间轴项
         Optional<ConversationSummaryPair> summaryPair = memoryShrinkService.getConversationSummaryPair(appId);
         // 如果summaryPair不为空指针的话
@@ -225,9 +200,6 @@ public class ChatHistoryAiMemoryRebuildSupport {
                     continue;
                 }
                 String message = h.getMessage();
-                if (type == ChatHistoryMessageTypeEnum.AI && truncateByChatId.containsKey(h.getId())) {
-                    message = truncateByChatId.get(h.getId());
-                }
                 items.add(new AiMemoryTimelineItem(
                         h.getCreateTime(),
                         h.getMessageType(),

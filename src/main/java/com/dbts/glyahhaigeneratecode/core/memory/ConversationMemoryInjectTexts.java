@@ -22,7 +22,9 @@ public final class ConversationMemoryInjectTexts {
 
     private static final String STATE_PRIORITY_BODY = """
             多轮续聊时，请先阅读本上下文中 [memory_index]、[memory_file_note] 等会话工程 state 索引，再理解并执行用户当轮指令。
-            实现细节与最新源码以磁盘 readFile / 工具读文件为准，勿仅凭历史对话臆造文件内容。""";
+            [memory_index] 与 [memory_file_note] 仅为短索引，不包含文件完整内容。
+            修改或理解代码实现细节前，必须使用 readFile 工具读取磁盘上对应文件的最新完整内容，以磁盘为准。
+            禁止仅凭记忆或索引中的片段臆造文件内容、路径或实现。""";
 
     /**
      * 工具类禁止实例化

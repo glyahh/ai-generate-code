@@ -16,14 +16,15 @@ public interface ChatHistoryConstant {
     int TARGET_UNMERGED_DB_USER_ROUNDS = 2;
 
     /**
-     * {@link dev.langchain4j.memory.chat.MessageWindowChatMemory} 窗口上限（条），含 user/ai/tool 等。
+     * {@link dev.langchain4j.memory.chat.MessageWindowChatMemory}
+     * 窗口上限（条），含 user/ai/tool 等。
      */
-    int CHAT_MEMORY_MAX_MESSAGES = 80;
+    int CHAT_MEMORY_MAX_MESSAGES = 160;
 
     /**
      * 从 MySQL 预加载进 Redis 的最大条数（配合 {@code turnHistoryToMemory} 的 limit），宜大于「可见轮数×2」并预留 tool/error 占位。
      */
-    int MEMORY_PRELOAD_MESSAGE_ROWS = 40;
+    int MEMORY_PRELOAD_MESSAGE_ROWS = 80;
 
     /**
      * 每次压缩时，将最早几轮合并为一轮（2 轮 → 1 轮，即 4 条消息 → 2 条）。

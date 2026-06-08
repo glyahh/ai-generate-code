@@ -60,7 +60,7 @@ public class ConversationMemoryProperties {
     /**
      * 单轮参与摘要的路径数上限。
      */
-    private int fileNoteMaxPathsPerRound = 20;
+    private int fileNoteMaxPathsPerRound = 40;
 
     /**
      * 无 diff 时读盘截断字符数（仅用于摘要模型输入）。
@@ -70,7 +70,7 @@ public class ConversationMemoryProperties {
     /**
      * 单路径 note 最大字符数（落库硬截断）。
      */
-    private int fileNoteMaxNoteChars = 120;
+    private int fileNoteMaxNoteChars = 200;
 
     /**
      * LangChain4j ChatMemory（memoryId=appId）TTL（秒），仅 AI 轨。

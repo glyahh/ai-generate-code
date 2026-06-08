@@ -168,46 +168,9 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
 
         int taggedInjected = conversationMemoryStateInjectSupport.injectMemoryTaggedMessages(chatMemory, changedFiles, fileNotes);
 
-        // 2. 按优先级排序注入文件列表：入口/配置/路由 -> changedFiles -> 其余补齐。
-        Path root = resolveProjectRoot(appId, codeGenTypeEnum);
-        List<Path> candidates = collectInjectCandidates(root, changedFiles);
-
-        // 3. 双阈预算：字符与 token 近似预算（chars/4），取更紧约束。
-        int remainingChars = ConversationMemoryConstant.DEFAULT_INJECT_CHAR_BUDGET;
-        int remainingTokens = ConversationMemoryConstant.DEFAULT_INJECT_TOKEN_BUDGET;
-
-        int injected = 0;
-        // 遍历所有代码改变的路径
-        for (Path file : candidates) {
-            if (remainingChars <= 0 || remainingTokens <= 0) {
-                break;
-            }
-            try {
-                // 获取相对路径
-                String relative = root.relativize(file).toString().replace('\\', '/');
-                // 根据项目根目录读取前 pageSize 字符（与 manifest 扫描根一致，见 readFilePageHead）
-                String content = readFilePageHead(root, relative, ConversationMemoryConstant.DEFAULT_PAGE_SIZE);
-                if (StrUtil.isBlank(content)) {
-                    continue;
-                }
-                int chars = content.length();
-                // token近似计算
-                int tokens = Math.max(1, chars / 4);
-                if (chars > remainingChars || tokens > remainingTokens) {
-                    continue;
-                }
-                // 1. 将按需读取的文件片段真正注入 MessageWindowChatMemory(ai最后系统性思考的内容)，闭环 C 要求。
-                // 2. 使用 SystemMessage 承载参考资料，避免被模型误当作「用户新指令」。
-                addInjectedFileToMemory(chatMemory, root, file, content);
-                // 更新剩余的tokens
-                remainingChars -= chars;
-                remainingTokens -= tokens;
-
-                injected++;
-            } catch (Exception ignore) {
-                // 单文件失败不影响注入主流程
-            }
-        }
+        // 经过测试发现:
+        // 关闭 [memory_inject] 磁盘文件头注入循环，仅保留 tagged 短索引（policy/index/fileNote）。
+        // 模型需通过 readFile 工具获取文件完整内容，以磁盘为准。
 
         String source = "redis";
         if (state.isEmpty()) {
@@ -216,7 +179,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         return ConversationMemoryInjectResult.builder()
                 // 从何处拿到的数据
                 .source(source)
-                .injectedMessageCount(Math.min(taggedInjected + injected, Math.max(0, maxCount)))
+                .injectedMessageCount(Math.min(taggedInjected, Math.max(0, maxCount)))
                 .changedFiles(changedFiles)
                 .build();
     }
