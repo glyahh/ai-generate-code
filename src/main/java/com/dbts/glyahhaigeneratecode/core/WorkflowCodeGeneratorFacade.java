@@ -354,53 +354,6 @@ public class WorkflowCodeGeneratorFacade {
 
 
     /**
-     * 遍历 Vue 生成目录，将可读文本文件以 fenced 块推给 sink（过滤 node_modules 等）
-     *
-     * @param sink         Flux 下游
-     * @param generatedDir 项目根目录
-     */
-    private void emitVueGeneratedCode(reactor.core.publisher.FluxSink<String> sink, String generatedDir) {
-        // 1. 根路径必须是目录
-        Path root = Path.of(generatedDir);
-        if (!Files.isDirectory(root)) {
-            return;
-        }
-
-        // 2. walk 收集候选文件并排序
-        List<Path> files;
-        try (var walk = Files.walk(root)) {
-            files = walk
-                    .filter(Files::isRegularFile)
-                    .filter(path -> shouldEmitVueFile(root, path))
-                    .sorted(Comparator.comparing(
-                            path -> root.relativize(path).toString().replace('\\', '/').toLowerCase(Locale.ROOT)))
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            log.warn("workflow vue 目录遍历失败: {}", generatedDir, e);
-            return;
-        }
-
-        // 3. 逐个读文件：超大小或非文本跳过，其余 wrap 后推送
-        for (Path path : files) {
-            try {
-                long size = Files.size(path);
-                if (size > VUE_ECHO_MAX_FILE_BYTES) {
-                    continue;
-                }
-                if (!isLikelyTextFile(path)) {
-                    continue;
-                }
-                String body = Files.readString(path, StandardCharsets.UTF_8);
-                String relative = root.relativize(path).toString().replace('\\', '/');
-                String language = markdownFenceLanguageForFileName(relative);
-                sink.next(wrapMarkdownCodeBlock(relative, body, language));
-            } catch (Exception ignore) {
-            }
-        }
-    }
-
-
-    /**
      * 判断相对路径是否落在应忽略的目录（如 node_modules）之下
      *
      * @param root 项目根
