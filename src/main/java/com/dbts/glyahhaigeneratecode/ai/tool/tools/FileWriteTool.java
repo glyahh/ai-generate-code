@@ -38,7 +38,7 @@ public class FileWriteTool extends BaseTool {
     @Resource
     private ConversationMemoryProperties conversationMemoryProperties;
 
-    @Tool("写入文件到指定路径")
+    @Tool("写入文件到指定路径。若目标文件已存在则拒绝写入——请改用 modifyFile 进行增量修改，或先 deleteFile 再 writeFile。仅用于创建新文件。")
     public String writeFile(
             @P("文件的相对路径")
             String relativeFilePath,
@@ -58,6 +58,13 @@ public class FileWriteTool extends BaseTool {
 
             if (!path.startsWith(projectRoot)) {
                 return "错误：禁止写入项目目录外的文件 - " + relativeFilePath;
+            }
+
+            // 文件已存在时拒绝覆盖，引导使用 modifyFile 或 deleteFile + writeFile
+            if (Files.exists(path)) {
+                return "错误：文件已存在 - " + relativeFilePath
+                        + "。请优先使用 modifyFile 工具对该文件进行增量修改（oldContent → newContent），"
+                        + "或先使用 deleteFile 删除该文件后再 writeFile 重新创建。";
             }
 
             Path parentDir = path.getParent();

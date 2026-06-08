@@ -16,6 +16,7 @@ import com.dbts.glyahhaigeneratecode.ai.tool.tools.FileModifyTool;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
 import com.dbts.glyahhaigeneratecode.core.Builder.vueProjectBuilder;
 import com.dbts.glyahhaigeneratecode.core.context.HtmlMultiFileEditContextBuilder;
+import com.dbts.glyahhaigeneratecode.core.context.VueEditContextBuilder;
 import com.dbts.glyahhaigeneratecode.core.parser.CodeParserExecutor;
 import com.dbts.glyahhaigeneratecode.core.saver.CodeFileSaverExecutor;
 import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlStreamIntegrity;
@@ -61,6 +62,9 @@ public class AiCodeGeneratorFacade {
 
     @Resource
     private HtmlMultiFileEditContextBuilder htmlMultiFileEditContextBuilder;
+
+    @Resource
+    private VueEditContextBuilder vueEditContextBuilder;
 
     @Resource
     private vueProjectBuilder vueProjectBuilder;
@@ -514,11 +518,16 @@ public class AiCodeGeneratorFacade {
      * @return Flux
      */
     private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound, boolean compactMemoryOnCacheHit) {
+        // 注入编辑上下文（仅非首轮）
+        String enhancedMessage = userMessage;
+        if (!firstRound) {
+            enhancedMessage = vueEditContextBuilder.buildPromptIfNeed(userMessage, appId);
+        }
         // 1. 取 Vue 专用 service（首轮控制工具白名单）
         aiCodeGeneratorService aiCodeGeneratorService =
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound, compactMemoryOnCacheHit);
         // 2. 开流
-        TokenStream tokenStream = aiCodeGeneratorService.generateCodeVueFileStream(appId, userMessage);
+        TokenStream tokenStream = aiCodeGeneratorService.generateCodeVueFileStream(appId, enhancedMessage);
         // 3. 转为前端 JSON 行协议
         return adaptVueTokenStream(tokenStream, appId);
     }
