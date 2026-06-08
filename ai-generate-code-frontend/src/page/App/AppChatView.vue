@@ -39,7 +39,7 @@ import {
   extractToolModifyFileNewContentBlocksFromText,
   extractToolWriteFileBlocksFromText,
 } from '@/utils/toolOutputAdapters/toolOutputBlockParsers'
-import { loadProjectFilesEchoFromDisk } from '@/utils/projectFilesEcho'
+import { loadProjectFilesEchoFromDisk, filterLockFiles } from '@/utils/projectFilesEcho'
 import CodeBlock from '@/components/CodeBlock.vue'
 import ToolExitHint from '@/components/ToolExitHint.vue'
 import ToolRequestHint from '@/components/ToolRequestHint.vue'
@@ -1698,6 +1698,8 @@ function extractToolWriteFileBlocks(text: string): Array<{ filePath: string; lan
 }
 
 function recordGeneratedFile(filePath: string, language: string | undefined, content: string) {
+  // 锁文件不进入回显列表（磁盘保留，构建正常使用）
+  if (isLockFilePath(filePath)) return
   const now = Date.now()
   const existing = generatedFileMap.value[filePath]
   const normalizedContent = normalizeFenceCodeContent(content)
@@ -1716,6 +1718,20 @@ function recordGeneratedFile(filePath: string, language: string | undefined, con
   } else {
     generatedFiles.value = generatedFiles.value.map((it) => (it.path === filePath ? item : it))
   }
+}
+
+const LOCK_FILE_PATTERNS = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']
+
+function isLockFilePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/')
+  const baseName = normalized.split('/').pop() ?? ''
+  return LOCK_FILE_PATTERNS.includes(baseName)
+}
+
+function formatFileTime(ts: number | string): string {
+  const d = new Date(Number(ts) || 0)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('zh-CN')
 }
 
 function removeGeneratedFile(filePath: string) {
@@ -2878,7 +2894,7 @@ onBeforeUnmount(() => {
               <span class="file-path" :class="getFileNameColorClass(f.path)">{{ f.path }}</span>
               <span v-if="isCoreFile(f.path)" class="file-core-badge">核心代码</span>
             </div>
-            <span class="file-meta">{{ new Date(f.updatedAt).toLocaleTimeString('zh-CN') }}</span>
+            <span class="file-meta">{{ formatFileTime(f.updatedAt) }}</span>
           </button>
         </div>
         <div class="files-viewer">

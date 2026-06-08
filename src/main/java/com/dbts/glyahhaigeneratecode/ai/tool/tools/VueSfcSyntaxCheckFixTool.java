@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Vue SFC 语法检查与修复工具（后端兜底）。
@@ -22,6 +24,13 @@ import java.nio.file.Path;
 @Slf4j
 @Component
 public class VueSfcSyntaxCheckFixTool extends BaseTool {
+
+    /**
+     * LLM 常见错误：开始标签属性写完后漏写 {@code >}，直接嵌套下一个标签。
+     * 例：{@code <div class="grid"      <div class="card">} → {@code <div class="grid"><div class="card">}
+     */
+    private static final Pattern UNCLOSED_OPENING_TAG_BEFORE_NESTED = Pattern.compile(
+            "(<[A-Za-z][\\w-]*(?:\\s+[\\w:@.-]+(?:=(?:\"[^\"]*\"|'[^']*'|[^\\s>/]*))?)*\\s+)(<[A-Za-z])");
 
     /**
      * 扫描并修复 Vue 项目 src 目录下的 .vue 文件顶层块开闭合标签不平衡问题。
@@ -65,6 +74,9 @@ public class VueSfcSyntaxCheckFixTool extends BaseTool {
         String raw = Files.readString(vueFile, StandardCharsets.UTF_8);
         String fixed = raw;
 
+        // 修复 template 内「开始标签未闭合就嵌套子标签」的 HTML 错误
+        fixed = fixUnclosedOpeningTagBeforeNestedTag(fixed);
+
         // 先移除“多余的闭合标签”（常见于模型胡乱输出）
         fixed = trimExcessClosingTags(fixed, "<template", "</template>");
         fixed = trimExcessClosingTags(fixed, "<script", "</script>");
@@ -81,6 +93,29 @@ public class VueSfcSyntaxCheckFixTool extends BaseTool {
             return true;
         }
         return false;
+    }
+
+    private String fixUnclosedOpeningTagBeforeNestedTag(String text) {
+        int templateOpen = text.indexOf("<template");
+        if (templateOpen < 0) {
+            return text;
+        }
+        int templateContentStart = text.indexOf('>', templateOpen);
+        if (templateContentStart < 0) {
+            return text;
+        }
+        int templateClose = text.lastIndexOf("</template>");
+        if (templateClose <= templateContentStart) {
+            return text;
+        }
+
+        String before = text.substring(0, templateContentStart + 1);
+        String templateBody = text.substring(templateContentStart + 1, templateClose);
+        String after = text.substring(templateClose);
+
+        Matcher matcher = UNCLOSED_OPENING_TAG_BEFORE_NESTED.matcher(templateBody);
+        String fixedBody = matcher.replaceAll("$1>$2");
+        return before + fixedBody + after;
     }
 
     private String appendMissingClosingTags(String text, String openingTagPrefix, String closingTag) {

@@ -82,10 +82,12 @@ public class WorkflowTextStreamHandler {
                     }
                 })
                 .doFinally(signal -> {
-                    CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.valueOf(appService.getById(appId).getCodeGenType());
+                    String codeGenType = appService.getById(appId).getCodeGenType();
+                    CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(codeGenType);
                     // 取消时仅打日志；本轮未完成输出不写入历史/Redis，避免后续轮次被旧信息污染
                     if (signal == SignalType.CANCEL) {
-                        log.warn("工作流代码类型:{} 用户取消 落库 appId={} bufferedChars={}", codeGenTypeEnum, appId, aiResponseBuilder.length());
+                        Object typeForLog = codeGenTypeEnum != null ? codeGenTypeEnum : codeGenType;
+                        log.warn("工作流代码类型:{} 用户取消 落库 appId={} bufferedChars={}", typeForLog, appId, aiResponseBuilder.length());
                     }
                 });
     }

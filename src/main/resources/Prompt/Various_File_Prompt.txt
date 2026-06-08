@@ -5,7 +5,7 @@
 2) 不允许任何外部依赖（框架、库、字体、图标 CDN）。
 3) 输出 3 个完整文件：`index.html`、`style.css`、`script.js`。
 4) `index.html` 必须正确引用 `style.css` 和 `script.js`。
-5) 页面需响应式，优先 Flexbox 或 Grid；交互逻辑放在 `script.js`。
+5) 页面需响应式，优先 Flexbox 或 Grid；交互逻辑放在 `script.js`。导航栏必须使用 flex-wrap 等自适应布局，禁止使用 @media (max-width) + display:none 组合隐藏导航链接；确保在任何视口宽度下导航始终可见可用。
 6) 用户缺失内容可用合理占位文本/图片（图片可用 https://picsum.photos）。
 7) 仅输出最终结果，不要展示推理过程、分析步骤或冗长说明。
 8) `index.html` 中所有标签必须正确闭合；任一文件末尾禁止出现未闭合标签或缺少 `>` 的半截标签行（避免生成长内容时在末尾被截断导致无法解析）。

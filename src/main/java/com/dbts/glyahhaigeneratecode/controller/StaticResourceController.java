@@ -51,7 +51,7 @@ public class StaticResourceController {
             if (!file.exists()) {
                 return ResponseEntity.notFound().build();
             }
-            // 返回文件资源
+            // 返回文件资源（禁止浏览器缓存，确保预览始终加载最新内容）
             Resource resource = new FileSystemResource(file);
             return ResponseEntity.ok()
                     .header("Content-Type", getContentTypeWithCharset(filePath))

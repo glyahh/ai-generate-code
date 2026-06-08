@@ -20,7 +20,25 @@ interface ProjectFileRaw {
   path: string
   language?: string
   content: string
-  updatedAt: number
+  updatedAt: number | string
+}
+
+/** 前端回显不展示的锁文件（磁盘保留，构建正常使用） */
+const LOCK_FILE_PATTERNS = [
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+]
+
+function isLockFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/')
+  const baseName = normalized.split('/').pop() ?? ''
+  return LOCK_FILE_PATTERNS.includes(baseName)
+}
+
+/** 对任意文件路径列表过滤锁文件，返回过滤后的列表 */
+export function filterLockFiles<T extends { path: string }>(items: T[]): T[] {
+  return items.filter((item) => !isLockFile(item.path))
 }
 
 export interface LoadProjectFilesEchoOpts {
@@ -61,12 +79,14 @@ export async function loadProjectFilesEchoFromDisk(
 
   const rawList: ProjectFileRaw[] = body.data ?? []
 
-  const items: GeneratedFileItem[] = rawList.map((raw) => ({
-    path: raw.path,
-    language: raw.language,
-    content: raw.content,
-    updatedAt: raw.updatedAt,
-  }))
+  const items: GeneratedFileItem[] = rawList
+    .filter((raw) => !isLockFile(raw.path))
+    .map((raw) => ({
+      path: raw.path,
+      language: raw.language,
+      content: raw.content,
+      updatedAt: Number(raw.updatedAt) || 0,
+    }))
 
   items.sort((a, b) => a.path.localeCompare(b.path))
   return items
