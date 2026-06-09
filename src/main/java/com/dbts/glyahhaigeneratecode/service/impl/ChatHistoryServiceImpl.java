@@ -850,15 +850,28 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      */
     @Override
     public int countUserRoundsInternal(Long appId) {
+        // 方法大纲：
+        // 1. 非法 appId 直接返回 0    L856-L858
+        // 2. 按 appId + USER 类型统计 chat_history 条数并返回    L859-L862
+
+        // 1. 非法 appId 视为无轮次,得到幂等 0 结果
         if (appId == null || appId <= 0) {
             return 0;
         }
+        // 2. 构造 USER 类型精确匹配条件并 count,得到 DB 权威对话轮数
         QueryWrapper queryWrapper = new QueryWrapper();
         queryWrapper.eq(ChatHistory::getAppId, appId);
         queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
         return (int) this.count(queryWrapper);
     }
 
+    /**
+     * 统计指定应用对话轮数：以 DB USER 条数为权威值，并比对 echo_memory 全文缓存一致性
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户（创建者或管理员可查看）
+     * @return DB 中 USER 消息条数（对话轮数）
+     */
     @Override
     public int countRoundsByAppId(Long appId, User loginUser) {
         // 方法大纲：
@@ -939,38 +952,44 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      * @param appId         应用 id
      * @param userId        用户 id
      * @param triggerReason 触发原因（日志用）
+     * @return 实际执行了 memory_shrink 合并时为 true，未超阈值或跳过为 false
      */
     @Override
     // 只要抛出 Exception（及子类），就回滚数据库操作
     @Transactional(rollbackFor = Exception.class)
-    public void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason) {
+    public boolean trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason) {
         // 方法大纲：
         // 1. 非法入参或 DB 未合并 USER 轮数未超阈值则跳过    L940-L952
         // 2. 循环合并最早轮次：AI 摘要后写入 memory_shrink 唯一摘要对    L955-L1008
         // 3. 若有合并则失效 echo 并重建 AI Redis ChatMemory    L1014-L1027
 
-        // 1. 非法入参直接返回,得到幂等无操作的收口
         if (appId == null || appId <= 0 || userId == null) {
-            return;
+            return false;
         }
         String reason = StrUtil.blankToDefault(triggerReason, "unknown");
+        // 确保 memory_shrink 表存在，首次使用自动建表
         memoryShrinkService.ensureTableExists();
+        // 收集已合并的 chat_history ID 集合，用于排除已合并轮次
         Set<Long> mergedSourceIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+        // 统计未合并的 DB USER 轮数，判断是否达到压缩阈值
         int dbUsersBefore = memoryShrinkService.countUnmergedDbUserRounds(appId, mergedSourceIds);
         if (dbUsersBefore <= ChatHistoryConstant.TARGET_UNMERGED_DB_USER_ROUNDS) {
             log.info("会话级总结跳过，compressType=conversation_summary, triggerReason={}, appId={}, unmergedDbUsers={}, target={}",
                     reason, appId, dbUsersBefore, ChatHistoryConstant.TARGET_UNMERGED_DB_USER_ROUNDS);
-            return;
+            return false;
         }
+        // 确保 audit 列在 chat_history 表存在，兼容旧表结构
         ChatHistorySchemaMigrationSupport.ensureAuditColumnsIfMissing(appId, this.getMapper());
         int mergedCount = 0;
-        // 2. 循环合并最早轮次：AI 摘要后写入 memory_shrink 唯一摘要对
         while (true) {
+            // 每次循环重新收集已合并 ID，排除已处理的轮次
             Set<Long> excludeIds = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+            // 统计排除后的未合并 USER 轮数
             int dbUsers = memoryShrinkService.countUnmergedDbUserRounds(appId, excludeIds);
             if (dbUsers <= ChatHistoryConstant.TARGET_UNMERGED_DB_USER_ROUNDS) {
                 break;
             }
+            // 查询当前已有的对话摘要对（用于滚动合并场景）
             var existingSummary = memoryShrinkService.getConversationSummaryPair(appId);
             List<ChatHistory> toMerge;
             String summaryText;
@@ -978,6 +997,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             List<Long> sourceIds;
             try {
                 if (existingSummary.isEmpty()) {
+                    // 查询最早 N 轮待合并的消息（首次合并场景）
                     toMerge = ChatHistorySchemaMigrationSupport.listOldestMessagesForMergeValidated(
                             appId, ChatHistoryConstant.MESSAGES_PER_MERGE, ChatHistoryConstant.ROUNDS_TO_MERGE,
                             this.getMapper(), excludeIds);
@@ -985,17 +1005,20 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                         log.warn("对话合并：不足两轮最早消息，跳过本次合并，appId={}", appId);
                         break;
                     }
+                    // 调用 AI 对最早两轮做摘要合并
                     summaryText = ChatHistorySchemaMigrationSupport.summarizeTwoRoundsWithAi(toMerge, chatModel);
                     anchorCreateTime = toMerge.getFirst().getCreateTime();
                     sourceIds = toMerge.stream().map(ChatHistory::getId).filter(Objects::nonNull).toList();
                 } else {
                     var pair = existingSummary.get();
+                    // 查询最新一轮消息，将当前摘要与新轮次滚动合并
                     toMerge = ChatHistorySchemaMigrationSupport.listOldestMessagesForMergeValidated(
                             appId, 2, 1, this.getMapper(), excludeIds);
                     if (toMerge == null) {
                         log.warn("对话合并：不足一轮最早消息用于滚动并入摘要，跳过本次合并，appId={}", appId);
                         break;
                     }
+                    // 调用 AI 将已有摘要与新轮次做滚动摘要
                     summaryText = ChatHistorySchemaMigrationSupport.summarizeWithExistingSummary(
                             pair.userSummary(), pair.aiSummary(), toMerge, chatModel);
                     anchorCreateTime = pair.anchorCreateTime() != null
@@ -1012,19 +1035,25 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 log.error("AI 总结对话失败，跳过本次合并，appId={}", appId, e);
                 break;
             }
+            // 解析 AI 返回的摘要文本为用户摘要/AI 摘要两部分
             String[] parsed = ChatHistorySchemaMigrationSupport.parseSummaryResponse(summaryText);
+            // 将合并结果写入 memory_shrink（唯一摘要对），替换旧摘要
             memoryShrinkService.replaceConversationSummary(
                     appId, userId, anchorCreateTime, parsed[0], parsed[1], sourceIds);
             mergedCount++;
             log.info("已滚动合并写入 memory_shrink（唯一摘要对），appId={}, mergedCount={}", appId, mergedCount);
         }
+        // 收集压缩后的统计信息供日志
         Set<Long> mergedAfter = memoryShrinkService.collectAllMergedSourceChatHistoryIds(appId);
+        // 统计压缩后仍然未合并的 DB USER 轮数
         int dbUsersAfter = memoryShrinkService.countUnmergedDbUserRounds(appId, mergedAfter);
+        // 统计压缩后的摘要轮数
         int summaryUsers = memoryShrinkService.countSummaryUserRounds(appId);
         log.info("会话级总结完成，compressType=conversation_summary, triggerReason={}, appId={}, beforeDbUsers={}, afterDbUsers={}, summaryUsers={}, mergedIterations={}",
                 reason, appId, dbUsersBefore, dbUsersAfter, summaryUsers, mergedCount);
-        // 3. 若有合并则失效 echo 并重建 AI Redis ChatMemory
-        if (mergedCount > 0) {
+        boolean didCompress = mergedCount > 0;
+        if (didCompress) {
+            // 失效 echo 缓存，下次访问强制从 DB 重建
             chatHistoryEchoRedisSupport.invalidate(appId);
             MessageWindowChatMemory rebuildMemory = MessageWindowChatMemory.builder()
                     .id(appId)
@@ -1032,16 +1061,15 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                     .maxMessages(ChatHistoryConstant.CHAT_MEMORY_MAX_MESSAGES)
                     .build();
             rebuildMemory.clear();
+            // 查询应用信息，确定代码生成类型用于后续 AI 记忆重建
             App app = appService.getById(appId);
             CodeGenTypeEnum codeGenTypeEnum = app != null ? CodeGenTypeEnum.getEnumByValue(app.getCodeGenType()) : null;
+            // 从 memory_shrink 重建 AI ChatMemory，使最新摘要生效
             chatHistoryAiMemoryRebuildSupport.rebuildAiChatMemoryFromShrink(
                     appId, rebuildMemory, ChatHistoryConstant.MEMORY_PRELOAD_MESSAGE_ROWS, codeGenTypeEnum);
         }
+        return didCompress;
     }
-
-
-
-
 
     /**
      * 单测反射入口：将 AI 长文压缩为适合 Redis 记忆的摘要片段

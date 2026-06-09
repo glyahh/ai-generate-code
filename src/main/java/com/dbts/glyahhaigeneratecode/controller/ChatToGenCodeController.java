@@ -85,20 +85,48 @@ public class ChatToGenCodeController {
             return events;
         }
 
+        // 匹配记忆压缩卡片
+        // 检查是否为 memory-compress 标记（优先级最高，避免被当成文本事件发送）
+        if ("[memory_compress_start]".equals(chunk)) {
+            String payload = JSONUtil.createObj()
+                    .set("phase", "start")
+                    .toString();
+            events.add(ServerSentEvent.<String>builder()
+                    .event("memory-compress")
+                    .data(payload)
+                    .build());
+            return events;
+        }
+        if ("[memory_compress_end]".equals(chunk)) {
+            String payload = JSONUtil.createObj()
+                    .set("phase", "end")
+                    .toString();
+            events.add(ServerSentEvent.<String>builder()
+                    .event("memory-compress")
+                    .data(payload)
+                    .build());
+            return events;
+        }
+
+        // 匹配工作流卡片
         Matcher matcher = WORKFLOW_STEP_PATTERN.matcher(chunk);
         while (matcher.find()) {
             Integer step = null;
             try {
+                // 获取第一个匹配成功的字符
                 step = Integer.parseInt(matcher.group(1));
             } catch (Exception ignored) {
-                // keep compatibility text event even if parse failed
+                log.warn("没有match.group到对应的工作流step值");
             }
+            // 拿到对应匹配步骤的标签
             String label = matcher.group(2) == null ? "" : matcher.group(2).trim();
             if (step != null && !label.isBlank()) {
+                // 写成单个json
                 String payload = JSONUtil.createObj()
                         .set("step", step)
                         .set("label", label)
                         .toString();
+                // 组成ServerSentEvent并塞到ServerSentEvent<String> List中
                 events.add(ServerSentEvent.<String>builder()
                         .event("workflow-step")
                         .data(payload)

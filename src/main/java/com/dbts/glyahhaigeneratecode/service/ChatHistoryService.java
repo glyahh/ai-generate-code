@@ -193,8 +193,8 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @param appId  应用 id
      * @param userId 用户 id（用于写入总结记录的 userId）
      */
-    default void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId) {
-        trySummarizeOldestRoundsIfNeeded(appId, userId, "unknown");
+    default boolean trySummarizeOldestRoundsIfNeeded(Long appId, Long userId) {
+        return trySummarizeOldestRoundsIfNeeded(appId, userId, "unknown");
     }
 
     /**
@@ -203,8 +203,9 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @param appId         应用 id
      * @param userId        用户 id
      * @param triggerReason 触发来源（如 entry_normal / entry_workflow）
+     * @return 是否实际执行了压缩（true=有合并操作）
      */
-    void trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason);
+    boolean trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason);
 
     /**
      * 在线压缩 Redis ChatMemory 中的超长历史 AI 消息（仅影响模型上下文，不改 DB 历史文本）。

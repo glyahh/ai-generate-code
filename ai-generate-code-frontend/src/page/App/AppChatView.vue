@@ -152,6 +152,8 @@ type ChatMessage = {
   mermaidErrorNotice?: boolean
   /** workflow 流式开始时间戳（用于长耗时提示） */
   workflowStreamStartedAt?: number
+  /** 后端是否正在执行对话记忆压缩（回忆分析中） */
+  isMemoryCompressing?: boolean
   /**
    * 用于将 SSE 流与具体 assistant 气泡绑定。
    * 多并发流时，禁止再用“最后一条 assistant 消息”作为流式落点。
@@ -2154,6 +2156,10 @@ function getTotalElapsedSec(m: ChatMessage): number | null {
 }
 
 function getThinkingStatusText(m: ChatMessage): string {
+  // 后端正在压缩对话记忆时，显示"回忆分析中..."而非"已思考X秒"
+  if (m.isMemoryCompressing) {
+    return '回忆分析中...'
+  }
   const thinkingSec = getThinkingElapsedSec(m)
   if (thinkingSec == null) return ''
   const baseText = `${m.firstVisibleAt ? '共思考' : '已思考'}${thinkingSec}秒`
@@ -2661,6 +2667,20 @@ async function sendMessage(text?: string) {
         message.error(fallback)
       } finally {
         stopStream(streamId)
+      }
+    })
+
+    // 监听后端对话记忆压缩事件 — 压缩进行时显示"回忆分析中..."
+    es.addEventListener('memory-compress', (event: MessageEvent) => {
+      const meta = activeStreamMeta.value[streamId]
+      if (!meta) return
+      const msg = sessionMessages.value.find((x) => x.id === meta.assistantMessageId)
+      if (!msg || msg.role !== 'assistant') return
+      try {
+        const payload = JSON.parse(event.data || '{}') as { phase?: string }
+        msg.isMemoryCompressing = payload.phase === 'start'
+      } catch {
+        // ignore malformed memory-compress payload
       }
     })
 

@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -106,15 +107,26 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             lock.unlock();
         }
 
-        // 5.5. 生成前触发「旧轮次总结压缩」，降低上下文长度与 token 消耗
-        // 说明：该压缩仅作用于 Redis 管理的上下文（不修改 DB），对后续生成请求生效。
-        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_normal");
-
-        // 6. 调用 AI 生成代码（流式）
+        // 6. 调用 AI 生成代码（流式）- 此时不执行压缩，压缩作为 Flux 的第一个阶段
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
+        Flux<String> handlerFlux = streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message, roundId);
 
-        // 7. 添加 AI 回复到对话历史,转换格式并返回给前端
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message, roundId);
+        // 7. 在 AI 生成流前插入压缩阶段
+        //    压缩在 boundedElastic 线程异步执行，避免阻塞 Netty event loop
+        //    使用 Flux.concat 确保压缩完成后再进入 AI 生成阶段
+        //    压缩触发时发射 [memory_compress_start/end] 标记，由 Controller 转为 SSE 事件通知前端
+        //    使用 Flux.defer 惰性执行
+        Flux<String> compressPhase = Flux.defer(() -> {
+            // 是否成功压缩了历史记忆
+            boolean didCompress = chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_normal");
+            if (didCompress) {
+                return Flux.just("[memory_compress_start]", "[memory_compress_end]");
+            }
+            return Flux.empty();
+            //
+        }).subscribeOn(Schedulers.boundedElastic());
+
+        return Flux.concat(compressPhase, handlerFlux);
     }
 
     @Override
@@ -158,20 +170,26 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             lock.unlock();
         }
 
-        // 生成前触发「旧轮次总结压缩」检查：与普通链路一致，每轮用户消息入库并通过审查后都执行；是否合并仍由阈值策略决定
-        chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_workflow");
-
-        // 获取一手流式string代码
+        // 获取一手流式string代码（此时不执行压缩，压缩作为 Flux 的第一个阶段）
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
                 message, codeGenTypeEnum, appId, firstRound);
 
-        // 将代码转化成想要的格式,持久化到数据库
-        // 解析一下,准备给前端了
-        return streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message, roundId)
+        Flux<String> handlerFlux = streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message, roundId)
                 .doOnError(InputGuardrailException.class, e -> {
                     chatHistoryService.removeUserMessageByContent(appId, user.getId(), originalPrompt);
                     log.warn("Guardrail 拒绝，已回滚 DB user 消息，appId={}", appId);
                 });
+
+        // 在 AI 生成流前插入压缩阶段
+        Flux<String> compressPhase = Flux.defer(() -> {
+            boolean didCompress = chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_workflow");
+            if (didCompress) {
+                return Flux.just("[memory_compress_start]", "[memory_compress_end]");
+            }
+            return Flux.empty();
+        }).subscribeOn(Schedulers.boundedElastic());
+
+        return Flux.concat(compressPhase, handlerFlux);
     }
 
     private CodeGenTypeEnum resolveCodeGenType(String codeGenType) {
