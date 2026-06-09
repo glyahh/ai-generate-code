@@ -846,7 +846,6 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      * 统计指定应用的对话轮数（以 DB 中 USER 条数为准），并比对 echo 缓存一致性
      *
      * @param appId     应用 id
-     * @param loginUser 当前登录用户
      * @return DB 中 USER 消息条数（对话轮数）
      */
     @Override
