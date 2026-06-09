@@ -86,8 +86,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         ReentrantLock lock = getFirstRoundLock(appId);
         lock.lock();
         try {
-            int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
-            firstRound = roundsBefore == 0;
+            firstRound = chatHistoryService.isFirstRound(appId, false);
 
             // 5. 保存用户消息到对话历史(Mysql), 入链路前进行最小审查，并写入审查日志 + 会话扩展字段
             PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
@@ -140,8 +139,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         ReentrantLock lock = getFirstRoundLock(appId);
         lock.lock();
         try {
-            int roundsBefore = chatHistoryService.countRoundsByAppId(appId, user);
-            firstRound = roundsBefore == 0;
+            firstRound = chatHistoryService.isFirstRound(appId, false);
 
             PromptSafetyAuditResult auditResult = PromptSafetyAuditEvaluator.evaluate(message);
             log.info("workflow prompt审查结果, appId={}, userId={}, blocked={}, rule={}, action={}",

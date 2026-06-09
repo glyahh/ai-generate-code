@@ -76,12 +76,15 @@ public class FileWriteTool extends BaseTool {
                 content = content.stripTrailing();
             }
             if (relativeFilePath.endsWith(".vue")) {
-                content = repairVueSfcContent(content);
+                content = VueSfcRepairHelper.repairVueSfcContent(content);
+            }
+
+            if (content == null) {
+                return "错误：写入内容为空 - " + relativeFilePath;
             }
 
             Files.write(path, content.getBytes(),
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING);
+                    StandardOpenOption.CREATE_NEW);
             registerFileNoteAfterWrite(appId, projectRoot, path, content);
             return "文件写入成功: " + relativeFilePath;
         } catch (IOException e) {
@@ -116,60 +119,6 @@ public class FileWriteTool extends BaseTool {
                 displayContent);
     }
 
-    private String sanitizeVueContent(String content) {
-        if (content == null || content.isEmpty()) {
-            return content;
-        }
-
-        String result = content;
-
-        int excessTemplate = countMatches(result, "</template>") - countMatches(result, "<template");
-        for (int i = 0; i < excessTemplate; i++) {
-            int lastIdx = result.lastIndexOf("</template>");
-            if (lastIdx >= 0) {
-                result = result.substring(0, lastIdx) + result.substring(lastIdx + "</template>".length());
-            }
-        }
-
-        int excessScript = countMatches(result, "</script>") - countMatches(result, "<script");
-        for (int i = 0; i < excessScript; i++) {
-            int lastIdx = result.lastIndexOf("</script>");
-            if (lastIdx >= 0) {
-                result = result.substring(0, lastIdx) + result.substring(lastIdx + "</script>".length());
-            }
-        }
-
-        return result.stripTrailing();
-    }
-
-    /**
-     * 针对 .vue 文件做最小兜底，避免顶层 SFC 标签不平衡导致构建失败。
-     */
-    private String repairVueSfcContent(String content) {
-        if (content == null || content.isEmpty()) {
-            return content;
-        }
-        String result = sanitizeVueContent(content);
-        result = appendMissingClosingTag(result, "<template", "</template>");
-        result = appendMissingClosingTag(result, "<script", "</script>");
-        result = appendMissingClosingTag(result, "<style", "</style>");
-        return result.stripTrailing();
-    }
-
-    private String appendMissingClosingTag(String text, String openingTagPrefix, String closingTag) {
-        int openingCount = countMatches(text, openingTagPrefix);
-        int closingCount = countMatches(text, closingTag);
-        int missingCount = openingCount - closingCount;
-        if (missingCount <= 0) {
-            return text;
-        }
-        StringBuilder sb = new StringBuilder(text);
-        for (int i = 0; i < missingCount; i++) {
-            sb.append(System.lineSeparator()).append(closingTag);
-        }
-        return sb.toString();
-    }
-
     private void registerFileNoteAfterWrite(Long appId, Path projectRoot, Path absoluteFile, String writtenContent) {
         try {
             String relative = toRelativePath(projectRoot, absoluteFile);
@@ -183,15 +132,5 @@ public class FileWriteTool extends BaseTool {
         } catch (Exception ignore) {
             // fileNote 失败不阻塞写盘
         }
-    }
-
-    private int countMatches(String text, String pattern) {
-        int count = 0;
-        int idx = 0;
-        while ((idx = text.indexOf(pattern, idx)) != -1) {
-            count++;
-            idx += pattern.length();
-        }
-        return count;
     }
 }

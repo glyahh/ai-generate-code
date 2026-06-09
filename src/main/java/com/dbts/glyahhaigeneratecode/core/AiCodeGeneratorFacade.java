@@ -25,6 +25,7 @@ import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
+import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.TokenStream;
@@ -72,6 +73,9 @@ public class AiCodeGeneratorFacade {
     @Resource
     private ToolManager toolManager;
 
+    @Resource
+    private ChatHistoryService chatHistoryService;
+
     private static final CodeFileSaverExecutor codeFileSaverExecutor = new CodeFileSaverExecutor();
     private static final CodeParserExecutor codeParserExecutor = new CodeParserExecutor();
 
@@ -90,30 +94,50 @@ public class AiCodeGeneratorFacade {
         }
 
         return switch (codeGenTypeEnum) {
-            case HTML -> {
-                // 2. 判断是否「可编辑存量」场景：关键词命中且磁盘已有文件 → 走工具化编辑链路的 service 配置
-                boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
-                        && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.HTML, appId);
-                // 3. 非编辑意图则首轮可无工具自举生成
-                boolean htmlMultiToollessBootstrap = !editIntent;
-                aiCodeGeneratorService svc = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
-                        appId, CodeGenTypeEnum.HTML, htmlMultiToollessBootstrap, true);
-                // 4. 调模型生成 HtmlCodeResult
-                HtmlCodeResult result = svc.generateCodeHTML(appId, userMessage);
-                // 5. 落盘
-                yield codeFileSaverExecutor.execute(codeGenTypeEnum, result, appId);
-            }
-            case MULTI_FILE -> {
-                boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
-                        && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.MULTI_FILE, appId);
-                boolean htmlMultiToollessBootstrap = !editIntent;
-                aiCodeGeneratorService svc = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
-                        appId, CodeGenTypeEnum.MULTI_FILE, htmlMultiToollessBootstrap, true);
-                MultiFileCodeResult result = svc.generateCodeMultiFile(appId, userMessage);
-                yield codeFileSaverExecutor.execute(codeGenTypeEnum, result, appId);
-            }
+            case HTML -> generateAndSaveHtmlCode(userMessage, appId);
+            case MULTI_FILE -> generateAndSaveMultiFileCode(userMessage, appId);
             default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenTypeEnum.getValue());
         };
+    }
+
+    /**
+     * 同步生成单文件 HTML 并落盘
+     */
+    private File generateAndSaveHtmlCode(String userMessage, Long appId) {
+        boolean firstRound = chatHistoryService.isFirstRound(appId, false);
+        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
+                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.HTML, appId);
+        boolean htmlMultiToollessBootstrap = firstRound && !editIntent;
+        aiCodeGeneratorService svc = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
+                appId, CodeGenTypeEnum.HTML, htmlMultiToollessBootstrap, true);
+        if (editIntent) {
+            // Modify: TokenStream 流式，工具直接写盘，无需解析落盘
+            TokenStream tokenStream = svc.modifyCodeHTML(appId, userMessage);
+            adaptCodeTokenStream(CodeGenTypeEnum.HTML, tokenStream, appId).blockLast();
+            return new File(AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "html_" + appId);
+        }
+        HtmlCodeResult result = svc.generateCodeHTML(appId, userMessage);
+        return codeFileSaverExecutor.execute(CodeGenTypeEnum.HTML, result, appId);
+    }
+
+    /**
+     * 同步生成多文件 HTML/CSS/JS 并落盘
+     */
+    private File generateAndSaveMultiFileCode(String userMessage, Long appId) {
+        boolean firstRound = chatHistoryService.isFirstRound(appId, false);
+        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
+                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.MULTI_FILE, appId);
+        boolean htmlMultiToollessBootstrap = firstRound && !editIntent;
+        aiCodeGeneratorService svc = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
+                appId, CodeGenTypeEnum.MULTI_FILE, htmlMultiToollessBootstrap, true);
+        if (editIntent) {
+            // Modify: TokenStream 流式，工具直接写盘，无需解析落盘
+            TokenStream tokenStream = svc.modifyCodeMultiFile(appId, userMessage);
+            adaptCodeTokenStream(CodeGenTypeEnum.MULTI_FILE, tokenStream, appId).blockLast();
+            return new File(AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "multi_file_" + appId);
+        }
+        MultiFileCodeResult result = svc.generateCodeMultiFile(appId, userMessage);
+        return codeFileSaverExecutor.execute(CodeGenTypeEnum.MULTI_FILE, result, appId);
     }
 
     /**
@@ -125,7 +149,8 @@ public class AiCodeGeneratorFacade {
      * @return SSE 文本流
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
-        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, false, true);
+        boolean firstRound = chatHistoryService.isFirstRound(appId, false);
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, firstRound, true);
     }
 
     /**
@@ -473,8 +498,10 @@ public class AiCodeGeneratorFacade {
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
                         appId, CodeGenTypeEnum.MULTI_FILE, htmlMultiToollessBootstrap, compactMemoryOnCacheHit);
 
-        // 3. 编辑轮依靠 changedFiles + fileNote + readFile 工具获取代码内容
-        TokenStream tokenStream = aiCodeGeneratorService.generateCodeMultiFileTokenStream(appId, userMessage);
+        // 3. 编辑轮采用 modify 提示词，首轮用 generate 提示词；依靠 changedFiles + fileNote + readFile 工具获取代码内容
+        TokenStream tokenStream = editIntent
+                ? aiCodeGeneratorService.modifyCodeMultiFileTokenStream(appId, userMessage)
+                : aiCodeGeneratorService.generateCodeMultiFileTokenStream(appId, userMessage);
 
         // 4. 编辑走仅透传；否则流结束 persist
         if (editIntent) {
@@ -499,9 +526,10 @@ public class AiCodeGeneratorFacade {
         aiCodeGeneratorService aiCodeGeneratorService =
                 aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
                         appId, CodeGenTypeEnum.HTML, htmlMultiToollessBootstrap, compactMemoryOnCacheHit);
-        // F 项：不再使用 HtmlMultiFileEditContextBuilder 拼接磁盘片段到 user 消息
-        // 3. 编辑轮依靠 changedFiles + fileNote + readFile 工具获取代码内容
-        TokenStream tokenStream = aiCodeGeneratorService.generateCodeHTMLTokenStream(appId, userMessage);
+        // 3. 编辑轮采用 modify 提示词，首轮用 generate 提示词；依靠 changedFiles + fileNote + readFile 工具获取代码内容
+        TokenStream tokenStream = editIntent
+                ? aiCodeGeneratorService.modifyCodeHTMLTokenStream(appId, userMessage)
+                : aiCodeGeneratorService.generateCodeHTMLTokenStream(appId, userMessage);
         if (editIntent) {
             return adaptCodeTokenStream(CodeGenTypeEnum.HTML, tokenStream, appId);
         }
@@ -518,16 +546,21 @@ public class AiCodeGeneratorFacade {
      * @return Flux
      */
     private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound, boolean compactMemoryOnCacheHit) {
-        // 注入编辑上下文（仅非首轮）
+        // 编辑意图判定：关键词命中 + 磁盘已有 Vue 源码文件
+        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
+                && vueEditContextBuilder.hasExistingVueFiles(appId);
+        // 注入编辑上下文（仅编辑意图时）
         String enhancedMessage = userMessage;
-        if (!firstRound) {
+        if (editIntent) {
             enhancedMessage = vueEditContextBuilder.buildPromptIfNeed(userMessage, appId);
         }
-        // 1. 取 Vue 专用 service（首轮控制工具白名单）
+        // 1. 取 Vue 专用 service（首轮控制工具白名单；编辑意图时开放全套工具）
         aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound, compactMemoryOnCacheHit);
-        // 2. 开流
-        TokenStream tokenStream = aiCodeGeneratorService.generateCodeVueFileStream(appId, enhancedMessage);
+                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound && !editIntent, compactMemoryOnCacheHit);
+        // 2. 开流（编辑意图用 modify 提示词，否则用 generate 提示词）
+        TokenStream tokenStream = editIntent
+                ? aiCodeGeneratorService.modifyCodeVueFileStream(appId, enhancedMessage)
+                : aiCodeGeneratorService.generateCodeVueFileStream(appId, enhancedMessage);
         // 3. 转为前端 JSON 行协议
         return adaptVueTokenStream(tokenStream, appId);
     }

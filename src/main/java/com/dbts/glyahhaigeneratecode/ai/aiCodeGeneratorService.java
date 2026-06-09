@@ -76,4 +76,49 @@ public interface aiCodeGeneratorService {
      */
     @SystemMessage(fromResource = "Prompt/Vue_File_Prompt.txt")
     TokenStream generateCodeVueFileStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+
+    // ======================== 以下为次轮修改专用方法  ========================
+
+    /**
+     * 次轮修改：根据用户要求修改已有的单HTML文件（TokenStream 流式，工具直接写盘）
+     */
+    @SystemMessage(fromResource = "Prompt/Single_File_Prompt_Modify.txt")
+    TokenStream modifyCodeHTML(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 次轮修改：根据用户要求修改已有的多文件项目（TokenStream 流式，工具直接写盘）
+     */
+    @SystemMessage(fromResource = "Prompt/Various_File_Prompt_Modify.txt")
+    TokenStream modifyCodeMultiFile(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 次轮修改：流式输出修改单HTML文件
+     */
+    @SystemMessage(fromResource = "Prompt/Single_File_Prompt_Modify.txt")
+    Flux<String> modifyCodeHTMLStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 次轮修改：流式输出修改多文件项目
+     */
+    @SystemMessage(fromResource = "Prompt/Various_File_Prompt_Modify.txt")
+    Flux<String> modifyCodeMultiFileStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 次轮修改：TokenStream 流式修改单HTML文件
+     */
+    @SystemMessage(fromResource = "Prompt/Single_File_Prompt_Modify.txt")
+    TokenStream modifyCodeHTMLTokenStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 次轮修改：TokenStream 流式修改多文件项目
+     */
+    @SystemMessage(fromResource = "Prompt/Various_File_Prompt_Modify.txt")
+    TokenStream modifyCodeMultiFileTokenStream(@MemoryId Long appId, @UserMessage String userMessage);
+
+    /**
+     * 次轮修改：TokenStream 流式修改Vue项目
+     */
+    @SystemMessage(fromResource = "Prompt/Vue_File_Prompt_Modify.txt")
+    TokenStream modifyCodeVueFileStream(@MemoryId Long appId, @UserMessage String userMessage);
 }

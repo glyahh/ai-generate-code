@@ -163,6 +163,29 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     int countRoundsByAppId(Long appId, User loginUser);
 
     /**
+     * 内部统计：按 appId 统计 DB 中 USER 消息条数（不做权限校验）。
+     * 供生成链路判定首轮使用，与 {@link #countRoundsByAppId(Long, User)} 的 DB 统计口径一致。
+     *
+     * @param appId 应用 id
+     * @return 非负整数
+     */
+    int countUserRoundsInternal(Long appId);
+
+    /**
+     * 判定当前是否为「首轮生成」（roundsBefore == 0）。
+     *
+     * @param appId                        应用 id
+     * @param currentUserMessagePersisted  当前这轮用户消息是否已写入 DB（对话入口在入库后调用 facade 时应为 true）
+     * @return true 表示首轮
+     */
+    default boolean isFirstRound(Long appId, boolean currentUserMessagePersisted) {
+        if (appId == null || appId <= 0) return true;
+        int count = countUserRoundsInternal(appId);
+        int roundsBefore = currentUserMessagePersisted ? Math.max(0, count - 1) : count;
+        return roundsBefore == 0;
+    }
+
+    /**
      * 当 DB 中用户轮数超过 {@link com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant#MAX_ROUNDS_BEFORE_SUMMARY} 时，
      * 将最早两轮（4 条）用 AI 总结为 1 轮摘要：逻辑删除原文、插入 2 条带 audit 的摘要行，并在全部合并完成后按 DB 重建 Redis ChatMemory。
      * 由对话入口或流式完成后调用，无需权限校验（内部按 appId 操作）。

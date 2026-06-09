@@ -39,6 +39,42 @@ public class VueEditContextBuilder {
     private static final String[] VUE_SOURCE_EXTENSIONS = {".vue", ".js", ".ts", ".css"};
 
     /**
+     * 检查 Vue 项目目录下是否存在源码文件，用于判定编辑意图
+     *
+     * @param appId 应用 ID
+     * @return true 表示存在 .vue/.js/.ts/.css 文件
+     */
+    public boolean hasExistingVueFiles(Long appId) {
+        if (appId == null || appId <= 0) {
+            return false;
+        }
+        String baseDir = AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "vue_project_" + appId;
+        File srcDir = new File(baseDir + File.separator + "src");
+        if (!srcDir.isDirectory()) {
+            return false;
+        }
+        // 快速扫描子树，找到一个 Vue 源码文件即返回 true
+        return hasVueSourceFileRecursive(srcDir);
+    }
+
+    private boolean hasVueSourceFileRecursive(File dir) {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return false;
+        }
+        for (File child : children) {
+            if (child.isDirectory()) {
+                if (hasVueSourceFileRecursive(child)) {
+                    return true;
+                }
+            } else if (isVueSourceFile(child.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 仅对 Vue 项目组装增量修改上下文；条件不满足时原样返回用户消息
      *
      * @param userMessage 用户输入
@@ -92,18 +128,10 @@ public class VueEditContextBuilder {
             return Map.of();
         }
 
-        // 两轮扫描：先 .vue，再其他扩展名，保证 .vue 优先级
+        // 单轮扫描：按 .vue → 其他源码 → 子目录优先级收集
         Map<String, String> files = new LinkedHashMap<>();
         int maxCharsPerFile = SNIPPET_CHAR_WINDOW * 2;
-
-        // 第一轮：优先加载 .vue 文件
         collectFiles(srcDir, srcDir, files, maxCharsPerFile);
-        // 第二轮：补充 .js/.ts/.css（如果 .vue 还没排满 MAX_FILE_COUNT）
-        if (files.size() < MAX_FILE_COUNT) {
-            // .vue 已在第一轮中加载，collectFiles 会自动跳过已存在键
-            // 这里利用 loadVueProjectFiles 只扫描 VUE_SOURCE_EXTENSIONS，
-            // 由于第一轮已收集所有 .vue，第二轮自然只补充 .js/.ts/.css
-        }
 
         return files;
     }

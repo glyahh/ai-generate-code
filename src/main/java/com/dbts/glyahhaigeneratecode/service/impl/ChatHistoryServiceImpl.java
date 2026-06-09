@@ -850,6 +850,17 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
      * @return DB 中 USER 消息条数（对话轮数）
      */
     @Override
+    public int countUserRoundsInternal(Long appId) {
+        if (appId == null || appId <= 0) {
+            return 0;
+        }
+        QueryWrapper queryWrapper = new QueryWrapper();
+        queryWrapper.eq(ChatHistory::getAppId, appId);
+        queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
+        return (int) this.count(queryWrapper);
+    }
+
+    @Override
     public int countRoundsByAppId(Long appId, User loginUser) {
         // 方法大纲：
         // 1. 校验 appId、登录态与创建者/管理员权限    L855-L863
@@ -868,10 +879,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权查看该应用的对话轮数");
 
         // 2. 统计 DB 中 USER 条数作为权威轮数
-        QueryWrapper queryWrapper = new QueryWrapper();
-        queryWrapper.eq(ChatHistory::getAppId, appId);
-        queryWrapper.eq(ChatHistory::getMessageType, ChatHistoryMessageTypeEnum.USER.getValue());
-        long count = this.count(queryWrapper);
+        long count = countUserRoundsInternal(appId);
 
         // 3. 仅对比“回显全文缓存”（chat:echo_memory:{appId}）与 DB 轮数，避免与 AI ChatMemory（压缩/注入/窗口）产生噪声偏差
         // 3.1 优先从 echo_memory 命中全文列表；miss 时回源 DB 并回填
