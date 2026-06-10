@@ -69,3 +69,4 @@ temp/**
 
 ### Local Bug Notes (DO NOT COMMIT) ###
 bugs/
+.worktrees/
