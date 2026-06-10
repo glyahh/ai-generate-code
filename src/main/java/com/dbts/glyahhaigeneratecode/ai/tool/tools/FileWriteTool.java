@@ -4,6 +4,7 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
+import com.dbts.glyahhaigeneratecode.ai.tool.tool_assist.VueSfcRepairHelper;
 import com.dbts.glyahhaigeneratecode.config.ConversationMemoryProperties;
 import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryFileNoteSupport;
 import com.dbts.glyahhaigeneratecode.service.AppService;
