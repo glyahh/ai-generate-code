@@ -52,6 +52,7 @@ import {
 import {
   isToolWaitStatusTool,
   resolveToolWaitStatus,
+  generateTier2Threshold,
   type ToolWaitStatusView,
 } from '@/utils/toolWaitStatus'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
@@ -176,6 +177,8 @@ type UiToolRequestSegment = {
   /** pending 胶囊开始计时（流式 tool_request 创建时写入） */
   createdAt?: number
   segmentId?: string
+  /** 随机生成的 tier2 阈值（毫秒），取代全局常量，使多卡片切换时刻错开 */
+  tier2ThresholdMs?: number
 }
 type UiToolExecutedWriteFileSegment = {
   kind: 'tool_executed_write_file'
@@ -1327,6 +1330,7 @@ function processAssistantChunkIntoUiState(state: AssistantUiState, chunk: string
           rawLabel,
           toolName,
           createdAt: Date.now(),
+          tier2ThresholdMs: generateTier2Threshold(toolName),
         })
 
         if (afterMatch.startsWith('\r\n')) {
@@ -2436,7 +2440,11 @@ function getToolRequestStatusView(m: ChatMessage, idx: number): ToolWaitStatusVi
   const segs = getMessageUiSegments(m)
   const seg = segs[idx]
   if (!seg || seg.kind !== 'tool_request' || !seg.createdAt) return null
-  return resolveToolWaitStatus(seg.toolName, workflowNowTs.value - seg.createdAt)
+  return resolveToolWaitStatus(
+    seg.toolName,
+    workflowNowTs.value - seg.createdAt,
+    seg.tier2ThresholdMs,
+  )
 }
 
 function shouldShowToolRequestStatus(m: ChatMessage, idx: number): boolean {

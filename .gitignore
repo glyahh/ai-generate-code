@@ -61,6 +61,7 @@ temp/**
 
 ### MCP / local agent config (DO NOT COMMIT) ###
 .mcp.json
+.cursor/mcp.json
 .tmp-cookies.txt
 
 ### Shared Cursor Assets (keep tracked) ###
