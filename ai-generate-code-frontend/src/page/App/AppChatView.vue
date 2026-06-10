@@ -44,6 +44,7 @@ import CodeBlock from '@/components/CodeBlock.vue'
 import ToolExitHint from '@/components/ToolExitHint.vue'
 import ToolRequestHint from '@/components/ToolRequestHint.vue'
 import ToolExecCardHeader from '@/components/ToolExecCardHeader.vue'
+import CollapsibleCodeBlock from '@/components/CollapsibleCodeBlock.vue'
 import {
   getToolExecHeaderTargetPath,
   stripToolCallPrefix,
@@ -3237,55 +3238,27 @@ onBeforeUnmount(() => {
                         </div>
                       </div>
 
-                      <!-- TOOL_EXECUTED：写入文件卡片（可流式追加） -->
+                      <!-- TOOL_EXECUTED：写入文件卡片（可折叠+可复制） -->
                       <div v-else-if="segment.kind === 'tool_executed_write_file'" class="tool-exec-card">
-                        <ToolExecCardHeader action-label="写入文件" :target-path="segment.filePath">
-                          <template #actions>
-                            <a-button size="small" class="ghost-btn" @click="copyToClipboard(segment.content)">
-                              复制内容
-                            </a-button>
-                          </template>
-                        </ToolExecCardHeader>
-                        <CodeBlock
+                        <CollapsibleCodeBlock
                           :code="segment.content"
                           :language="segment.language"
+                          :file-path="segment.filePath"
                           :is-streaming="isStreamActiveForMessage(m) && !segment.done"
                         />
                       </div>
 
-                      <!-- TOOL_EXECUTED：修改文件卡片（替换前/替换后） -->
+                      <!-- TOOL_EXECUTED：修改文件卡片（可折叠+可复制） -->
                       <div v-else-if="segment.kind === 'tool_executed_modify_file'" class="tool-exec-card">
-                        <ToolExecCardHeader action-label="修改文件" :target-path="segment.filePath">
-                          <template #actions>
-                            <a-button
-                              size="small"
-                              class="ghost-btn"
-                              @click="copyToClipboard(segment.afterContent)"
-                            >
-                              复制替换后
-                            </a-button>
-                          </template>
-                        </ToolExecCardHeader>
-
-                        <div style="display: flex; flex-direction: column; gap: 8px">
-                          <div class="tool-call-title" style="font-size: 12px; font-weight: 600; color: #111827">
-                            替换前
-                          </div>
-                          <CodeBlock
-                            :code="segment.beforeContent"
-                            :language="segment.language"
-                            :is-streaming="isStreamActiveForMessage(m) && !segment.beforeDone"
-                          />
-
-                          <div class="tool-call-title" style="font-size: 12px; font-weight: 600; color: #111827">
-                            替换后
-                          </div>
-                          <CodeBlock
-                            :code="segment.afterContent"
-                            :language="segment.language"
-                            :is-streaming="isStreamActiveForMessage(m) && !segment.afterDone"
-                          />
-                        </div>
+                        <CollapsibleCodeBlock
+                          :before-code="segment.beforeContent"
+                          :after-code="segment.afterContent"
+                          :language="segment.language"
+                          :file-path="segment.filePath"
+                          :is-streaming="isStreamActiveForMessage(m)"
+                          :before-done="segment.beforeDone"
+                          :after-done="segment.afterDone"
+                        />
                       </div>
 
                       <!-- TOOL_EXECUTED：其它工具简单输出卡片 -->

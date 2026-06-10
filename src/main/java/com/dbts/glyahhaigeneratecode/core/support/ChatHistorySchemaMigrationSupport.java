@@ -1,8 +1,7 @@
-package com.dbts.glyahhaigeneratecode.core.util;
+package com.dbts.glyahhaigeneratecode.core.support;
 
 import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.util.StrUtil;
-import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
@@ -27,7 +26,6 @@ import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

@@ -1,6 +1,5 @@
 package com.dbts.glyahhaigeneratecode.core;
 
-import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorService;
@@ -19,11 +18,10 @@ import com.dbts.glyahhaigeneratecode.core.context.HtmlMultiFileEditContextBuilde
 import com.dbts.glyahhaigeneratecode.core.context.VueEditContextBuilder;
 import com.dbts.glyahhaigeneratecode.core.parser.CodeParserExecutor;
 import com.dbts.glyahhaigeneratecode.core.saver.CodeFileSaverExecutor;
-import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlStreamIntegrity;
-import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlToolStreamSupport;
+import com.dbts.glyahhaigeneratecode.core.support.LegacyHtmlStreamIntegrity;
+import com.dbts.glyahhaigeneratecode.core.support.LegacyHtmlToolStreamSupport;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
-import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -468,15 +466,50 @@ public class AiCodeGeneratorFacade {
                 LegacyHtmlStreamIntegrity.looksLikeIncompleteTrailingTag(safeFull)
         );
         try {
-            // 2. 解析并保存
+            // 2. 解析为结果对象
             Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, safeFull);
-            // 3. 保存
+            // 3. 解析结果为空（纯对话无代码块），跳过保存，不抛异常
+            if (isParseResultEmpty(codeGenTypeEnum, executeResult)) {
+                log.info("模型本轮未生成代码，跳过落盘。appId={} codeGenType={} charLen={}",
+                        appId, codeGenTypeEnum, len);
+                return;
+            }
+            // 4. 保存到 code_output
             File file = codeFileSaverExecutor.execute(codeGenTypeEnum, executeResult, appId);
             log.info("保存目录: {}", file.getAbsolutePath());
         } catch (Exception e) {
             log.error("生成代码失败: {}", e.getMessage(), e);
-            throw e;
+            // 不重新抛出异常：模型已成功输出自然语言或代码流，
+            // 落盘失败不应通过 sink.error 触发前端错误文案拼接（方案 A）。
+            // 真实生成失败由流中断/工具执行异常等其他机制捕获。
         }
+    }
+
+    /**
+     * 判断解析结果是否为空（模型本轮未生成任何代码文件内容）
+     * <p>
+     * 用于在持久化前提前退出，避免空内容写入时抛异常，
+     * 进而触发 sink.error → SimpleTextStreamHandler 拼接失败文案 → 污染 chat_history。
+     *
+     * @param codeGenTypeEnum 生成类型
+     * @param executeResult   CodeParserExecutor 返回的解析结果
+     * @return true 表示所有文件内容均为空，无需保存
+     */
+    private boolean isParseResultEmpty(CodeGenTypeEnum codeGenTypeEnum, Object executeResult) {
+        if (executeResult == null) {
+            return true;
+        }
+        return switch (codeGenTypeEnum) {
+            case MULTI_FILE -> {
+                MultiFileCodeResult r = (MultiFileCodeResult) executeResult;
+                yield r.getHtmlCode() == null && r.getCssCode() == null && r.getJsCode() == null;
+            }
+            case HTML -> {
+                HtmlCodeResult r = (HtmlCodeResult) executeResult;
+                yield r.getHtmlCode() == null;
+            }
+            default -> false;
+        };
     }
 
     /**

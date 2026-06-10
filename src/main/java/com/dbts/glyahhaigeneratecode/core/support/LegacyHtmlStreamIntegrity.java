@@ -1,4 +1,4 @@
-package com.dbts.glyahhaigeneratecode.core.util;
+package com.dbts.glyahhaigeneratecode.core.support;
 
 /**
  * Legacy HTML/MULTI_FILE 流式输出的完整性辅助：检测「末尾像未写完的标签」并在入库前给出可读提示（不静默补单个字符）。

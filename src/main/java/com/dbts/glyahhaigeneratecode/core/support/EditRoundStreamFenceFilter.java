@@ -1,4 +1,4 @@
-package com.dbts.glyahhaigeneratecode.core.util;
+package com.dbts.glyahhaigeneratecode.core.support;
 
 import cn.hutool.core.util.StrUtil;
 

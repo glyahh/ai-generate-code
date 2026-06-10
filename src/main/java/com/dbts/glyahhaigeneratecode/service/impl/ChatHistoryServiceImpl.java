@@ -23,7 +23,7 @@ import static com.dbts.glyahhaigeneratecode.constant.ChatHistoryMemoryCompaction
 import com.dbts.glyahhaigeneratecode.core.memory.ChatAiMemoryRedisSupport;
 import com.dbts.glyahhaigeneratecode.core.memory.ChatHistoryAiMemoryRebuildSupport;
 import com.dbts.glyahhaigeneratecode.core.memory.ChatHistoryEchoRedisSupport;
-import com.dbts.glyahhaigeneratecode.core.util.ChatHistorySchemaMigrationSupport;
+import com.dbts.glyahhaigeneratecode.core.support.ChatHistorySchemaMigrationSupport;
 import com.dbts.glyahhaigeneratecode.service.MemoryShrinkService;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;

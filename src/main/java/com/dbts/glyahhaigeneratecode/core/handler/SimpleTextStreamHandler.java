@@ -1,7 +1,7 @@
 package com.dbts.glyahhaigeneratecode.core.handler;
 
 import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
-import com.dbts.glyahhaigeneratecode.core.util.LegacyHtmlStreamIntegrity;
+import com.dbts.glyahhaigeneratecode.core.support.LegacyHtmlStreamIntegrity;
 import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;

@@ -19,9 +19,15 @@ withDefaults(defineProps<Props>(), {
     <div class="tool-call-badge">使用工具</div>
     <div class="tool-exec-meta">
       <div class="tool-exec-inline">
-        <span class="tool-exec-action-label">{{ actionLabel }}</span>
+        <span class="tool-exec-action-label">
+          {{ actionLabel }}
+          <slot name="action-label-after" />
+        </span>
         <ToolFlashlightGlyph v-if="targetPath" class="tool-exec-header-connector" :size="14" />
-        <span v-if="targetPath" class="tool-exec-target-path">{{ targetPath }}</span>
+        <span v-if="targetPath" class="tool-exec-target-path">
+          {{ targetPath }}
+          <slot name="target-path-after" />
+        </span>
       </div>
     </div>
     <div v-if="$slots.actions" class="tool-exec-actions">
@@ -91,5 +97,12 @@ withDefaults(defineProps<Props>(), {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+}
+
+/* hover 父标签时显式 slot 内 .copy-hint 元素 */
+.tool-exec-action-label:hover :slotted(.copy-hint),
+.tool-exec-target-path:hover :slotted(.copy-hint) {
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 </style>

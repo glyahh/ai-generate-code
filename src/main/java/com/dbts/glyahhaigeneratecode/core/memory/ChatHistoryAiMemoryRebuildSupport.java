@@ -2,7 +2,7 @@ package com.dbts.glyahhaigeneratecode.core.memory;
 
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.constant.ChatHistoryConstant;
-import com.dbts.glyahhaigeneratecode.core.util.ChatHistorySchemaMigrationSupport;
+import com.dbts.glyahhaigeneratecode.core.support.ChatHistorySchemaMigrationSupport;
 import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
