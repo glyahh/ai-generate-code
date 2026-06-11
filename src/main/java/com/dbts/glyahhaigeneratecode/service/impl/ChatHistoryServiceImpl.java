@@ -31,6 +31,7 @@ import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ConversationMemoryStateService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
+import com.mybatisflex.core.query.RawQueryCondition;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -344,6 +345,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         safeRequest.setPageSize(pageSize);
         safeRequest.setMessageType(queryRequest.getMessageType());
         safeRequest.setAppId(queryRequest.getAppId());
+        safeRequest.setAppName(queryRequest.getAppName());
         safeRequest.setUserId(loginUser.getId());
 
         // 3. 分页查库并批量补全 appName
@@ -453,6 +455,12 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
         if (appId != null) {
             queryWrapper.eq(ChatHistory::getAppId, appId);
+        }
+        if (StrUtil.isNotBlank(queryRequest.getAppName())) {
+            queryWrapper.and(new RawQueryCondition(
+                "EXISTS (SELECT 1 FROM app WHERE app.id = chat_history.app_id AND app.app_name LIKE CONCAT('%', ?, '%'))",
+                new Object[]{queryRequest.getAppName()}
+            ));
         }
         if (userId != null) {
             queryWrapper.eq(ChatHistory::getUserId, userId);
