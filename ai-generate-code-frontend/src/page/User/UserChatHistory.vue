@@ -123,8 +123,30 @@ const columns: ColumnsType<UserChatHistoryItemVO> = [
     title: '消息内容',
     dataIndex: 'message',
     key: 'message',
-    ellipsis: true,
-    customRender: ({ text }: { text?: string }) => truncateMessage(text),
+    width: 350,
+    customRender: ({ text, record }: { text?: string; record: UserChatHistoryItemVO }) => {
+      const type = (record.messageType || '').toLowerCase()
+
+      // 错误消息
+      if (type === 'error') {
+        return h('span', { style: 'color: #999;' }, '消息出错啦')
+      }
+
+      // AI 消息：摘要 + NL 两行
+      if (type === 'ai') {
+        const summary = record.summaryText || 'nothing'
+        const nl = record.naturalLanguage
+          ? (record.naturalLanguage.length > 80 ? record.naturalLanguage.slice(0, 80) + '…' : record.naturalLanguage)
+          : 'nothing'
+        return h('div', { style: 'line-height: 1.8;' }, [
+          h('div', { style: 'font-size: 12px; color: #999; margin-bottom: 2px;' }, summary),
+          h('div', { style: 'color: #666; font-size: 13px;' }, nl),
+        ])
+      }
+
+      // 用户消息：80 字截断
+      return h('span', truncateMessage(text, 80))
+    },
   },
   {
     title: '应用名称',
@@ -203,7 +225,7 @@ onMounted(async () => {
           :data-source="tableData"
           :loading="loading"
           :pagination="pagination"
-          :scroll="{ x: 1100 }"
+          :scroll="{ x: 1300 }"
           row-key="createTime"
           @change="handleTableChange"
           bordered
