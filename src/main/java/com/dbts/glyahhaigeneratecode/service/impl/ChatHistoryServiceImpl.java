@@ -458,7 +458,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         }
         if (StrUtil.isNotBlank(queryRequest.getAppName())) {
             queryWrapper.and(new RawQueryCondition(
-                "EXISTS (SELECT 1 FROM app WHERE app.id = chat_history.app_id AND app.app_name LIKE CONCAT('%', ?, '%'))",
+                "EXISTS (SELECT 1 FROM app WHERE app.id = chat_history.appId AND app.appName LIKE CONCAT('%', ?, '%'))",
                 new Object[]{queryRequest.getAppName()}
             ));
         }

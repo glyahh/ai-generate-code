@@ -254,7 +254,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 queryWrapper.isNotNull(App::getDeployKey);
                 queryWrapper.ne(App::getDeployKey, "");
             } else {
-                queryWrapper.and("(deploy_key IS NULL OR deploy_key = '')");
+                queryWrapper.and("(deployKey IS NULL OR deployKey = '')");
             }
         }
         // 代码类型筛选
