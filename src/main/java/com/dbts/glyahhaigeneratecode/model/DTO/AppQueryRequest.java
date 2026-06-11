@@ -59,6 +59,16 @@ public class AppQueryRequest extends PageRequest implements Serializable {
      */
     private Integer isDelete;
 
+    /**
+     * 是否工作流生成：1-是（isBeta=1），0-否（isBeta=0），null-全部
+     */
+    private Integer isWorkflow;
+
+    /**
+     * 是否已部署：1-已部署（deployKey 非空），0-未部署（deployKey 为空），null-全部
+     */
+    private Integer isDeployed;
+
     private static final long serialVersionUID = 1L;
 }
 
