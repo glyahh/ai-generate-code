@@ -180,6 +180,8 @@ export type AppQueryRequest = {
   priority?: number;
   userId?: number;
   isDelete?: number;
+  isWorkflow?: number;
+  isDeployed?: number;
 };
 
 export type AppUndeployUsingPostResponses = {
@@ -418,6 +420,7 @@ export type ChatHistoryQueryRequest = {
   message?: string;
   messageType?: string;
   appId?: number;
+  appName?: string;
   userId?: number;
   lastCreateTime?: string;
 };
