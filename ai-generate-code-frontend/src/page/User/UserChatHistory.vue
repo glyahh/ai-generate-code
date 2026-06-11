@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Button, Form, Input, InputNumber, message, Space, Table, Tag } from 'ant-design-vue'
+import { Button, Form, Input, message, Space, Table, Tag } from 'ant-design-vue'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import type { UserChatHistoryItemVO } from '@/api'
 import { chatHistoryMyUsingPost } from '@/api'
@@ -26,9 +26,11 @@ const pagination = ref({
 const searchForm = ref<{
   messageType?: string
   appId?: number
+  appName?: string
 }>({
   messageType: '',
   appId: undefined,
+  appName: '',
 })
 
 function formatDateTime(value?: string) {
@@ -64,6 +66,7 @@ async function loadData() {
         pageSize: pagination.value.pageSize,
         messageType: searchForm.value.messageType || undefined,
         appId: searchForm.value.appId,
+        appName: searchForm.value.appName || undefined,
       },
     })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
@@ -88,6 +91,14 @@ function handleTableChange(pag: any) {
 
 function handleSearch() {
   pagination.value.current = 1
+  const raw = searchForm.value.appName?.trim() || ''
+  if (/^\d+$/.test(raw)) {
+    searchForm.value.appId = parseInt(raw, 10)
+    searchForm.value.appName = undefined
+  } else {
+    searchForm.value.appId = undefined
+    searchForm.value.appName = raw || undefined
+  }
   void loadData()
 }
 
@@ -95,6 +106,7 @@ function resetSearch() {
   searchForm.value = {
     messageType: '',
     appId: undefined,
+    appName: '',
   }
   pagination.value.current = 1
   void loadData()
@@ -207,8 +219,8 @@ onMounted(async () => {
           <Form.Item label="消息类型">
             <Input v-model:value="searchForm.messageType" placeholder="user / assistant" allow-clear style="width: 140px" />
           </Form.Item>
-          <Form.Item label="应用 ID">
-            <InputNumber v-model:value="searchForm.appId" :min="1" style="width: 140px" />
+          <Form.Item label="应用 ID/名称">
+            <Input v-model:value="searchForm.appName" placeholder="数字 ID 或名称关键字" allow-clear style="width: 160px" />
           </Form.Item>
           <Form.Item>
             <Space>
