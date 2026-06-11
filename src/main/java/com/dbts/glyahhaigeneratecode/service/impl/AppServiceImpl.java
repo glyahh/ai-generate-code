@@ -244,6 +244,23 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (StrUtil.isNotBlank(appQueryRequest.getAppName())) {
             queryWrapper.like(App::getAppName, appQueryRequest.getAppName());
         }
+        // 工作流/普通生成筛选：isWorkflow=1 对应 isBeta=1，isWorkflow=0 对应 isBeta=0
+        if (appQueryRequest.getIsWorkflow() != null) {
+            queryWrapper.eq(App::getIsBeta, appQueryRequest.getIsWorkflow());
+        }
+        // 部署状态筛选：isDeployed=1 要求 deployKey 非空，isDeployed=0 要求 deployKey 为空
+        if (appQueryRequest.getIsDeployed() != null) {
+            if (appQueryRequest.getIsDeployed() == 1) {
+                queryWrapper.isNotNull(App::getDeployKey);
+                queryWrapper.ne(App::getDeployKey, "");
+            } else {
+                queryWrapper.isNull(App::getDeployKey);
+            }
+        }
+        // 代码类型筛选
+        if (StrUtil.isNotBlank(appQueryRequest.getCodeGenType())) {
+            queryWrapper.eq(App::getCodeGenType, appQueryRequest.getCodeGenType());
+        }
         if (StrUtil.isNotBlank(appQueryRequest.getSortField()) && StrUtil.isNotBlank(appQueryRequest.getSortOrder())) {
             queryWrapper.orderBy(appQueryRequest.getSortField(), "ascend".equals(appQueryRequest.getSortOrder()));
         } else {
