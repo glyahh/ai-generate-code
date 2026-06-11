@@ -23,6 +23,7 @@ import static com.dbts.glyahhaigeneratecode.constant.ChatHistoryMemoryCompaction
 import com.dbts.glyahhaigeneratecode.core.memory.ChatAiMemoryRedisSupport;
 import com.dbts.glyahhaigeneratecode.core.memory.ChatHistoryAiMemoryRebuildSupport;
 import com.dbts.glyahhaigeneratecode.core.memory.ChatHistoryEchoRedisSupport;
+import com.dbts.glyahhaigeneratecode.core.summary.AiMessageSummaryService;
 import com.dbts.glyahhaigeneratecode.core.support.ChatHistorySchemaMigrationSupport;
 import com.dbts.glyahhaigeneratecode.service.MemoryShrinkService;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
@@ -98,6 +99,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
     @Resource
     private ChatAiMemoryRedisSupport chatAiMemoryRedisSupport;
+
+    @Resource
+    private AiMessageSummaryService aiMessageSummaryService;
 
     /**
      * 添加一条对话消息并返回是否写入成功（默认审查占位 SKIP/NONE）
@@ -372,6 +376,14 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         List<UserChatHistoryItemVO> voList = records.stream().map(item -> {
             UserChatHistoryItemVO vo = new UserChatHistoryItemVO();
             vo.setMessage(item.getMessage());
+            // AI 消息：填充摘要字段替代原始内容
+            if ("ai".equals(item.getMessageType()) && StrUtil.isNotBlank(item.getMessage())) {
+                AiMessageSummaryService.SummaryCacheEntry entry = aiMessageSummaryService.getOrCompute(
+                        item.getAppId(), item.getId(), item.getMessage());
+                vo.setSummaryText(entry.summaryText());
+                vo.setNaturalLanguage(entry.naturalLanguage());
+                vo.setMessage(null);
+            }
             vo.setMessageType(item.getMessageType());
             vo.setAppId(item.getAppId());
             vo.setCreateTime(item.getCreateTime());
