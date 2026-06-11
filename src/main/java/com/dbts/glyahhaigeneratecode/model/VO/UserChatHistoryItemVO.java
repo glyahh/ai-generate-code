@@ -36,6 +36,16 @@ public class UserChatHistoryItemVO implements Serializable {
      */
     private LocalDateTime createTime;
 
+    /**
+     * AI 消息摘要行
+     */
+    private String summaryText;
+
+    /**
+     * AI 消息自然语言正文
+     */
+    private String naturalLanguage;
+
     private static final long serialVersionUID = 1L;
 }
 
