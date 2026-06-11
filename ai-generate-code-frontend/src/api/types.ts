@@ -591,6 +591,10 @@ export type UserChatHistoryItemVO = {
   appId?: number;
   appName?: string;
   createTime?: string;
+  /** AI 消息摘要行 */
+  summaryText?: string;
+  /** AI 消息自然语言正文 */
+  naturalLanguage?: string;
 };
 
 export type UserGetInfoIdUsingGetParams = {
