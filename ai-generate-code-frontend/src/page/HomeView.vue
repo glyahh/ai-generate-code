@@ -5,6 +5,7 @@ import {
   message,
   Modal as AModal,
   Input as AInput,
+  Select as ASelect,
   Button as AButton,
   Card as ACard,
   Pagination as APagination,
@@ -192,6 +193,9 @@ type AppListState = {
   pageSize: number
   loading: boolean
   keyword: string
+  isWorkflow?: number
+  isDeployed?: number
+  codeType?: string
 }
 
 const myApps = ref<AppListState>({
@@ -201,6 +205,9 @@ const myApps = ref<AppListState>({
   pageSize: 20,
   loading: false,
   keyword: '',
+  isWorkflow: undefined,
+  isDeployed: undefined,
+  codeType: undefined,
 })
 
 const goodApps = ref<AppListState>({
@@ -354,6 +361,9 @@ async function loadMyApps() {
         pageNum: myApps.value.pageNum,
         pageSize: myApps.value.pageSize,
         ...keywordToQuery(myApps.value.keyword),
+        isWorkflow: myApps.value.isWorkflow,
+        isDeployed: myApps.value.isDeployed,
+        codeGenType: myApps.value.codeType,
       },
     })
     if (isSuccess(res.data.code) && res.data.data) {
@@ -752,10 +762,45 @@ onMounted(() => {
       <div v-else>
         <div class="list-toolbar">
           <div class="list-toolbar-search">
+            <ASelect
+              v-model:value="myApps.isWorkflow"
+              placeholder="生成类型"
+              allow-clear
+              style="width: 120px"
+              @change="loadMyApps"
+            >
+              <ASelect.Option :value="undefined">全部</ASelect.Option>
+              <ASelect.Option :value="0">普通生成</ASelect.Option>
+              <ASelect.Option :value="1">工作流生成</ASelect.Option>
+            </ASelect>
+            <ASelect
+              v-model:value="myApps.isDeployed"
+              placeholder="部署状态"
+              allow-clear
+              style="width: 120px"
+              @change="loadMyApps"
+            >
+              <ASelect.Option :value="undefined">全部</ASelect.Option>
+              <ASelect.Option :value="0">未部署</ASelect.Option>
+              <ASelect.Option :value="1">已部署</ASelect.Option>
+            </ASelect>
+            <ASelect
+              v-model:value="myApps.codeType"
+              placeholder="代码类型"
+              allow-clear
+              style="width: 120px"
+              @change="loadMyApps"
+            >
+              <ASelect.Option :value="undefined">全部</ASelect.Option>
+              <ASelect.Option value="html">HTML</ASelect.Option>
+              <ASelect.Option value="multi_file">多文件</ASelect.Option>
+              <ASelect.Option value="vue">Vue</ASelect.Option>
+            </ASelect>
             <AInput
               v-model:value="myApps.keyword"
               placeholder="按名称或 App ID 搜索我的应用"
               allow-clear
+              style="width: 180px"
               @press-enter="loadMyApps"
             />
             <AButton type="primary" ghost @click="loadMyApps">
