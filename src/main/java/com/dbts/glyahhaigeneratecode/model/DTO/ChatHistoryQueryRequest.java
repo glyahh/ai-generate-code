@@ -35,6 +35,11 @@ public class ChatHistoryQueryRequest extends PageRequest implements Serializable
     private Long appId;
 
     /**
+     * 应用名称关键字（模糊搜索，通过 app 表关联）
+     */
+    private String appName;
+
+    /**
      * 创建用户id
      */
     private Long userId;
