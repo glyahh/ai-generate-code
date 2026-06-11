@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { userLogoutUsingPost } from '@/api/userController'
-import { RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { RightOutlined, SettingOutlined, SkinOutlined } from '@ant-design/icons-vue'
 
 const userLoginStore = UserLoginStore()
 userLoginStore.fetchLoginUser()
@@ -79,6 +79,12 @@ function handleSettings() {
   showUserMenu.value = false
 }
 
+// 外观设置
+function handleAppearance() {
+  router.push('/user/appearance')
+  showUserMenu.value = false
+}
+
 // 查看历史
 function handleHistory() {
   router.push('/user/chats')
@@ -135,6 +141,10 @@ async function handleLogout() {
               <div class="menu-item settings-item" @click="handleSettings">
                 <SettingOutlined class="menu-icon" />
                 <span class="menu-text">个人设置</span>
+              </div>
+              <div class="menu-item settings-item" @click="handleAppearance">
+                <SkinOutlined class="menu-icon" />
+                <span class="menu-text">外观设置</span>
               </div>
               <div class="menu-item logout-item" @click="handleLogout" :class="{ 'loading': isLoggingOut }">
                 <RightOutlined class="menu-icon" />

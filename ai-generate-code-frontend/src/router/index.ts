@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../page/HomeView.vue'
 import UserLogin from '../page/User/UserLogin.vue'
 import UserSettings from '../page/User/UserSettings.vue'
+import UserAppearanceSettings from '../page/User/UserAppearanceSettings.vue'
 import UserChatHistory from '../page/User/UserChatHistory.vue'
 import AdminHome from '@/page/Admin/AdminHome.vue'
 import AdminAppManage from '@/page/Admin/AdminAppManage.vue'
@@ -38,6 +39,12 @@ const router = createRouter({
       path: '/user/settings',
       name: 'user-settings',
       component: UserSettings,
+    },
+    // 用户外观设置界面
+    {
+      path: '/user/appearance',
+      name: 'user-appearance',
+      component: UserAppearanceSettings,
     },
     // 用户查看历史对话
     {
