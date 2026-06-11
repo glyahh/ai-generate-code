@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Button, Form, Input, message, Space, Table, Tag } from 'ant-design-vue'
+import { Button, Form, Input, message, Modal, Space, Table, Tag } from 'ant-design-vue'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import type { UserChatHistoryItemVO } from '@/api'
-import { chatHistoryMyUsingPost } from '@/api'
+import { chatHistoryDeleteByAppIdUsingPost, chatHistoryMyUsingPost } from '@/api'
 import { UserLoginStore } from '@/stores/UserLogin'
 
 const router = useRouter()
@@ -13,6 +13,7 @@ const userLoginStore = UserLoginStore()
 const isLogin = computed(() => !!userLoginStore.userLogin?.id)
 
 const loading = ref(false)
+const deletingAppId = ref<number | null>(null)
 const tableData = ref<UserChatHistoryItemVO[]>([])
 const pagination = ref({
   current: 1,
@@ -118,6 +119,35 @@ function goAppChat(record: UserChatHistoryItemVO) {
   }
 }
 
+function handleDelete(record: UserChatHistoryItemVO) {
+  const appId = record.appId
+  if (appId == null) return
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定删除「${record.appName || '未知应用'}」的全部对话记录？删除后不可恢复。`,
+    okText: '确认删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      deletingAppId.value = appId
+      try {
+        const res = await chatHistoryDeleteByAppIdUsingPost({ appId })
+        if (res.data.code === 0 || res.data.code === 20000) {
+          message.success('对话记录已删除')
+          void loadData()
+        } else {
+          message.error(res.data.message || '删除失败')
+        }
+      } catch (e) {
+        console.error(e)
+        message.error('删除失败，请稍后重试')
+      } finally {
+        deletingAppId.value = null
+      }
+    },
+  })
+}
+
 const columns: ColumnsType<UserChatHistoryItemVO> = [
   {
     title: '消息类型',
@@ -130,6 +160,20 @@ const columns: ColumnsType<UserChatHistoryItemVO> = [
       const color = val.toLowerCase() === 'user' ? 'blue' : 'green'
       return h(Tag, { color }, () => val)
     },
+  },
+  {
+    title: '应用 ID',
+    dataIndex: 'appId',
+    key: 'appId',
+    width: 110,
+    align: 'center',
+  },
+  {
+    title: '应用名称',
+    dataIndex: 'appName',
+    key: 'appName',
+    width: 180,
+    ellipsis: true,
   },
   {
     title: '消息内容',
@@ -161,20 +205,6 @@ const columns: ColumnsType<UserChatHistoryItemVO> = [
     },
   },
   {
-    title: '应用名称',
-    dataIndex: 'appName',
-    key: 'appName',
-    width: 180,
-    ellipsis: true,
-  },
-  {
-    title: '应用 ID',
-    dataIndex: 'appId',
-    key: 'appId',
-    width: 110,
-    align: 'center',
-  },
-  {
     title: '创建时间',
     dataIndex: 'createTime',
     key: 'createTime',
@@ -182,21 +212,43 @@ const columns: ColumnsType<UserChatHistoryItemVO> = [
     customRender: ({ text }: { text?: string }) => formatDateTime(text),
   },
   {
+    title: '上次修改时间',
+    dataIndex: 'updateTime',
+    key: 'updateTime',
+    width: 170,
+    customRender: ({ text }: { text?: string }) => formatDateTime(text),
+  },
+  {
     title: '操作',
     key: 'action',
     fixed: 'right',
-    width: 110,
+    width: 210,
     align: 'center',
-    customRender: ({ record }: { record: UserChatHistoryItemVO }) =>
-      h(
-        Button,
-        {
-          size: 'small',
-          type: 'primary',
-          onClick: () => goAppChat(record),
-        },
-        () => '查看对话',
-      ),
+    customRender: ({ record }: { record: UserChatHistoryItemVO }) => {
+      const isDeleting = deletingAppId.value === record.appId
+      return h('div', { style: 'display: flex; gap: 8px; justify-content: center;' }, [
+        h(
+          Button,
+          {
+            size: 'small',
+            type: 'primary',
+            onClick: () => goAppChat(record),
+          },
+          () => '查看对话',
+        ),
+        h(
+          Button,
+          {
+            size: 'small',
+            danger: true,
+            loading: isDeleting,
+            disabled: isDeleting,
+            onClick: () => handleDelete(record),
+          },
+          () => '删除对话',
+        ),
+      ])
+    },
   },
 ]
 
@@ -237,10 +289,9 @@ onMounted(async () => {
           :data-source="tableData"
           :loading="loading"
           :pagination="pagination"
-          :scroll="{ x: 1300 }"
-          row-key="createTime"
+          :scroll="{ x: 1400 }"
+          row-key="id"
           @change="handleTableChange"
-          bordered
         />
       </div>
     </div>
@@ -276,24 +327,27 @@ onMounted(async () => {
   z-index: 1;
   width: 100%;
   max-width: 1600px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 20px;
-  padding: 32px 32px 40px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 28px 32px 36px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  transition: box-shadow 0.2s ease;
 }
 
 .user-chat-header {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .user-chat-title {
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 700;
-  margin: 0 0 8px;
+  color: #0F172A;
+  margin: 0;
+  letter-spacing: -0.3px;
 }
 
 .user-chat-subtitle {
@@ -302,11 +356,69 @@ onMounted(async () => {
 }
 
 .search-bar {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+.search-bar :deep(.ant-form-item) {
+  margin-bottom: 0;
+}
+
+.search-bar :deep(.ant-input) {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.search-bar :deep(.ant-input:focus) {
+  border-color: #4096ff;
+  box-shadow: 0 0 0 2px rgba(64, 150, 255, 0.1);
 }
 
 .table-wrapper {
   overflow: hidden;
+}
+
+.table-wrapper :deep(.ant-table-wrapper) {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.table-wrapper :deep(.ant-table) {
+  border-radius: 12px;
+  background: transparent;
+}
+
+.table-wrapper :deep(.ant-table-thead > tr > th) {
+  background: rgba(250, 250, 252, 0.85);
+  font-weight: 600;
+  font-size: 13px;
+  color: #475569;
+  border-bottom: 1px solid #e9edf4;
+  padding: 12px 16px;
+}
+
+.table-wrapper :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid #f0f2f5;
+  padding: 14px 16px;
+  transition: background 0.15s ease;
+}
+
+.table-wrapper :deep(.ant-table-tbody > tr:hover > td) {
+  background: rgba(240, 244, 248, 0.6);
+}
+
+.table-wrapper :deep(.ant-table-tbody > tr:last-child > td) {
+  border-bottom: none;
+}
+
+.table-wrapper :deep(.ant-table-pagination) {
+  margin: 16px 0 4px !important;
+}
+
+.table-wrapper :deep(.ant-btn-primary) {
+  box-shadow: none;
+}
+
+.table-wrapper :deep(.ant-btn-dangerous) {
+  font-size: 13px;
 }
 
 @media (max-width: 1200px) {
@@ -328,6 +440,10 @@ onMounted(async () => {
   .user-chat-wrapper {
     padding: 20px 12px 28px;
   }
+
+  .search-bar :deep(.ant-form) {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 }
 </style>
-

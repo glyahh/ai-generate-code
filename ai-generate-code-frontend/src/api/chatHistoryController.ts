@@ -121,3 +121,17 @@ export function chatHistorySaveUsingPost({
     ...(options || {}),
   });
 }
+
+/** 用户删除某应用全部对话历史 POST /chatHistory/deleteByAppId/${param0} */
+export function chatHistoryDeleteByAppIdUsingPost({
+  appId,
+  options,
+}: {
+  appId: number;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseBoolean>(`/chatHistory/deleteByAppId/${appId}`, {
+    method: 'POST',
+    ...(options || {}),
+  });
+}

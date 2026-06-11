@@ -589,11 +589,14 @@ export type UserAppApplyRequest = {
 };
 
 export type UserChatHistoryItemVO = {
+  id?: number;
   message?: string;
   messageType?: string;
   appId?: number;
   appName?: string;
   createTime?: string;
+  /** 上次修改时间 */
+  updateTime?: string;
   /** AI 消息摘要行 */
   summaryText?: string;
   /** AI 消息自然语言正文 */

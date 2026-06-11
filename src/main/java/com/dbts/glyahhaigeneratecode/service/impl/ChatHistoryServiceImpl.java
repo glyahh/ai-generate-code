@@ -377,6 +377,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         // 7. 将数据库实体转换为前端展示VO，补齐应用名称并设置默认占位值。
         List<UserChatHistoryItemVO> voList = records.stream().map(item -> {
             UserChatHistoryItemVO vo = new UserChatHistoryItemVO();
+            vo.setId(item.getId());
             vo.setMessage(item.getMessage());
             // AI 消息：填充摘要字段替代原始内容
             if ("ai".equals(item.getMessageType()) && StrUtil.isNotBlank(item.getMessage())) {
@@ -389,6 +390,7 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             vo.setMessageType(item.getMessageType());
             vo.setAppId(item.getAppId());
             vo.setCreateTime(item.getCreateTime());
+            vo.setUpdateTime(item.getUpdateTime());
             vo.setAppName(appNameMap.getOrDefault(item.getAppId(), "-"));
             return vo;
         }).toList();

@@ -170,4 +170,24 @@ public class ChatHistoryController {
         Page<UserChatHistoryItemVO> page = chatHistoryService.listMyChatHistoryByPage(chatHistoryQueryRequest, loginUser);
         return ResultUtils.success(page);
     }
+
+    /**
+     * 【用户】删除某应用的全部对话历史（仅应用创建者或管理员可操作）
+     */
+    @PostMapping("/deleteByAppId/{appId}")
+    public BaseResponse<Boolean> deleteChatHistoryByAppId(
+            @PathVariable Long appId,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "appId 不能为空");
+        User loginUser = userService.getUserInSession(request);
+        App app = appService.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(
+                !loginUser.getId().equals(app.getUserId())
+                        && !UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole()),
+                ErrorCode.NO_AUTH_ERROR, "仅应用创建者和管理员可删除对话历史"
+        );
+        boolean result = chatHistoryService.removeByAppId(appId);
+        return ResultUtils.success(result);
+    }
 }

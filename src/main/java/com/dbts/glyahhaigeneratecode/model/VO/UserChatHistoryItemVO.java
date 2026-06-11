@@ -12,6 +12,11 @@ import java.time.LocalDateTime;
 public class UserChatHistoryItemVO implements Serializable {
 
     /**
+     * 记录 id（用于表格 row-key）
+     */
+    private Long id;
+
+    /**
      * 消息内容
      */
     private String message;
@@ -35,6 +40,11 @@ public class UserChatHistoryItemVO implements Serializable {
      * 创建时间
      */
     private LocalDateTime createTime;
+
+    /**
+     * 上次修改时间
+     */
+    private LocalDateTime updateTime;
 
     /**
      * AI 消息摘要行
