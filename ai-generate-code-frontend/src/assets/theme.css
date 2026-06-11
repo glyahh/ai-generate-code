@@ -1,0 +1,131 @@
+/* ============================================================
+   theme.css — 全局主题 CSS 变量
+   control by: stores/appearance.ts → applyToDocument()
+   ============================================================ */
+
+/* ---------- 浅色模式（默认） ---------- */
+:root {
+  /* 主色 */
+  --color-primary: #1677ff;
+  --color-primary-light: #e6f4ff;
+  --color-primary-bg: #f0f5ff;
+
+  /* 背景色 */
+  --bg-base: #ffffff;
+  --bg-soft: #f5f7fa;
+  --bg-mute: #f0f0f0;
+  --bg-card: #ffffff;
+  --bg-section-header: #f0f5ff;
+
+  /* 文字色 */
+  --text-base: #1f1f1f;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-on-dark: #ffffff;
+
+  /* 边框与阴影 */
+  --border-color: #e8e8e8;
+  --border-color-hover: #d9d9d9;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-popup: 0 4px 12px rgba(0, 0, 0, 0.12);
+
+  /* 字号 */
+  --font-size-base: 15px;
+  --code-font-size: 13px;
+  --code-font-family: Consolas, Monaco, "Courier New", monospace;
+  --font-family-base: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* 动画 */
+  --transition-duration: 0.2s;
+  --transition-timing: ease;
+
+  /* 代码高亮色 */
+  --code-keyword: #569cd6;
+  --code-string: #e6b450;
+  --code-comment: #7f8ea3;
+  --code-property: #7dcfff;
+  --code-value: #f9a8d4;
+  --code-selector: #8be9fd;
+  --code-tag: #ff7aa2;
+  --code-attr: #9ccfd8;
+  --code-number: #c4b5fd;
+  --code-operator: #f38ba8;
+  --code-function: #7ee787;
+
+  /* 代码块背景 */
+  --code-bg: #1e1e1e;
+  --code-header-bg: #2d2d2d;
+  --code-border: #3e3e3e;
+  --code-text: #d4d4d4;
+}
+
+/* ---------- 深色模式 ---------- */
+[data-theme="dark"] {
+  --color-primary-bg: #111d2c;
+
+  --bg-base: #1a1a2e;
+  --bg-soft: #16213e;
+  --bg-mute: #0f3460;
+  --bg-card: #1e1e36;
+  --bg-section-header: #1a1a2e;
+
+  --text-base: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #707070;
+
+  --border-color: #2a2a4a;
+  --border-color-hover: #3a3a5a;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-popup: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- 紧凑模式 ---------- */
+[data-compact="true"] {
+  --font-size-base: 13px;
+  --code-font-size: 12px;
+}
+
+/* ---------- 代码块高对比主题 ---------- */
+[data-code-theme="high-contrast"] {
+  --code-keyword: #ff79c6;
+  --code-string: #f1fa8c;
+  --code-comment: #6272a4;
+  --code-property: #8be9fd;
+  --code-value: #ffb86c;
+  --code-selector: #50fa7b;
+  --code-tag: #ff5555;
+  --code-attr: #f8f8f2;
+  --code-number: #bd93f9;
+  --code-operator: #ff79c6;
+  --code-function: #50fa7b;
+  --code-bg: #000000;
+  --code-text: #f8f8f2;
+}
+
+/* ---------- 代码块柔和主题 ---------- */
+[data-code-theme="soft"] {
+  --code-keyword: #5c8ec4;
+  --code-string: #c9a85e;
+  --code-comment: #8c9aa8;
+  --code-property: #6ab0c4;
+  --code-value: #d492b0;
+  --code-selector: #73c4b8;
+  --code-tag: #c46a7a;
+  --code-attr: #8cb4c4;
+  --code-number: #a894c4;
+  --code-operator: #c48494;
+  --code-function: #6cb87a;
+  --code-bg: #2a2a2a;
+  --code-text: #c8c8c8;
+}
+
+/* ---------- 减少动画 ---------- */
+* {
+  transition-duration: var(--transition-duration) !important;
+  animation-duration: var(--transition-duration) !important;
+}

@@ -26,6 +26,7 @@ import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
 import { normalizeDeployUrl } from '@/utils/deployUrl'
 import AppGenPipelineBadge from '@/components/app/AppGenPipelineBadge.vue'
 import { isAppWorkflowBetaFromApp, syncGenModeStorageForApp } from '@/utils/appGenPipeline'
+import { useAppearanceStore } from '@/stores/appearance'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -34,9 +35,14 @@ const prompt = ref('')
 const creating = ref(false)
 
 const codeTypePickerOpen = ref(false)
-const selectedCodeType = ref<string>(CodeGenTypeEnum.MULTI_FILE)
-const autoCodeTypeEnabled = ref(true)
-const workflowBetaEnabled = ref(false)
+const appearanceStore = useAppearanceStore()
+const selectedCodeType = ref<string>(
+  appearanceStore.defaultCodeType === 'auto'
+    ? CodeGenTypeEnum.MULTI_FILE
+    : appearanceStore.defaultCodeType as string,
+)
+const autoCodeTypeEnabled = ref(appearanceStore.defaultCodeType === 'auto')
+const workflowBetaEnabled = ref(appearanceStore.workflowEnabled)
 const workflowBetaTooltip = '该功能处于测试状态，可能不稳定'
 const workflowAdvantageTips = ['逻辑更严谨', '图片更贴切', '代码质量检测']
 

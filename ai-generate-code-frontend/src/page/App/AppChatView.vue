@@ -19,6 +19,7 @@ import {
   chatHistoryRoundCountAppIdUsingGet,
 } from '@/api/chatHistoryController'
 import { UserLoginStore } from '@/stores/UserLogin'
+import { useAppearanceStore } from '@/stores/appearance'
 import {
   parseMarkdownWithCode,
   findLineAlignedClosingFenceInBuffer,
@@ -81,7 +82,8 @@ const PREVIEW_BASE_URL =
 const route = useRoute()
 const router = useRouter()
 const userLoginStore = UserLoginStore()
-const genMode = ref<'legacy' | 'workflow'>('legacy')
+const appearanceStore = useAppearanceStore()
+const genMode = ref<'legacy' | 'workflow'>(appearanceStore.chatGenMode)
 
 // 保持 id 为字符串，避免雪花算法生成的 Long ID 精度丢失
 const appId = computed(() => {
@@ -468,7 +470,7 @@ const shouldShowWebsite = computed(() => {
 })
 const iframeKey = ref(0)
 const chatMessagesRef = ref<HTMLElement | null>(null)
-const shouldAutoScroll = ref(true)
+const shouldAutoScroll = ref(appearanceStore.smoothScroll)
 const showScrollToBottom = computed(() => !shouldAutoScroll.value && displayMessages.value.length > 0)
 
 const previewIframeRef = ref<HTMLIFrameElement | null>(null)
@@ -3251,6 +3253,7 @@ onBeforeUnmount(() => {
                         <CollapsibleCodeBlock
                           :code="segment.content"
                           :language="segment.language"
+                          :default-collapsed="appearanceStore.toolCardCollapsed"
                           :file-path="segment.filePath"
                           :is-streaming="isStreamActiveForMessage(m) && !segment.done"
                         />
@@ -3261,6 +3264,7 @@ onBeforeUnmount(() => {
                         <CollapsibleCodeBlock
                           :before-code="segment.beforeContent"
                           :after-code="segment.afterContent"
+                          :default-collapsed="appearanceStore.toolCardCollapsed"
                           :language="segment.language"
                           :file-path="segment.filePath"
                           :is-streaming="isStreamActiveForMessage(m)"

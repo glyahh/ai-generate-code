@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
-import { ConfigProvider } from 'ant-design-vue'
+// ConfigProvider 由 Ant Design Vue 全量注册（main.ts app.use(Antd)），模板中直接使用 <a-config-provider>
 import BasicLayout from '@/layouts/BasicLayout.vue'
 import { UserLoginStore } from './stores/UserLogin'
 import { useAppearanceStore, resolveThemeConfig } from './stores/appearance'

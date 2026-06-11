@@ -9,10 +9,6 @@ const store = useAppearanceStore()
 function goBack() {
   router.back()
 }
-
-function handleReset(section: 'colors' | 'fonts' | 'density' | 'preferences') {
-  store.resetSection(section)
-}
 </script>
 
 <template>

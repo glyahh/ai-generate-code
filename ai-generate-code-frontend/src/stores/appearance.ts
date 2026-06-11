@@ -163,6 +163,7 @@ export function applyToDocument(settings: AppearanceSettings): void {
 }
 
 /** 根据当前设置生成 Ant Design ConfigProvider theme 对象 */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function resolveThemeConfig(settings: { colorMode: string; primaryColor: string }): { token: Record<string, any>; algorithm: any } {
   const isDark = settings.colorMode === 'dark' ||
     (settings.colorMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -188,7 +189,8 @@ export const useAppearanceStore = defineStore('appearance', () => {
     const keys = SECTION_KEYS[section]
     if (!keys) return
     keys.forEach((k) => {
-      ;(state as any)[k] = DEFAULTS[k]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (state as any)[k] = DEFAULTS[k]
     })
     persistAndApply()
   }

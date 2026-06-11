@@ -223,8 +223,8 @@ function scrollToBottom() {
   margin: 12px 0;
   border-radius: 8px;
   overflow: hidden;
-  background: #1e1e1e;
-  border: 1px solid #3e3e3e;
+  background: var(--code-bg, #1e1e1e);
+  border: 1px solid var(--code-border, #3e3e3e);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   width: 100%;
   max-width: 100%;
@@ -239,8 +239,8 @@ function scrollToBottom() {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: #2d2d2d;
-  border-bottom: 1px solid #3e3e3e;
+  background: var(--code-header-bg, #2d2d2d);
+  border-bottom: 1px solid var(--code-border, #3e3e3e);
 }
 
 .code-block-header-left {
@@ -287,10 +287,10 @@ function scrollToBottom() {
 .code-block {
   margin: 0;
   padding: 16px;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
+  background: var(--code-bg, #1e1e1e);
+  color: var(--code-text, #d4d4d4);
+  font-family: var(--code-font-family, Consolas, Monaco, "Courier New", monospace);
+  font-size: var(--code-font-size, 13px);
   line-height: 1.6;
   white-space: pre;
   word-wrap: normal;
@@ -365,51 +365,51 @@ function scrollToBottom() {
   background: rgba(37, 99, 235, 0.9);
 }
 
-/* 语法高亮颜色 */
+/* 语法高亮颜色 — 使用 CSS 变量支持主题切换 */
 :deep(.code-keyword) {
-  color: #569cd6;
+  color: var(--code-keyword, #569cd6);
   font-weight: 500;
 }
 
 :deep(.code-string) {
-  color: #e6b450;
+  color: var(--code-string, #e6b450);
 }
 
 :deep(.code-comment) {
-  color: #7f8ea3;
+  color: var(--code-comment, #7f8ea3);
   font-style: italic;
 }
 
 :deep(.code-property) {
-  color: #7dcfff;
+  color: var(--code-property, #7dcfff);
 }
 
 :deep(.code-value) {
-  color: #f9a8d4;
+  color: var(--code-value, #f9a8d4);
 }
 
 :deep(.code-selector) {
-  color: #8be9fd;
+  color: var(--code-selector, #8be9fd);
 }
 
 :deep(.code-tag) {
-  color: #ff7aa2;
+  color: var(--code-tag, #ff7aa2);
 }
 
 :deep(.code-attr) {
-  color: #9ccfd8;
+  color: var(--code-attr, #9ccfd8);
 }
 
 :deep(.code-number) {
-  color: #c4b5fd;
+  color: var(--code-number, #c4b5fd);
 }
 
 :deep(.code-operator) {
-  color: #f38ba8;
+  color: var(--code-operator, #f38ba8);
 }
 
 :deep(.code-function) {
-  color: #7ee787;
+  color: var(--code-function, #7ee787);
 }
 
 </style>
