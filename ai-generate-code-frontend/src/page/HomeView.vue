@@ -361,9 +361,9 @@ async function loadMyApps() {
         pageNum: myApps.value.pageNum,
         pageSize: myApps.value.pageSize,
         ...keywordToQuery(myApps.value.keyword),
-        isWorkflow: myApps.value.isWorkflow,
-        isDeployed: myApps.value.isDeployed,
-        codeGenType: myApps.value.codeType,
+        isWorkflow: myApps.value.isWorkflow ?? undefined,
+        isDeployed: myApps.value.isDeployed ?? undefined,
+        codeGenType: myApps.value.codeType ?? undefined,
       },
     })
     if (isSuccess(res.data.code) && res.data.data) {
@@ -769,7 +769,7 @@ onMounted(() => {
               style="width: 120px"
               @change="loadMyApps"
             >
-              <ASelect.Option :value="undefined">全部</ASelect.Option>
+              <ASelect.Option :value="null">全部</ASelect.Option>
               <ASelect.Option :value="0">普通生成</ASelect.Option>
               <ASelect.Option :value="1">工作流生成</ASelect.Option>
             </ASelect>
@@ -780,7 +780,7 @@ onMounted(() => {
               style="width: 120px"
               @change="loadMyApps"
             >
-              <ASelect.Option :value="undefined">全部</ASelect.Option>
+              <ASelect.Option :value="null">全部</ASelect.Option>
               <ASelect.Option :value="0">未部署</ASelect.Option>
               <ASelect.Option :value="1">已部署</ASelect.Option>
             </ASelect>
@@ -791,7 +791,7 @@ onMounted(() => {
               style="width: 120px"
               @change="loadMyApps"
             >
-              <ASelect.Option :value="undefined">全部</ASelect.Option>
+              <ASelect.Option :value="null">全部</ASelect.Option>
               <ASelect.Option value="html">HTML</ASelect.Option>
               <ASelect.Option value="multi_file">多文件</ASelect.Option>
               <ASelect.Option value="vue">Vue</ASelect.Option>
