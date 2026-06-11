@@ -53,9 +53,10 @@ function goBack() {
         <div class="row-control row-control--color">
           <a-color-picker
             :value="store.primaryColor"
+            format="hex"
             :preset-colors="['#1677ff','#52c41a','#fa8c16','#eb2f96','#722ed1','#13c2c2','#f5222d','#faad14']"
             :show-text="false"
-            @update:value="(v: string) => store.primaryColor = v"
+            @update:value="(v: any) => store.primaryColor = typeof v === 'string' ? v : '#1677ff'"
           />
           <a-button size="small" @click="store.primaryColor = store.DEFAULTS.primaryColor">重置</a-button>
         </div>

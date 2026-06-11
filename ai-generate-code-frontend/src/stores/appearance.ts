@@ -1,5 +1,5 @@
+import { computed, reactive, ref, toRefs, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { reactive, toRefs, watch } from 'vue'
 import { theme } from 'ant-design-vue'
 
 /** localStorage key */
@@ -102,43 +102,19 @@ function saveToStorage(state: AppearanceSettings): void {
 }
 
 /**
- * 将设置应用到 DOM
+ * 将设置应用到 DOM（仅纯 DOM 操作，不持有 store 引用）
  * - data-theme / data-compact / data-code-theme 属性
  * - CSS 自定义属性（字号、字体族、强调色）
- * - 跟随系统时注册 matchMedia 监听
  */
-let mediaQueryList: MediaQueryList | null = null
-let mediaChangeHandler: (() => void) | null = null
-
 export function applyToDocument(settings: AppearanceSettings): void {
   const root = document.documentElement
 
-  // 1. 主题模式
+  // 1. 主题模式（不再在这里注册 matchMedia，由 Store 的 init 管理）
   if (settings.colorMode === 'system') {
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
     root.dataset.theme = prefersDark ? 'dark' : 'light'
-    if (!mediaQueryList) {
-      mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)')
-      mediaChangeHandler = () => {
-        const raw = localStorage.getItem(STORAGE_KEY)
-        if (raw) {
-          try {
-            const saved = JSON.parse(raw)
-            if (saved.colorMode === 'system') {
-              root.dataset.theme = mediaQueryList!.matches ? 'dark' : 'light'
-            }
-          } catch { /* ignore */ }
-        }
-      }
-      mediaQueryList.addEventListener('change', mediaChangeHandler)
-    }
   } else {
     root.dataset.theme = settings.colorMode
-    if (mediaQueryList && mediaChangeHandler) {
-      mediaQueryList.removeEventListener('change', mediaChangeHandler)
-      mediaQueryList = null
-      mediaChangeHandler = null
-    }
   }
 
   // 2. 紧凑模式
@@ -164,12 +140,10 @@ export function applyToDocument(settings: AppearanceSettings): void {
 
 /** 根据当前设置生成 Ant Design ConfigProvider theme 对象 */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function resolveThemeConfig(settings: { colorMode: string; primaryColor: string }): { token: Record<string, any>; algorithm: any } {
-  const isDark = settings.colorMode === 'dark' ||
-    (settings.colorMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+export function resolveThemeConfig(settings: { isDark: boolean; primaryColor: string }): { token: Record<string, any>; algorithm: any } {
   return {
     token: { colorPrimary: settings.primaryColor },
-    algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+    algorithm: settings.isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
   }
 }
 
@@ -177,6 +151,19 @@ export const useAppearanceStore = defineStore('appearance', () => {
   const saved = loadFromStorage()
 
   const state = reactive<AppearanceSettings>({ ...saved })
+
+  /**
+   * 响应式系统暗色标记。
+   * 当 colorMode === 'system' 时，matchMedia 变化会更新此 ref，
+   * 驱动 effectiveColorMode 的 computed 重算 → ConfigProvider 自动跟随。
+   */
+  const _systemDark = ref(window.matchMedia('(prefers-color-scheme: dark)').matches)
+
+  /** 实际生效的外观模式：非 'system' 时直接透传；'system' 时跟随系统偏好 */
+  const effectiveColorMode = computed(() => {
+    if (state.colorMode === 'system') return _systemDark.value ? 'dark' : 'light'
+    return state.colorMode
+  })
 
   /** 持久化到 localStorage 并应用到 DOM */
   function persistAndApply() {
@@ -195,21 +182,36 @@ export const useAppearanceStore = defineStore('appearance', () => {
     persistAndApply()
   }
 
-  /** 启动时加载一次 */
-  function init() {
-    persistAndApply()
+  /** matchMedia 系统主题监听器。跟随系统模式时自动更新 DOM + 响应式标记 */
+  let mql: MediaQueryList | null = null
+
+  function handleSystemThemeChange() {
+    if (!mql) return
+    _systemDark.value = mql.matches
+    // 仅当 colorMode === 'system' 时才更新 dataset，否则用户的显式选择优先
+    if (state.colorMode === 'system') {
+      document.documentElement.dataset.theme = mql.matches ? 'dark' : 'light'
+    }
   }
 
-  // 自动 watch：任何 state 变化 → 持久化 + 应用
+  /** 启动时执行一次：localStorage → DOM + 注册 matchMedia 监听 */
+  function init() {
+    persistAndApply()
+    // 注册系统主题变化监听
+    mql = window.matchMedia('(prefers-color-scheme: dark)')
+    mql.addEventListener('change', handleSystemThemeChange)
+  }
+
+  // 自动 watch：用户对 state 的任何更改 → 持久化 + 应用（不响应 _systemDark 的变化）
   watch(
     () => ({ ...state }),
     () => persistAndApply(),
-    { deep: true },
   )
 
   return {
     ...toRefs(state),
     state,
+    effectiveColorMode,
     init,
     resetSection,
     DEFAULTS,

@@ -24,12 +24,12 @@ onMounted(() => {
 })
 
 // ConfigProvider 主题配置：监听 store 变化动态计算
+// effectiveColorMode 是响应式 computed，跟随系统主题变化时自动触发重算
 const configProviderTheme = computed(() => {
-  const settings = {
-    colorMode: appearanceStore.colorMode,
+  return resolveThemeConfig({
+    isDark: appearanceStore.effectiveColorMode === 'dark',
     primaryColor: appearanceStore.primaryColor,
-  }
-  return resolveThemeConfig(settings)
+  })
 })
 
 // 路由布局

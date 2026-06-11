@@ -125,7 +125,7 @@
 }
 
 /* ---------- 减少动画 ---------- */
-* {
-  transition-duration: var(--transition-duration) !important;
-  animation-duration: var(--transition-duration) !important;
+:not([class*="ant-"]) {
+  transition-duration: var(--transition-duration);
+  animation-duration: var(--transition-duration);
 }
