@@ -83,7 +83,7 @@ const route = useRoute()
 const router = useRouter()
 const userLoginStore = UserLoginStore()
 const appearanceStore = useAppearanceStore()
-const genMode = ref<'legacy' | 'workflow'>(appearanceStore.chatGenMode)
+const genMode = ref<'legacy' | 'workflow'>('legacy')
 
 // 保持 id 为字符串，避免雪花算法生成的 Long ID 精度丢失
 const appId = computed(() => {
@@ -3017,7 +3017,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <section class="main-content">
+    <section class="main-content" :class="{ 'main-content--single': !appearanceStore.previewExpanded }">
       <div class="chat-panel">
         <div v-if="generatedFiles.length > 0" class="generated-files-bar">
           <div class="generated-files-left">
@@ -3359,7 +3359,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="preview-panel">
+      <div v-if="appearanceStore.previewExpanded" class="preview-panel">
         <div class="preview-header">
           <div class="preview-header-left">
             <div class="preview-title">
@@ -4567,6 +4567,14 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
   border-radius: 6px;
   flex: 1;
+}
+
+.main-content--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.main-content--single .preview-panel {
+  display: none;
 }
 
 @media (max-width: 992px) {

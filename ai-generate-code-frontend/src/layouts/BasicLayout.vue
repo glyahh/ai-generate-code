@@ -29,7 +29,7 @@ import GlobalFooter from '@/components/GlobalFooter.vue'
   padding: 0;
   height: 64px;
   line-height: 64px;
-  background: #fff;
+  background: var(--bg-card, #fff);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 

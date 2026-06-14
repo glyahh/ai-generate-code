@@ -46,7 +46,6 @@ export interface AppearanceSettings {
   // D. 本项目专属
   defaultCodeType: 'auto' | 'html' | 'multi_file' | 'vue_project'
   workflowEnabled: boolean
-  chatGenMode: 'legacy' | 'workflow'
   codeTheme: 'default' | 'high-contrast' | 'soft'
   toolCardCollapsed: boolean
   previewExpanded: boolean
@@ -58,7 +57,7 @@ export const SECTION_KEYS: Record<string, Array<keyof AppearanceSettings>> = {
   colors: ['colorMode', 'primaryColor'],
   fonts: ['fontSize', 'codeFontSize', 'codeFontFamily'],
   density: ['compactMode', 'reducedMotion'],
-  preferences: ['defaultCodeType', 'workflowEnabled', 'chatGenMode', 'codeTheme', 'toolCardCollapsed', 'previewExpanded', 'smoothScroll'],
+  preferences: ['defaultCodeType', 'workflowEnabled', 'codeTheme', 'toolCardCollapsed', 'previewExpanded', 'smoothScroll'],
 }
 
 /** 默认值：对齐项目现有代码的初值 */
@@ -72,7 +71,6 @@ const DEFAULTS: AppearanceSettings = {
   reducedMotion: false,
   defaultCodeType: 'auto',
   workflowEnabled: false,
-  chatGenMode: 'legacy',
   codeTheme: 'default',
   toolCardCollapsed: true,
   previewExpanded: true,
@@ -140,9 +138,16 @@ export function applyToDocument(settings: AppearanceSettings): void {
 
 /** 根据当前设置生成 Ant Design ConfigProvider theme 对象 */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function resolveThemeConfig(settings: { isDark: boolean; primaryColor: string }): { token: Record<string, any>; algorithm: any } {
+export function resolveThemeConfig(settings: {
+  isDark: boolean
+  primaryColor: string
+  fontSize: number
+}): { token: Record<string, any>; algorithm: any } {
   return {
-    token: { colorPrimary: settings.primaryColor },
+    token: {
+      colorPrimary: settings.primaryColor,
+      fontSize: settings.fontSize,
+    },
     algorithm: settings.isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
   }
 }

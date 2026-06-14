@@ -237,12 +237,12 @@ async function handleLogout() {
 }
 
 .user-area:hover .user-info {
-  background-color: rgba(0, 0, 0, 0.04);
+  background-color: var(--bg-mute, rgba(0, 0, 0, 0.04));
 }
 
 .user-name {
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--text-base, rgba(0, 0, 0, 0.85));
   font-weight: 500;
 }
 
@@ -252,7 +252,7 @@ async function handleLogout() {
   top: 100%;
   right: 0;
   min-width: 120px;
-  background: #fff;
+  background: var(--bg-card, #fff);
   border-radius: 6px;
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.15),
@@ -271,16 +271,16 @@ async function handleLogout() {
   line-height: 34px;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--text-base, rgba(0, 0, 0, 0.85));
   font-size: 14px;
 }
 
 .menu-item:hover {
-  background-color: rgba(0, 0, 0, 0.06);
+  background-color: var(--bg-mute, rgba(0, 0, 0, 0.06));
 }
 
 .menu-item.settings-item .menu-icon {
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--text-secondary, rgba(0, 0, 0, 0.65));
 }
 
 .menu-item.logout-item {

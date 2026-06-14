@@ -187,23 +187,6 @@ function goBack() {
 
       <div class="appearance-row">
         <div class="row-label">
-          <span class="row-title">聊天默认生成模式</span>
-          <span class="row-desc">新对话的生成方式</span>
-        </div>
-        <div class="row-control">
-          <a-select
-            :value="store.chatGenMode"
-            style="width: 120px"
-            @change="(v: string) => store.chatGenMode = v as 'legacy' | 'workflow'"
-          >
-            <a-select-option value="legacy">传统</a-select-option>
-            <a-select-option value="workflow">工作流</a-select-option>
-          </a-select>
-        </div>
-      </div>
-
-      <div class="appearance-row">
-        <div class="row-label">
           <span class="row-title">代码块主题</span>
           <span class="row-desc">代码语法高亮的配色方案</span>
         </div>
