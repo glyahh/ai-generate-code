@@ -121,13 +121,13 @@ function handleCancel() {
 .intro-text {
   margin-bottom: 12px;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .hint-text {
   margin-top: 8px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--text-muted, #9ca3af);
 }
 
 .placeholder-section {
@@ -143,7 +143,7 @@ function handleCancel() {
   width: 100%;
   padding: 24px 20px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg-card, rgba(255, 255, 255, 0.9));
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
   text-align: center;
 }
@@ -157,7 +157,7 @@ function handleCancel() {
 .placeholder-subtitle {
   margin: 0 0 16px;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 @media (max-width: 768px) {

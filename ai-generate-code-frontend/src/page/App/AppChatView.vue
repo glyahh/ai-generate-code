@@ -3440,7 +3440,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: 12px 20px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg-card, rgba(255, 255, 255, 0.9));
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
 }
 
@@ -3474,7 +3474,7 @@ onBeforeUnmount(() => {
 
 .app-subtitle {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 /* 应用标题右侧：纤细竖线 + 对话轮数，仅创建者/管理员可见 */
@@ -3495,7 +3495,7 @@ onBeforeUnmount(() => {
 
 .round-count-text {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
@@ -3522,7 +3522,7 @@ onBeforeUnmount(() => {
 .chat-panel,
 .preview-panel {
   position: relative;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--bg-card, rgba(255, 255, 255, 0.94));
   border-radius: 18px;
   padding: 16px;
   display: flex;
@@ -3564,7 +3564,7 @@ onBeforeUnmount(() => {
 
 .generated-files-text {
   font-size: 12px;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   opacity: 0.86;
   white-space: nowrap;
   overflow: hidden;
@@ -3580,7 +3580,7 @@ onBeforeUnmount(() => {
 
 .files-list {
   border-radius: 14px;
-  background: rgba(249, 250, 251, 1);
+  background: var(--bg-soft, rgba(249, 250, 251, 1));
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -3590,7 +3590,7 @@ onBeforeUnmount(() => {
 
 .files-list-title {
   font-size: 12px;
-  color: #334155;
+  color: var(--text-base, #334155);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -3616,7 +3616,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   padding: 10px 10px;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--bg-card, rgba(255, 255, 255, 0.85));
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
   display: flex;
   flex-direction: column;
@@ -3626,7 +3626,7 @@ onBeforeUnmount(() => {
 
 .file-item:hover {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 1);
+  background: var(--bg-card, rgba(255, 255, 255, 1));
   box-shadow:
     0 8px 18px rgba(15, 23, 42, 0.08),
     inset 0 0 0 1px rgba(15, 23, 42, 0.06);
@@ -3640,7 +3640,7 @@ onBeforeUnmount(() => {
 
 .file-path {
   font-size: 12px;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   word-break: break-all;
 }
 
@@ -3671,7 +3671,7 @@ onBeforeUnmount(() => {
 }
 
 .file-path--default {
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
 }
 
 .file-core-badge {
@@ -3687,13 +3687,13 @@ onBeforeUnmount(() => {
 
 .file-meta {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-variant-numeric: tabular-nums;
 }
 
 .files-viewer {
   border-radius: 14px;
-  background: rgba(249, 250, 251, 1);
+  background: var(--bg-soft, rgba(249, 250, 251, 1));
   padding: 10px;
   min-height: 0;
   overflow: hidden;
@@ -3748,7 +3748,7 @@ onBeforeUnmount(() => {
 .files-viewer-path {
   font-size: 12px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   word-break: break-all;
 }
 
@@ -3819,7 +3819,7 @@ onBeforeUnmount(() => {
   max-width: 80%;
   border-radius: 18px;
   padding: 8px 12px;
-  background: #f3f4f6;
+  background: var(--bg-soft, #f3f4f6);
 }
 
 .bubble-user .bubble-inner {
@@ -3836,7 +3836,7 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   overflow: hidden;
   isolation: isolate;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.65) inset,
     0 10px 28px rgba(15, 23, 42, 0.14),
@@ -3913,9 +3913,9 @@ onBeforeUnmount(() => {
 
 .visual-edit-copy-btn {
   flex-shrink: 0;
-  color: #1e3a8a !important;
+  color: var(--color-primary, #1e3a8a) !important;
   border-color: rgba(99, 102, 241, 0.28) !important;
-  background: rgba(255, 255, 255, 0.78) !important;
+  background: var(--bg-card, rgba(255, 255, 255, 0.78)) !important;
   backdrop-filter: blur(6px);
   cursor: pointer;
   transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
@@ -3924,7 +3924,7 @@ onBeforeUnmount(() => {
 .visual-edit-copy-btn:hover {
   color: #1d4ed8 !important;
   border-color: rgba(37, 99, 235, 0.45) !important;
-  background: rgba(255, 255, 255, 0.95) !important;
+  background: var(--bg-card, rgba(255, 255, 255, 0.95)) !important;
 }
 
 .visual-edit-selector-chip {
@@ -3932,7 +3932,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--bg-card, rgba(255, 255, 255, 0.72));
   backdrop-filter: blur(4px);
   display: flex;
   flex-direction: column;
@@ -3951,7 +3951,7 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 11.5px;
   line-height: 1.5;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   word-break: break-all;
 }
@@ -3961,7 +3961,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px dashed rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-card, rgba(255, 255, 255, 0.5));
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -3982,7 +3982,7 @@ onBeforeUnmount(() => {
 }
 
 .visual-edit-field-label {
-  color: #475569;
+  color: var(--text-secondary, #475569);
   font-weight: 600;
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -3990,7 +3990,7 @@ onBeforeUnmount(() => {
 }
 
 .visual-edit-field-value {
-  color: #1e293b;
+  color: var(--text-base, #1e293b);
   word-break: break-word;
   white-space: pre-wrap;
 }
@@ -4051,7 +4051,7 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   width: 24px;
   min-width: 24px;
-  background: #f0f9ff;
+  background: var(--color-primary-bg, #f0f9ff);
   color: #0c4a6e;
   font-weight: 700;
   cursor: pointer;
@@ -4065,7 +4065,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(14, 165, 233, 0.35);
   background:
     radial-gradient(circle at 0 0, rgba(224, 242, 254, 0.9), transparent 55%),
-    #f8fafc;
+    var(--bg-soft, #f8fafc);
 }
 
 .workflow-steps-title-row {
@@ -4104,17 +4104,17 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 8px;
   font-size: 12px;
-  color: #334155;
+  color: var(--text-base, #334155);
   line-height: 1.45;
   border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--bg-card, rgba(255, 255, 255, 0.75));
   border-radius: 8px;
   padding: 7px 8px;
 }
 
 .workflow-step-card--latest .workflow-step-label {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
 }
 
 .workflow-step-card--latest .workflow-step-badge {
@@ -4138,8 +4138,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   font-size: 11px;
   font-weight: 700;
-  background: #e2e8f0;
-  color: #475569;
+  background: var(--bg-mute, #e2e8f0);
+  color: var(--text-secondary, #475569);
 }
 
 .workflow-step-label {
@@ -4227,7 +4227,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: rgba(15, 23, 42, 0.7);
+  color: var(--text-secondary, rgba(15, 23, 42, 0.7));
 }
 
 .thinking-summary {
@@ -4300,7 +4300,7 @@ onBeforeUnmount(() => {
 .chat-input-bar {
   margin-top: 8px;
   border-radius: 16px;
-  background: #f9fafb;
+  background: var(--bg-soft, #f9fafb);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -4337,7 +4337,7 @@ onBeforeUnmount(() => {
 
 .chat-input-readonly :deep(.ant-input) {
   cursor: not-allowed;
-  background-color: #f3f4f6;
+  background-color: var(--bg-soft, #f3f4f6);
 }
 
 .chat-input-actions {
@@ -4345,7 +4345,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .chat-input-buttons {
@@ -4393,7 +4393,7 @@ onBeforeUnmount(() => {
 
 .deploy-url-label {
   font-size: 11px;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   opacity: 0.72;
   white-space: nowrap;
 }
@@ -4417,7 +4417,7 @@ onBeforeUnmount(() => {
 
 .preview-subtitle {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .preview-refresh-btn {
@@ -4430,7 +4430,7 @@ onBeforeUnmount(() => {
 .preview-body {
   flex: 1;
   border-radius: 12px;
-  background: #f3f4f6;
+  background: var(--bg-soft, #f3f4f6);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -4441,7 +4441,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   border: none;
-  background: white;
+  background: var(--bg-base, white);
 }
 
 .scroll-bottom-btn {
@@ -4533,7 +4533,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.8);
   background:
     radial-gradient(circle at 0 0, rgba(226, 232, 240, 0.9), rgba(148, 163, 184, 0.2) 55%),
-    #f9fafb;
+    var(--bg-soft, #f9fafb);
   box-shadow:
     0 8px 18px rgba(15, 23, 42, 0.12),
     0 0 0 1px rgba(15, 23, 42, 0.02);
@@ -4549,7 +4549,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.8);
   background:
     radial-gradient(circle at 0 0, rgba(226, 232, 240, 0.9), rgba(148, 163, 184, 0.2) 55%),
-    #f9fafb;
+    var(--bg-soft, #f9fafb);
   box-shadow:
     0 8px 18px rgba(15, 23, 42, 0.12),
     0 0 0 1px rgba(15, 23, 42, 0.02);
@@ -4558,7 +4558,7 @@ onBeforeUnmount(() => {
 .tool-call-title {
   font-size: 13px;
   font-weight: 600;
-  color: #111827;
+  color: var(--text-base, #111827);
 }
 
 .bubble-content :deep(.code-block-container) {

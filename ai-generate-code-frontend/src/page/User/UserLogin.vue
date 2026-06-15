@@ -288,7 +288,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg-card, rgba(255, 255, 255, 0.9));
   transition:
     transform 0.6s ease,
     opacity 0.6s ease;

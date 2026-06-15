@@ -392,7 +392,7 @@ function goBack() {
   border-radius: var(--radius-sm, 6px);
   background: var(--code-bg, #1e1e1e);
   color: var(--code-text, #d4d4d4);
-  font-size: var(--code-font-size, 13px);
+  font-size: 16px; /* 固定较大字号，让字体特征肉眼可见 */
   font-family: var(--code-font-family, Consolas, "Courier New", monospace);
   line-height: 1.7;
   overflow-x: auto;

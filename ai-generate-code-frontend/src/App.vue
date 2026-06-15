@@ -30,6 +30,7 @@ const configProviderTheme = computed(() => {
     isDark: appearanceStore.effectiveColorMode === 'dark',
     primaryColor: appearanceStore.primaryColor,
     fontSize: appearanceStore.fontSize,
+    compactMode: appearanceStore.compactMode,
   })
 })
 

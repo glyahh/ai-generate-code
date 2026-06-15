@@ -35,7 +35,7 @@ import GlobalFooter from '@/components/GlobalFooter.vue'
 
 .layout-content {
   flex: 1;
-  padding: 24px;
+  padding: var(--spacing-lg, 24px);
   padding-bottom: 80px;
   /* 为固定底部 footer 留出空间 */
   min-height: calc(100vh - 64px - 48px);

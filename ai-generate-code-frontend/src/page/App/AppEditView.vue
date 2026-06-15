@@ -178,7 +178,7 @@ onMounted(() => {
 
 .edit-header p {
   margin: 0 0 16px 0;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
   font-size: 13px;
 }
 

@@ -142,11 +142,20 @@ export function resolveThemeConfig(settings: {
   isDark: boolean
   primaryColor: string
   fontSize: number
+  compactMode: boolean
 }): { token: Record<string, any>; algorithm: any } {
   return {
     token: {
       colorPrimary: settings.primaryColor,
       fontSize: settings.fontSize,
+      sizeStep: settings.compactMode ? 3 : 6,
+      borderRadius: settings.compactMode ? 4 : 6,
+      controlHeight: settings.compactMode ? 28 : 36,
+      padding: settings.compactMode ? 12 : 20,
+      paddingSM: settings.compactMode ? 8 : 14,
+      marginXS: settings.compactMode ? 2 : 8,
+      marginSM: settings.compactMode ? 6 : 12,
+      marginMD: settings.compactMode ? 10 : 18,
     },
     algorithm: settings.isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
   }

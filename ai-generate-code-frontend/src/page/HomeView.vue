@@ -960,7 +960,7 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
 }
 
 .hero-main-text-inner {
@@ -1135,7 +1135,7 @@ onMounted(() => {
   z-index: 1;
   padding: 16px 16px 12px;
   border-radius: 21px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-card, rgba(255, 255, 255, 0.96));
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
 }
 
@@ -1177,7 +1177,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .prompt-actions {
@@ -1191,8 +1191,8 @@ onMounted(() => {
   height: 26px;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.14);
-  background: rgba(255, 255, 255, 0.72);
-  color: rgba(15, 23, 42, 0.72);
+  background: var(--bg-card, rgba(255, 255, 255, 0.72));
+  color: var(--text-base, rgba(15, 23, 42, 0.72));
   cursor: help;
   font-size: 13px;
   font-weight: 700;
@@ -1232,8 +1232,8 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(255, 255, 255, 0.68);
-  color: #0f172a;
+  background: var(--bg-card, rgba(255, 255, 255, 0.68));
+  color: var(--text-base, #0f172a);
   cursor: pointer;
   transition:
     transform 0.16s ease-out,
@@ -1279,7 +1279,7 @@ onMounted(() => {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  color: #475569;
+  color: var(--text-secondary, #475569);
   background: rgba(148, 163, 184, 0.2);
 }
 
@@ -1315,7 +1315,7 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-card, rgba(255, 255, 255, 0.7));
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
@@ -1324,7 +1324,7 @@ onMounted(() => {
     transform 0.16s ease-out,
     box-shadow 0.16s ease-out,
     border-color 0.16s ease-out;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   position: relative;
   overflow: hidden;
 }
@@ -1363,7 +1363,7 @@ onMounted(() => {
 .code-type-picker-btn-label {
   font-size: 12px;
   letter-spacing: 0.02em;
-  color: rgba(15, 23, 42, 0.72);
+  color: var(--text-secondary, rgba(15, 23, 42, 0.72));
 }
 
 .code-type-picker-btn-value {
@@ -1376,7 +1376,7 @@ onMounted(() => {
 
 .code-type-picker-btn-caret {
   font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
+  color: var(--text-muted, rgba(15, 23, 42, 0.6));
 }
 
 .code-type-options {
@@ -1388,7 +1388,7 @@ onMounted(() => {
   width: 120px;
   padding: 10px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--bg-card, rgba(255, 255, 255, 0.92));
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -1416,7 +1416,7 @@ onMounted(() => {
   background:
     radial-gradient(circle at 16% 20%, rgba(191, 219, 254, 0.55), transparent 40%),
     linear-gradient(120deg, rgba(219, 234, 254, 0.9), rgba(186, 230, 253, 0.84), rgba(224, 242, 254, 0.88));
-  color: #1e3a8a;
+  color: var(--color-primary, #1e3a8a);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1461,7 +1461,7 @@ onMounted(() => {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: #3b82f6;
+  background: var(--color-primary, #3b82f6);
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
 }
 
@@ -1489,7 +1489,7 @@ onMounted(() => {
   padding: 0 12px;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.1);
-  background: rgba(255, 255, 255, 0.65);
+  background: var(--bg-card, rgba(255, 255, 255, 0.65));
   cursor: pointer;
   transition:
     transform 0.16s ease-out,
@@ -1497,7 +1497,7 @@ onMounted(() => {
     background 0.16s ease-out,
     border-color 0.16s ease-out;
   font-weight: 700;
-  color: rgba(15, 23, 42, 0.8);
+  color: var(--text-base, rgba(15, 23, 42, 0.8));
   letter-spacing: 0.02em;
   display: flex;
   align-items: center;
@@ -1535,7 +1535,7 @@ onMounted(() => {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-card, rgba(255, 255, 255, 0.95));
   border-radius: 20px;
   padding: 20px 20px 16px;
   box-shadow:
@@ -1546,7 +1546,7 @@ onMounted(() => {
     0 0 0 1px rgba(148, 163, 184, 0.18);
   backdrop-filter: blur(10px) saturate(120%);
   -webkit-backdrop-filter: blur(10px) saturate(120%);
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
 }
 
 .apps-section::before {
@@ -1648,7 +1648,7 @@ onMounted(() => {
   isolation: isolate;
   border-radius: 16px;
   border: 1px solid transparent !important;
-  background: rgba(255, 255, 255, 0.86);
+  background: var(--bg-card, rgba(255, 255, 255, 0.86));
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
   backdrop-filter: blur(14px) saturate(130%);
   -webkit-backdrop-filter: blur(14px) saturate(130%);
@@ -1709,7 +1709,7 @@ onMounted(() => {
 
 .app-card:hover {
   border-color: rgba(59, 130, 246, 0.55) !important;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-card, rgba(255, 255, 255, 0.96));
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
   transform: translateY(-2px);
 }
@@ -1879,7 +1879,7 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .app-meta-type {
@@ -1900,7 +1900,7 @@ onMounted(() => {
 
 .app-meta-type-label {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--text-muted, #9ca3af);
 }
 
 .app-meta-type-tag {
@@ -1910,7 +1910,7 @@ onMounted(() => {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #0f172a;
+  color: var(--text-base, #0f172a);
   background: linear-gradient(135deg, #dbeafe, #bbf7d0);
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.45);
 }
@@ -1955,7 +1955,7 @@ onMounted(() => {
   display: flex;
   gap: 6px;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--text-secondary, #4b5563);
   justify-content: center;
   width: 100%;
   text-align: center;
@@ -1983,7 +1983,7 @@ onMounted(() => {
 .deploy-modal-text {
   margin-bottom: 8px;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--text-secondary, #4b5563);
 }
 
 .deploy-modal-input {

@@ -423,11 +423,11 @@ watch(
 .settings-sidebar {
   flex-shrink: 0;
   width: 220px;
-  background: #fff;
+  background: var(--bg-card, #fff);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
 }
 
 .sidebar-title {
@@ -436,7 +436,7 @@ watch(
   gap: 10px;
   font-size: 17px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--text-base, #1a1a1a);
   margin: 0 0 20px 0;
   letter-spacing: 0.02em;
 }
@@ -461,7 +461,7 @@ watch(
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #555;
+  color: var(--text-secondary, #555);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -470,7 +470,7 @@ watch(
 
 .nav-item:hover {
   background: rgba(193, 127, 89, 0.08);
-  color: #1a1a1a;
+  color: var(--text-base, #1a1a1a);
 }
 
 .nav-item.active {
@@ -494,23 +494,23 @@ watch(
 }
 
 .work-panel {
-  background: #fff;
+  background: var(--bg-card, #fff);
   border-radius: 12px;
   padding: 28px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
 }
 
 .panel-title {
   font-size: 18px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--text-base, #1a1a1a);
   margin: 0 0 6px 0;
 }
 
 .panel-desc {
   font-size: 13px;
-  color: #888;
+  color: var(--text-secondary, #888);
   margin: 0 0 24px 0;
 }
 
@@ -534,7 +534,7 @@ watch(
 
 .avatar-tip {
   font-size: 13px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .profile-form,
@@ -561,7 +561,7 @@ watch(
 
 .apply-tip {
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary, #666);
   margin-bottom: 20px;
 }
 
@@ -582,7 +582,7 @@ watch(
 .empty-list {
   padding: 48px;
   text-align: center;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .empty-icon {
@@ -602,14 +602,14 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: 16px 18px;
-  background: #fafafa;
+  background: var(--bg-soft, #fafafa);
   border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
   transition: background 0.2s;
 }
 
 .request-item:hover {
-  background: #f5f5f5;
+  background: var(--bg-mute, #f5f5f5);
 }
 
 .request-info {
@@ -620,17 +620,17 @@ watch(
 
 .req-name {
   font-weight: 500;
-  color: #1a1a1a;
+  color: var(--text-base, #1a1a1a);
 }
 
 .req-account {
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .req-time {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .request-actions {
@@ -648,7 +648,7 @@ watch(
 
 .history-last-updated {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
   margin-right: auto;
 }
 
@@ -661,8 +661,8 @@ watch(
 .history-item {
   padding: 16px 18px;
   border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: #fafafa;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+  background: var(--bg-soft, #fafafa);
 }
 
 .history-head {
@@ -681,7 +681,7 @@ watch(
 
 .history-operate {
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--text-base, #1a1a1a);
 }
 
 .history-time {
@@ -690,7 +690,7 @@ watch(
   align-items: flex-end;
   gap: 4px;
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .history-body {
@@ -708,12 +708,12 @@ watch(
 
 .history-label {
   font-size: 13px;
-  color: #888;
+  color: var(--text-secondary, #888);
 }
 
 .history-value {
   font-size: 13px;
-  color: #333;
+  color: var(--text-base, #333);
   word-break: break-word;
 }
 

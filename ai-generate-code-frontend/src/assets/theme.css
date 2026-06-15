@@ -44,6 +44,13 @@
   --transition-duration: 0.2s;
   --transition-timing: ease;
 
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
   /* 代码高亮色 */
   --code-keyword: #569cd6;
   --code-string: #e6b450;
@@ -88,6 +95,11 @@
 [data-compact="true"] {
   --font-size-base: 13px;
   --code-font-size: 12px;
+  --spacing-xs: 2px;
+  --spacing-sm: 4px;
+  --spacing-md: 8px;
+  --spacing-lg: 12px;
+  --spacing-xl: 16px;
 }
 
 /* ---------- 代码块高对比主题 ---------- */

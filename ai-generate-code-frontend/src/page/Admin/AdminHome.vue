@@ -672,13 +672,13 @@ onMounted(async () => {
   z-index: 1;
   width: 100%;
   max-width: 1600px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--bg-card, rgba(255, 255, 255, 0.6));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 20px;
   padding: 40px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.3));
 }
 
 .admin-header {
@@ -689,13 +689,13 @@ onMounted(async () => {
 .admin-title {
   font-size: 32px;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--text-base, #1a1a1a);
   margin: 0 0 12px 0;
 }
 
 .admin-subtitle {
   font-size: 16px;
-  color: #666;
+  color: var(--text-secondary, #666);
   margin: 0;
 }
 
@@ -708,18 +708,18 @@ onMounted(async () => {
 }
 
 :deep(.ant-table-thead > tr > th) {
-  background: #fafafa;
+  background: var(--bg-soft, #fafafa);
   font-weight: 600;
-  color: #1a1a1a;
-  border-bottom: 2px solid #e8e8e8;
+  color: var(--text-base, #1a1a1a);
+  border-bottom: 2px solid var(--border-color, #e8e8e8);
 }
 
 :deep(.ant-table-tbody > tr > td) {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
 }
 
 :deep(.ant-table-tbody > tr:hover > td) {
-  background: #f5f7fa;
+  background: var(--bg-soft, #f5f7fa);
 }
 
 :deep(.ant-pagination) {

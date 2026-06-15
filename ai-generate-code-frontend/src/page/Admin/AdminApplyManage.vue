@@ -292,7 +292,7 @@ onMounted(() => {
 
 .left-column,
 .right-column {
-  background: #ffffff;
+  background: var(--bg-card, #ffffff);
   border-radius: 18px;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
   padding: 18px 18px 16px;
@@ -310,7 +310,7 @@ onMounted(() => {
 .column-subtitle {
   margin: 0 0 10px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .apply-list {
@@ -368,12 +368,12 @@ onMounted(() => {
 
 .apply-type {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .empty-tip {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
   padding: 16px 4px;
 }
 
@@ -385,7 +385,7 @@ onMounted(() => {
 
 .detail-header {
   padding-bottom: 10px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
 }
 
 .detail-title-block {
@@ -411,7 +411,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 12px;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--text-secondary, #4b5563);
 }
 
 .detail-body {
@@ -428,23 +428,23 @@ onMounted(() => {
   margin: 0 0 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #111827;
+  color: var(--text-base, #111827);
 }
 
 .reason-box {
   border-radius: 10px;
   padding: 10px 12px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-soft, #f9fafb);
+  border: 1px solid var(--border-color, #e5e7eb);
   font-size: 13px;
-  color: #374151;
+  color: var(--text-base, #374151);
   min-height: 72px;
   white-space: pre-wrap;
 }
 
 .detail-footer {
   padding-top: 10px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--border-color, #e5e7eb);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -453,7 +453,7 @@ onMounted(() => {
 
 .footer-hint {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .footer-actions {
@@ -467,7 +467,7 @@ onMounted(() => {
   justify-content: center;
   height: 100%;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
 }
 
 .reject-form {
@@ -485,7 +485,7 @@ onMounted(() => {
 .reject-label {
   font-size: 13px;
   font-weight: 500;
-  color: #374151;
+  color: var(--text-base, #374151);
 }
 
 .reject-label .required {
@@ -496,7 +496,7 @@ onMounted(() => {
 .reject-hint {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
   line-height: 1.4;
 }
 

@@ -460,13 +460,13 @@ onMounted(async () => {
   z-index: 1;
   width: 100%;
   max-width: 1600px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--bg-card, rgba(255, 255, 255, 0.6));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 20px;
   padding: 32px 32px 40px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.3));
 }
 
 .admin-header {
@@ -482,7 +482,7 @@ onMounted(async () => {
 
 .admin-subtitle {
   margin: 0;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .search-bar {

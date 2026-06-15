@@ -327,7 +327,7 @@ onMounted(async () => {
   z-index: 1;
   width: 100%;
   max-width: 1600px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--bg-card, rgba(255, 255, 255, 0.72));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 20px;
@@ -345,14 +345,14 @@ onMounted(async () => {
 .user-chat-title {
   font-size: 28px;
   font-weight: 700;
-  color: #0F172A;
+  color: var(--text-base, #0F172A);
   margin: 0;
   letter-spacing: -0.3px;
 }
 
 .user-chat-subtitle {
   margin: 0;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .search-bar {
@@ -387,22 +387,22 @@ onMounted(async () => {
 }
 
 .table-wrapper :deep(.ant-table-thead > tr > th) {
-  background: rgba(250, 250, 252, 0.85);
+  background: var(--bg-soft, rgba(250, 250, 252, 0.85));
   font-weight: 600;
   font-size: 13px;
-  color: #475569;
-  border-bottom: 1px solid #e9edf4;
+  color: var(--text-secondary, #475569);
+  border-bottom: 1px solid var(--border-color, #e9edf4);
   padding: 12px 16px;
 }
 
 .table-wrapper :deep(.ant-table-tbody > tr > td) {
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--border-color, #f0f2f5);
   padding: 14px 16px;
   transition: background 0.15s ease;
 }
 
 .table-wrapper :deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(240, 244, 248, 0.6);
+  background: var(--bg-soft, rgba(240, 244, 248, 0.6));
 }
 
 .table-wrapper :deep(.ant-table-tbody > tr:last-child > td) {
