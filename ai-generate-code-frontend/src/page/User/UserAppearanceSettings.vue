@@ -124,6 +124,18 @@ function goBack() {
           </a-select>
         </div>
       </div>
+
+      <!-- 字体实时预览 -->
+      <div class="appearance-row appearance-row--preview">
+        <div class="font-preview">
+          <div class="font-preview__label">字体预览</div>
+          <pre class="font-preview__code"><code><span class="kw">function</span> <span class="fn">fibonacci</span>(n: <span class="ty">number</span>): <span class="ty">number</span> {
+  <span class="kw">if</span> (n <span class="op">&lt;=</span> <span class="num">1</span>) <span class="kw">return</span> n
+  <span class="kw">const</span> a = <span class="num">0</span>, b = <span class="num">1</span>, c = a + b
+  <span class="kw">return</span> <span class="fn">fibonacci</span>(n - <span class="num">1</span>) + <span class="fn">fibonacci</span>(n - <span class="num">2</span>)
+}</code></pre>
+        </div>
+      </div>
     </section>
 
     <!-- C. 界面密度 -->
@@ -243,6 +255,7 @@ function goBack() {
   max-width: 720px;
   margin: 0 auto;
   padding: 24px;
+  gap: var(--spacing-md, 16px);
 }
 
 /* 顶部栏 */
@@ -286,11 +299,11 @@ function goBack() {
   border-radius: var(--radius-lg, 12px);
   box-shadow: var(--shadow-card, 0 2px 8px rgba(0,0,0,0.06));
   overflow: hidden;
-  margin-bottom: 16px;
+  margin-bottom: var(--spacing-md, 16px);
 }
 
 .section-header {
-  padding: 10px 16px;
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -305,7 +318,7 @@ function goBack() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
   border-bottom: 1px solid var(--border-color, #e8e8e8);
 }
 
@@ -355,6 +368,44 @@ function goBack() {
   color: var(--text-secondary, #666);
   text-align: center;
 }
+
+/* 字体实时预览 */
+.appearance-row--preview {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding-top: calc(var(--spacing-sm, 8px) + 4px);
+  padding-bottom: calc(var(--spacing-md, 16px) + 4px);
+}
+
+.font-preview__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+  margin-bottom: 8px;
+}
+
+.font-preview__code {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--code-bg, #1e1e1e);
+  color: var(--code-text, #d4d4d4);
+  font-size: var(--code-font-size, 13px);
+  font-family: var(--code-font-family, Consolas, "Courier New", monospace);
+  line-height: 1.7;
+  overflow-x: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-preview__code .kw  { color: var(--code-keyword, #569cd6); }
+.font-preview__code .fn  { color: var(--code-function, #7ee787); }
+.font-preview__code .ty  { color: var(--code-keyword, #569cd6); }
+.font-preview__code .op  { color: var(--code-operator, #f38ba8); }
+.font-preview__code .num { color: var(--code-number, #c4b5fd); }
+.font-preview__code .str { color: var(--code-string, #e6b450); }
 
 /* 响应式 */
 @media (max-width: 576px) {
