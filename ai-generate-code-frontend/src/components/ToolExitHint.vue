@@ -112,7 +112,7 @@ withDefaults(defineProps<Props>(), {
 }
 
 .tool-exit-row--pending .tool-exit-bar {
-  background: #cbd5e1;
+  background: var(--bg-mute, #cbd5e1);
 }
 
 .tool-exit-row--pending .tool-exit-text--secondary {

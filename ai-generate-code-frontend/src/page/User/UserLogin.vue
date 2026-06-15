@@ -369,7 +369,7 @@ onMounted(() => {
   padding: 8px 14px;
   border-radius: 999px;
   margin-bottom: 16px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--bg-card, rgba(255, 255, 255, 0.85));
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
 }
 

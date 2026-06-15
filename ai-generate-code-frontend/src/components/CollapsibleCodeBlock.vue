@@ -248,7 +248,7 @@ onUnmounted(() => {
 }
 
 .collapse-eye-btn:hover {
-  background: #f1f5f9;
+  background: var(--bg-mute, #f1f5f9);
 }
 
 .collapse-eye-img {

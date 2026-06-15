@@ -4590,4 +4590,84 @@ onBeforeUnmount(() => {
     max-width: 40vw;
   }
 }
+/* ========== 深色模式覆盖 ========== */
+[data-theme="dark"] .workflow-steps-card {
+  background:
+    radial-gradient(circle at 0 0, rgba(99, 102, 241, 0.12), transparent 55%),
+    var(--bg-soft, #16213e);
+  border-color: rgba(148, 163, 184, 0.1);
+}
+
+[data-theme="dark"] .workflow-mermaid-notice {
+  background: rgba(180, 83, 9, 0.2);
+  border-color: rgba(180, 83, 9, 0.25);
+  color: var(--text-secondary, #a0a0a0);
+}
+
+[data-theme="dark"] .workflow-step-slow-hint {
+  background: linear-gradient(135deg, rgba(180, 83, 9, 0.15), rgba(120, 53, 15, 0.2));
+  color: var(--text-secondary, #a0a0a0);
+}
+
+[data-theme="dark"] .thinking-summary {
+  background:
+    linear-gradient(120deg, rgba(99, 102, 241, 0.12), rgba(129, 140, 248, 0.08)),
+    var(--bg-card, #1e1e36);
+}
+
+[data-theme="dark"] .gen-status-card {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+  color: var(--text-secondary, #a0a0a0);
+}
+
+[data-theme="dark"] .tool-call-card,
+[data-theme="dark"] .tool-exec-card {
+  background:
+    radial-gradient(circle at 0 0, rgba(99, 102, 241, 0.08), transparent 55%),
+    var(--bg-soft, #16213e);
+  border-color: rgba(148, 163, 184, 0.08);
+}
+
+[data-theme="dark"] .visual-edit-selection-card__glow {
+  background:
+    radial-gradient(circle at 40% 20%, rgba(99, 102, 241, 0.15), transparent 45%),
+    radial-gradient(circle at 80% 60%, rgba(56, 189, 248, 0.08), transparent 35%),
+    linear-gradient(145deg, rgba(30, 30, 54, 0.98) 0%, rgba(37, 37, 66, 0.94) 48%, rgba(30, 30, 54, 0.92) 100%);
+}
+
+[data-theme="dark"] .deploy-url-pill {
+  background:
+    radial-gradient(circle at 0 0, rgba(34, 197, 94, 0.15), transparent 55%),
+    var(--bg-card, #1e1e36) !important;
+  border-color: rgba(34, 197, 94, 0.3) !important;
+  color: var(--text-base, #e0e0e0) !important;
+}
+
+[data-theme="dark"] .selected-element-alert :deep(.ant-alert) {
+  background:
+    radial-gradient(circle at 0 0, rgba(14, 165, 233, 0.15), transparent 55%),
+    var(--bg-card, #1e1e36) !important;
+  border-color: rgba(14, 165, 233, 0.25) !important;
+  color: var(--text-base, #e0e0e0) !important;
+}
+
+[data-theme="dark"] .workflow-step-card {
+  border-color: rgba(148, 163, 184, 0.08);
+}
+
+[data-theme="dark"] .file-core-badge {
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.3), rgba(16, 185, 129, 0.25));
+  color: #6ee7b7;
+}
+
+[data-theme="dark"] .visual-edit-copy-btn {
+  border-color: rgba(148, 163, 184, 0.15) !important;
+}
+
+[data-theme="dark"] .scroll-bottom-btn {
+  background:
+    radial-gradient(circle at 30% 0%, rgba(52, 211, 153, 0.3), rgba(34, 197, 94, 0.2) 40%, rgba(14, 165, 233, 0.2) 100%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
 </style>

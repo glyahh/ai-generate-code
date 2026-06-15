@@ -129,6 +129,27 @@ function goBack() {
           <a-switch :checked="store.reducedMotion" @change="(v: boolean) => store.reducedMotion = v" />
         </div>
       </div>
+
+      <!-- 减少动画详情与演示 -->
+      <div class="appearance-row appearance-row--motion-detail">
+        <div class="motion-detail">
+          <div class="motion-detail__label">关闭后以下动画将被抑制：</div>
+          <ul class="motion-detail__list">
+            <li>页面切换过渡（背景色、文字色）</li>
+            <li>元素展开与折叠（代码块、工具卡片）</li>
+            <li>加载脉冲（工具调用、打字指示器、工作流步骤）</li>
+            <li>装饰循环（首页漂浮、光束旋转、渐变位移）</li>
+            <li>hover 位移与阴影过渡</li>
+          </ul>
+          <div class="motion-demo">
+            <div class="motion-demo__header">对比演示</div>
+            <div class="motion-demo__body">
+              <div class="motion-demo__dot" />
+              <span class="motion-demo__text">{{ store.reducedMotion ? '动画已关闭 — 静态无脉冲' : '动画运行中 — 蓝色圆点规律脉冲' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- D. 生成与聊天偏好 -->
@@ -335,6 +356,70 @@ function goBack() {
   font-size: 13px;
   color: var(--text-secondary, #666);
   text-align: center;
+}
+
+/* 减少动画详情与演示 */
+.appearance-row--motion-detail {
+  flex-direction: column;
+  align-items: stretch;
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+}
+
+.motion-detail__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+  margin-bottom: 6px;
+}
+
+.motion-detail__list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 12px;
+  color: var(--text-muted, #999);
+  line-height: 1.8;
+  list-style-type: disc;
+}
+
+.motion-demo {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-soft, #f5f7fa);
+}
+
+.motion-demo__header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #999);
+  margin-bottom: 8px;
+}
+
+.motion-demo__body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.motion-demo__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--color-primary, #1677ff);
+  animation: motion-demo-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes motion-demo-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+.motion-demo__text {
+  font-size: 13px;
+  color: var(--text-base, #1f1f1f);
 }
 
 /* 响应式 */

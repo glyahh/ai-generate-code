@@ -2025,4 +2025,144 @@ onMounted(() => {
     padding: 16px 12px 12px;
   }
 }
+/* ========== 深色模式覆盖 ========== */
+[data-theme="dark"] .workflow-beta-btn--active {
+  background:
+    radial-gradient(circle at 0 0, rgba(99, 102, 241, 0.35), transparent 55%),
+    linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(45, 212, 191, 0.25), rgba(129, 140, 248, 0.25)),
+    var(--bg-card, #1e1e36);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(99, 102, 241, 0.3);
+}
+
+[data-theme="dark"] .workflow-beta-btn-icon {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.6), rgba(129, 140, 248, 0.5), rgba(45, 212, 191, 0.5));
+}
+
+[data-theme="dark"] .workflow-beta-btn-badge {
+  background: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+}
+
+[data-theme="dark"] .code-type-auto-btn {
+  border-color: rgba(99, 102, 241, 0.3);
+  background:
+    radial-gradient(circle at 16% 20%, rgba(99, 102, 241, 0.2), transparent 40%),
+    linear-gradient(120deg, rgba(30, 30, 54, 0.9), rgba(37, 37, 66, 0.85), rgba(30, 30, 54, 0.88));
+  color: #a5b4fc;
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .code-type-auto-btn:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+[data-theme="dark"] .code-type-auto-btn.is-active {
+  border-color: rgba(129, 140, 248, 0.5);
+  background:
+    radial-gradient(circle at 16% 20%, rgba(129, 140, 248, 0.25), transparent 40%),
+    linear-gradient(120deg, rgba(37, 37, 66, 0.95), rgba(49, 46, 129, 0.85), rgba(37, 37, 66, 0.92));
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #c7d2fe;
+}
+
+[data-theme="dark"] .code-type-option-btn {
+  border-color: rgba(148, 163, 184, 0.15);
+}
+
+[data-theme="dark"] .code-type-option-btn.is-selected {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-elevated, #252542));
+  border-color: color-mix(in srgb, var(--accent) 50%, rgba(148, 163, 184, 0.15));
+  color: var(--text-base, #e0e0e0);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .apps-section {
+  background: var(--bg-card, #1e1e36);
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.2),
+    0 4px 12px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(148, 163, 184, 0.1) inset;
+}
+
+[data-theme="dark"] .apps-section--featured::before {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(99, 102, 241, 0.18), transparent 38%),
+    radial-gradient(circle at 92% 8%, rgba(129, 140, 248, 0.15), transparent 38%),
+    radial-gradient(circle at 48% 120%, rgba(45, 212, 191, 0.12), transparent 44%),
+    linear-gradient(135deg, rgba(30, 30, 54, 0.98), rgba(26, 26, 46, 0.95), rgba(30, 30, 54, 0.96));
+}
+
+[data-theme="dark"] .apps-section--featured::after {
+  background:
+    linear-gradient(120deg, rgba(99, 102, 241, 0.08), rgba(56, 189, 248, 0.04)),
+    repeating-linear-gradient(
+      -28deg,
+      rgba(99, 102, 241, 0.06) 0 10px,
+      rgba(56, 189, 248, 0.03) 10px 20px
+    );
+}
+
+[data-theme="dark"] .apps-section--mine::before {
+  background:
+    radial-gradient(circle at 12% -6%, rgba(251, 191, 36, 0.12), transparent 36%),
+    radial-gradient(circle at 88% 4%, rgba(244, 114, 182, 0.1), transparent 34%),
+    radial-gradient(circle at 76% 112%, rgba(99, 102, 241, 0.1), transparent 40%),
+    linear-gradient(136deg, rgba(30, 30, 54, 0.98), rgba(37, 37, 66, 0.95), rgba(30, 30, 54, 0.96));
+}
+
+[data-theme="dark"] .apps-section--mine::after {
+  background:
+    linear-gradient(125deg, rgba(99, 102, 241, 0.06), rgba(236, 72, 153, 0.04)),
+    repeating-linear-gradient(
+      35deg,
+      rgba(236, 72, 153, 0.04) 0 9px,
+      rgba(99, 102, 241, 0.03) 9px 18px
+    );
+}
+
+[data-theme="dark"] .my-app-card--deployed {
+  border-color: rgba(13, 148, 136, 0.4) !important;
+  background:
+    linear-gradient(
+      152deg,
+      rgba(30, 30, 54, 0.97) 0%,
+      rgba(26, 26, 46, 0.92) 42%,
+      rgba(30, 30, 54, 0.95) 100%
+    );
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(13, 148, 136, 0.12) inset;
+}
+
+[data-theme="dark"] .my-app-card--deployed:hover {
+  border-color: rgba(13, 148, 136, 0.55) !important;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(13, 148, 136, 0.2) inset;
+}
+
+[data-theme="dark"] .app-meta-type {
+  background:
+    radial-gradient(circle at 0 0, rgba(148, 163, 184, 0.25), transparent 60%),
+    var(--bg-soft, #16213e);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(148, 163, 184, 0.2);
+}
+
+[data-theme="dark"] .app-meta-type-tag {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.3), rgba(52, 211, 153, 0.25));
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3);
+  color: var(--text-base, #e0e0e0);
+}
 </style>

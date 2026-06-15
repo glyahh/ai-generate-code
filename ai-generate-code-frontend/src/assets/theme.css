@@ -79,6 +79,7 @@
   --bg-mute: #0f3460;
   --bg-card: #1e1e36;
   --bg-section-header: #1a1a2e;
+  --bg-elevated: #252542;
 
   --text-base: #e0e0e0;
   --text-secondary: #a0a0a0;
@@ -136,7 +137,21 @@
 }
 
 /* ---------- 减少动画 ---------- */
+/* 用户设置（data-reduced-motion）与系统偏好双重覆盖 */
 :not([class*="ant-"]) {
   transition-duration: var(--transition-duration);
   animation-duration: var(--transition-duration);
+}
+
+[data-reduced-motion="true"] *,
+[data-reduced-motion="true"] *::before,
+[data-reduced-motion="true"] *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
+}
+
+[data-reduced-motion="true"] .motion-demo__dot {
+  animation: none !important;
 }

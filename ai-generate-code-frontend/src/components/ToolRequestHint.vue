@@ -179,7 +179,7 @@ const iconMotionClass = computed(() => {
 }
 
 .tool-request-row--pending .tool-request-track {
-  background: #cbd5e1;
+  background: var(--bg-mute, #cbd5e1);
 }
 
 @media (prefers-reduced-motion: no-preference) {

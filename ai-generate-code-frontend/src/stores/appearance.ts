@@ -117,6 +117,7 @@ export function applyToDocument(settings: AppearanceSettings): void {
   root.style.setProperty('--color-primary', settings.primaryColor)
 
   // 5. 动画减弱
+  root.dataset.reducedMotion = settings.reducedMotion ? 'true' : 'false'
   if (settings.reducedMotion) {
     root.style.setProperty('--transition-duration', '0s')
   } else {
