@@ -5,14 +5,6 @@ import { theme } from 'ant-design-vue'
 /** localStorage key */
 const STORAGE_KEY = 'glyahh:appearance:v1'
 
-/** 代码字体族预设 */
-export const CODE_FONT_OPTIONS = [
-  { label: '系统默认', value: 'system', css: 'Consolas, Monaco, "Courier New", monospace' },
-  { label: 'JetBrains Mono', value: 'jetbrains-mono', css: '"JetBrains Mono", Consolas, monospace' },
-  { label: 'Fira Code', value: 'fira-code', css: '"Fira Code", Consolas, monospace' },
-  { label: 'Consolas', value: 'consolas', css: 'Consolas, Monaco, monospace' },
-] as const
-
 /** 代码块主题 */
 export const CODE_THEME_OPTIONS = [
   { label: '默认', value: 'default' },
@@ -37,7 +29,6 @@ export interface AppearanceSettings {
   // B. 字体
   fontSize: number
   codeFontSize: number
-  codeFontFamily: string
 
   // C. 界面密度
   compactMode: boolean
@@ -55,7 +46,7 @@ export interface AppearanceSettings {
 /** 按分组索引的 key 列表，用于 resetSection */
 export const SECTION_KEYS: Record<string, Array<keyof AppearanceSettings>> = {
   colors: ['colorMode', 'primaryColor'],
-  fonts: ['fontSize', 'codeFontSize', 'codeFontFamily'],
+  fonts: ['fontSize', 'codeFontSize'],
   density: ['compactMode', 'reducedMotion'],
   preferences: ['defaultCodeType', 'workflowEnabled', 'codeTheme', 'toolCardCollapsed', 'previewExpanded', 'smoothScroll'],
 }
@@ -66,7 +57,6 @@ const DEFAULTS: AppearanceSettings = {
   primaryColor: '#1677ff',
   fontSize: 15,
   codeFontSize: 13,
-  codeFontFamily: 'system',
   compactMode: false,
   reducedMotion: false,
   defaultCodeType: 'auto',
@@ -124,8 +114,6 @@ export function applyToDocument(settings: AppearanceSettings): void {
   // 4. CSS 变量
   root.style.setProperty('--font-size-base', `${settings.fontSize}px`)
   root.style.setProperty('--code-font-size', `${settings.codeFontSize}px`)
-  const fontCss = CODE_FONT_OPTIONS.find(f => f.value === settings.codeFontFamily)?.css ?? CODE_FONT_OPTIONS[0].css
-  root.style.setProperty('--code-font-family', fontCss)
   root.style.setProperty('--color-primary', settings.primaryColor)
 
   // 5. 动画减弱

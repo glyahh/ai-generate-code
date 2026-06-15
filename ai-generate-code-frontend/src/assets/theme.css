@@ -32,7 +32,6 @@
   /* 字号 */
   --font-size-base: 15px;
   --code-font-size: 13px;
-  --code-font-family: Consolas, Monaco, "Courier New", monospace;
   --font-family-base: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
 
   /* 圆角 */
