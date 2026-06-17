@@ -1,0 +1,7 @@
+interface:
+  display_name: "ui-ux-pro-max"
+  short_description: "UI/UX review and improvements"
+  default_prompt: "Use $ui-ux-pro-max to review my UI/UX and propose concrete improvements and implementation steps."
+
+policy:
+  allow_implicit_invocation: true

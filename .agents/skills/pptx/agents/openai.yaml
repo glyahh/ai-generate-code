@@ -1,0 +1,7 @@
+interface:
+  display_name: "PPTX"
+  short_description: "Create, edit, and review PPTX"
+  default_prompt: "Use $pptx to create or edit a PPTX based on my requirements and any provided template."
+
+policy:
+  allow_implicit_invocation: true

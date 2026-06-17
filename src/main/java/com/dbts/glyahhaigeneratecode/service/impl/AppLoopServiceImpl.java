@@ -5,6 +5,8 @@ import com.dbts.glyahhaigeneratecode.mapper.LoopMapper;
 import com.dbts.glyahhaigeneratecode.model.Entity.AppLoop;
 import com.dbts.glyahhaigeneratecode.model.Entity.Loop;
 import com.dbts.glyahhaigeneratecode.service.AppLoopService;
+import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
+import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.mybatisflex.core.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,16 +53,22 @@ public class AppLoopServiceImpl implements AppLoopService {
     @Override
     @Transactional
     public void addLoop(Long appId, Long loopId, String addedFrom) {
+        // 先校验 Loop 是否存在且未删除，防止绑定无效 Loop
+        Loop loop = loopMapper.selectOneById(loopId);
+        ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
+                ErrorCode.NOT_FOUND_ERROR, "Loop 不存在或已删除");
         AppLoop al = new AppLoop();
         al.setAppId(appId);
         al.setLoopId(loopId);
         al.setAddedFrom(addedFrom);
-        // 唯一索引 (app_id, loop_id) 防重复，try-catch 静默忽略
         try {
             appLoopMapper.insert(al);
             redisTemplate.opsForSet().add("loop:app_ids:" + loopId, String.valueOf(appId));
-        } catch (Exception e) {
+        } catch (org.springframework.dao.DuplicateKeyException e) {
             log.warn("addLoop duplicate ignored: appId={} loopId={}", appId, loopId);
+        } catch (Exception e) {
+            log.error("addLoop failed: appId={} loopId={}", appId, loopId, e);
+            ThrowUtils.throwIf(true, ErrorCode.SYSTEM_ERROR, "绑定 Loop 失败");
         }
         redisTemplate.delete("app:loop:ids:" + appId);
     }

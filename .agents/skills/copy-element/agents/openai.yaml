@@ -1,0 +1,7 @@
+interface:
+  display_name: "copy-element"
+  short_description: "Copy UI element patterns"
+  default_prompt: "Use $copy-element to replicate a UI element from a reference and adapt it to my codebase."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "new-techno"
+  short_description: "Track and explain new tech"
+  default_prompt: "Use $new-techno to explain this new technology, its tradeoffs, and when to use it."
+
+policy:
+  allow_implicit_invocation: true

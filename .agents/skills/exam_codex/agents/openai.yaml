@@ -1,0 +1,7 @@
+interface:
+  display_name: "exam_codex"
+  short_description: "Verify implemented solution + clean one-shot tests + report"
+  default_prompt: "Use $exam_codex to validate my implemented solution against the plan and clean up only one-shot test scaffolding."
+
+policy:
+  allow_implicit_invocation: true

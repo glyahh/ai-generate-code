@@ -4,11 +4,13 @@ import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.ThrowUtils;
 import com.dbts.glyahhaigeneratecode.mapper.LoopMapper;
+import com.dbts.glyahhaigeneratecode.mapper.AppLoopMapper;
 import com.dbts.glyahhaigeneratecode.mapper.UserLoopApplyMapper;
 import com.dbts.glyahhaigeneratecode.model.DTO.LoopAddRequest;
 import com.dbts.glyahhaigeneratecode.model.DTO.LoopQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.DTO.LoopUpdateRequest;
 import com.dbts.glyahhaigeneratecode.model.Entity.Loop;
+import com.dbts.glyahhaigeneratecode.model.Entity.AppLoop;
 import com.dbts.glyahhaigeneratecode.model.Entity.UserLoopApply;
 import com.dbts.glyahhaigeneratecode.model.VO.LoopVO;
 import com.dbts.glyahhaigeneratecode.service.LoopService;
@@ -17,6 +19,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
+import com.mybatisflex.core.query.RawQueryCondition;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -31,6 +34,15 @@ import java.util.stream.Collectors;
 
 /**
  * Loop 服务层实现。
+ *
+ * <p>核心职责：Loop 技能实体的 CRUD + 精选/审批 + 导入编译。</p>
+ *
+ * <p>设计要点：
+ * <ul>
+ *   <li>workflowJson 存原始步骤 JSON，compiledPrompt 为编译后的注入文本——两者分离避免每次注入时重算 JSON 解析</li>
+ *   <li>删除采用逻辑删除（isDelete=1），但 app_loop 关联记录物理删除——解耦聚合根与关联表</li>
+ *   <li>Redis 反向索引 loop:app_ids:{loopId} 用于删除时批量清理应用缓存，避免全表扫描</li>
+ * </ul></p>
  */
 @Slf4j
 @Service
@@ -38,6 +50,7 @@ import java.util.stream.Collectors;
 public class LoopServiceImpl implements LoopService {
 
     private final LoopMapper loopMapper;
+    private final AppLoopMapper appLoopMapper;
     private final UserLoopApplyMapper userLoopApplyMapper;
     private final StringRedisTemplate stringRedisTemplate;
 
@@ -82,7 +95,7 @@ public class LoopServiceImpl implements LoopService {
         Loop loop = loopMapper.selectOneById(req.getId());
         ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
                 ErrorCode.NOT_FOUND_ERROR, "Loop不存在");
-        ThrowUtils.throwIf(!loop.getUserId().equals(userId),
+        ThrowUtils.throwIf(userId == null || !userId.equals(loop.getUserId()),
                 ErrorCode.FORBIDDEN_ERROR, "无权修改他人Loop");
 
         if (StrUtil.isNotBlank(req.getLoopName())) {
@@ -114,17 +127,22 @@ public class LoopServiceImpl implements LoopService {
         Loop loop = loopMapper.selectOneById(id);
         ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
                 ErrorCode.NOT_FOUND_ERROR, "Loop不存在");
-        // 校验归属：Loop 创建者或管理员可删除
-        ThrowUtils.throwIf(!loop.getUserId().equals(userId),
+        // 校验 userId 非空 + 归属（防止数据库脏数据触发 NPE）
+        ThrowUtils.throwIf(userId == null || !userId.equals(loop.getUserId()),
                 ErrorCode.FORBIDDEN_ERROR, "无权删除他人Loop");
+
+        // 1. 清理 MySQL 关联表（app_loop 无逻辑删除，直接 delete）
+        appLoopMapper.deleteByQuery(
+                new QueryWrapper().eq("loop_id", id)
+        );
 
         loop.setIsDelete(1);
         loopMapper.update(loop);
 
-        // 清理 Redis 缓存
+        // 2. 清理 Redis 缓存
         stringRedisTemplate.delete("loop:compiled:" + id);
 
-        // 清理反向索引：读取 loop:app_ids:{loopId} Set，逐一删除 app:loop:ids:{appId}
+        // 3. 清理反向索引：读取 loop:app_ids:{loopId} Set，逐一删除 app:loop:ids:{appId}
         Set<String> appIds = stringRedisTemplate.opsForSet().members("loop:app_ids:" + id);
         if (appIds != null && !appIds.isEmpty()) {
             List<String> keysToDelete = appIds.stream()
@@ -155,8 +173,8 @@ public class LoopServiceImpl implements LoopService {
                 .orderBy("create_time", false);
 
         if (StrUtil.isNotBlank(req.getSearchText())) {
-            qw.and(w -> w.like("loop_name", req.getSearchText())
-                    .or(q -> q.like("description", req.getSearchText())));
+            String searchText = "%" + req.getSearchText() + "%";
+            qw.and(new RawQueryCondition("(loop_name LIKE ? OR description LIKE ?)", searchText, searchText));
         }
 
         Page<Loop> page = loopMapper.paginate(Page.of(req.getPageNum(), req.getPageSize()), qw);
@@ -174,8 +192,8 @@ public class LoopServiceImpl implements LoopService {
                 .orderBy("create_time", false);
 
         if (StrUtil.isNotBlank(req.getSearchText())) {
-            qw.and(w -> w.like("loop_name", req.getSearchText())
-                    .or().like("description", req.getSearchText()));
+            String searchText = "%" + req.getSearchText() + "%";
+            qw.and(new RawQueryCondition("(loop_name LIKE ? OR description LIKE ?)", searchText, searchText));
         }
 
         Page<Loop> page = loopMapper.paginate(Page.of(req.getPageNum(), req.getPageSize()), qw);
@@ -189,6 +207,8 @@ public class LoopServiceImpl implements LoopService {
     public Long importLoop(String rawContent, Long userId) {
         // 解析 frontmatter + body
         // 格式: ---\nkey: value\n---\n## 标题\nbody
+        ThrowUtils.throwIf(StrUtil.isBlank(rawContent),
+                ErrorCode.PARAMS_ERROR, "导入内容不能为空");
         String loopName = "未命名技能";
         String description = "";
         String visibility = "public";
@@ -219,7 +239,8 @@ public class LoopServiceImpl implements LoopService {
                 bodyBuilder.append(trimmed);
             }
         } catch (Exception e) {
-            throw new RuntimeException("导入内容解析失败");
+            log.error("importLoop 内容解析异常", e);
+            throw new RuntimeException("导入内容解析失败: " + e.getMessage(), e);
         }
 
         // 构建 workflowJson
@@ -243,8 +264,18 @@ public class LoopServiceImpl implements LoopService {
         Loop loop = loopMapper.selectOneById(loopId);
         ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
                 ErrorCode.NOT_FOUND_ERROR, "Loop不存在");
-        ThrowUtils.throwIf(!loop.getUserId().equals(userId),
+        // 校验 userId 非空 + 归属（防止脏数据触发 NPE）
+        ThrowUtils.throwIf(userId == null || !userId.equals(loop.getUserId()),
                 ErrorCode.FORBIDDEN_ERROR, "只能申请自己创建的Loop");
+
+        // 检查是否已有待审申请，防止重复提交
+        long pendingCount = userLoopApplyMapper.selectCountByQuery(
+                new QueryWrapper().eq("loop_id", loopId)
+                        .eq("user_id", userId)
+                        .eq("status", 0)
+        );
+        ThrowUtils.throwIf(pendingCount > 0,
+                ErrorCode.OPERATION_ERROR, "已存在待审申请，请勿重复提交");
 
         UserLoopApply apply = new UserLoopApply();
         apply.setLoopId(loopId);
@@ -263,8 +294,8 @@ public class LoopServiceImpl implements LoopService {
                 .orderBy("create_time", false);
 
         if (StrUtil.isNotBlank(req.getSearchText())) {
-            qw.and(w -> w.like("loop_name", req.getSearchText())
-                    .or().like("description", req.getSearchText()));
+            String searchText = "%" + req.getSearchText() + "%";
+            qw.and(new RawQueryCondition("(loop_name LIKE ? OR description LIKE ?)", searchText, searchText));
         }
 
         Page<Loop> page = loopMapper.paginate(Page.of(req.getPageNum(), req.getPageSize()), qw);

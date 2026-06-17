@@ -7,6 +7,7 @@ export type AppAddRequest = {
   initPrompt?: string;
   codeGenType?: string;
   isBeta?: number;
+  loopIds?: number[];
 };
 
 export type AppAddUsingPostResponses = {
@@ -90,6 +91,15 @@ export type AppApplyUsingPostResponses = {
   200: BaseResponseBoolean;
 };
 
+export type AppChatHistoryPageVO = {
+  records?: ChatHistory[];
+  pageNumber?: number;
+  pageSize?: number;
+  totalPage?: number;
+  totalRow?: number;
+  isBeta?: number;
+};
+
 export type AppDeployRequest = {
   appId?: number;
 };
@@ -128,6 +138,54 @@ export type AppGoodListPageVoUsingPostResponses = {
    * OK
    */
   200: BaseResponsePageAppVO;
+};
+
+export type AppLoopAddUsingPostParams = {
+  appId: number;
+  loopId: number;
+};
+
+export type AppLoopAddUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
+};
+
+export type AppLoopBindUsingPostBody = number[];
+
+export type AppLoopBindUsingPostParams = {
+  appId: number;
+};
+
+export type AppLoopBindUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
+};
+
+export type AppLoopListVoUsingPostParams = {
+  appId: number;
+};
+
+export type AppLoopListVoUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListMapStringObject;
+};
+
+export type AppLoopRemoveUsingPostParams = {
+  appId: number;
+  loopId: number;
+};
+
+export type AppLoopRemoveUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
 };
 
 export type ApplyHistoryVO = {
@@ -184,6 +242,17 @@ export type AppQueryRequest = {
   isDeployed?: number;
 };
 
+export type AppStaticProjectFilesAppIdUsingGetParams = {
+  appId: number;
+};
+
+export type AppStaticProjectFilesAppIdUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListProjectFileVO;
+};
+
 export type AppUndeployUsingPostResponses = {
   /**
    * OK
@@ -219,24 +288,12 @@ export type AppVO = {
   updateTime?: string;
   userVO?: UserVO;
   hasGeneratedCode?: boolean;
-  /** 是否 workflow beta 应用：0-否，1-是 */
   isBeta?: number;
 };
 
-/** 应用对话历史分页（含 isBeta，用于工作流进度卡片展示判定） */
-export type AppChatHistoryPage = {
-  records?: ChatHistory[];
-  pageNumber?: number;
-  pageSize?: number;
-  totalPage?: number;
-  totalRow?: number;
-  optimizeCountQuery?: boolean;
-  isBeta?: number;
-};
-
-export type BaseResponseAppChatHistoryPage = {
+export type BaseResponseAppChatHistoryPageVO = {
   code?: number;
-  data?: AppChatHistoryPage;
+  data?: AppChatHistoryPageVO;
   message?: string;
 };
 
@@ -276,6 +333,24 @@ export type BaseResponseListChatHistoryVO = {
   message?: string;
 };
 
+export type BaseResponseListLoopVO = {
+  code?: number;
+  data?: LoopVO[];
+  message?: string;
+};
+
+export type BaseResponseListMapStringObject = {
+  code?: number;
+  data?: Record<string, Record<string, unknown>>[];
+  message?: string;
+};
+
+export type BaseResponseListProjectFileVO = {
+  code?: number;
+  data?: ProjectFileVO[];
+  message?: string;
+};
+
 export type BaseResponseLoginUserVO = {
   code?: number;
   data?: LoginUserVO;
@@ -285,6 +360,12 @@ export type BaseResponseLoginUserVO = {
 export type BaseResponseLong = {
   code?: number;
   data?: number;
+  message?: string;
+};
+
+export type BaseResponseLoopVO = {
+  code?: number;
+  data?: LoopVO;
   message?: string;
 };
 
@@ -330,15 +411,28 @@ export type BaseResponseUser = {
   message?: string;
 };
 
+export type BaseResponseUserPersonalizationVO = {
+  code?: number;
+  data?: UserPersonalizationVO;
+  message?: string;
+};
+
 export type BaseResponseUserVO = {
   code?: number;
   data?: UserVO;
   message?: string;
 };
 
+export type BaseResponseVoid = {
+  code?: number;
+  data?: Record<string, unknown>;
+  message?: string;
+};
+
 export type ChatGenCodeUsingGetParams = {
   appId: number;
   message: string;
+  loopId?: number;
 };
 
 export type ChatGenCodeUsingGetResponses = {
@@ -390,10 +484,21 @@ export type ChatHistoryAppAppIdUsingGetResponses = {
   /**
    * OK
    */
-  200: BaseResponseAppChatHistoryPage;
+  200: BaseResponseAppChatHistoryPageVO;
 };
 
-export type ChatHistoryMyUsingPostResponses = {
+export type ChatHistoryDeleteByAppIdAppIdUsingPostParams = {
+  appId: number;
+};
+
+export type ChatHistoryDeleteByAppIdAppIdUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
+};
+
+export type ChatHistoryMyChatHistoryUsingPostResponses = {
   /**
    * OK
    */
@@ -481,6 +586,133 @@ export type LoginUserVO = {
   updateTime?: string;
 };
 
+export type LoopAddRequest = {
+  loopName?: string;
+  description?: string;
+  cover?: string;
+  workflowJson?: string;
+  sourceType?: string;
+  visibility?: string;
+};
+
+export type LoopAddUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseLong;
+};
+
+export type LoopAdminListPageVoUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListLoopVO;
+};
+
+export type LoopAdminUpdateUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
+};
+
+export type LoopApplyUsingPostParams = {
+  loopId: number;
+  reason?: string;
+};
+
+export type LoopApplyUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
+};
+
+export type LoopGetVoUsingGetParams = {
+  id: number;
+};
+
+export type LoopGetVoUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseLoopVO;
+};
+
+export type LoopGoodListPageVoUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListLoopVO;
+};
+
+export type LoopMyListPageVoUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListLoopVO;
+};
+
+export type LoopOpenApiDeleteUsingPostParams = {
+  id: number;
+};
+
+export type LoopOpenApiDeleteUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
+};
+
+export type LoopOpenApiImportUsingPostBody = string;
+
+export type LoopOpenApiImportUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseLong;
+};
+
+export type LoopQueryRequest = {
+  pageNum?: number;
+  pageSize?: number;
+  sortField?: string;
+  sortOrder?: string;
+  searchText?: string;
+};
+
+export type LoopUpdateRequest = {
+  id?: number;
+  loopName?: string;
+  description?: string;
+  cover?: string;
+  workflowJson?: string;
+  visibility?: string;
+  priority?: number;
+};
+
+export type LoopUpdateUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseVoid;
+};
+
+export type LoopVO = {
+  id?: number;
+  loopName?: string;
+  description?: string;
+  cover?: string;
+  userId?: number;
+  priority?: number;
+  workflowJson?: string;
+  compiledPrompt?: string;
+  sourceType?: string;
+  visibility?: string;
+  createTime?: string;
+  updateTime?: string;
+};
+
 export type PageAppVO = {
   records?: AppVO[];
   pageNumber?: number;
@@ -524,6 +756,13 @@ export type PageUserVO = {
   totalPage?: number;
   totalRow?: number;
   optimizeCountQuery?: boolean;
+};
+
+export type ProjectFileVO = {
+  path?: string;
+  language?: string;
+  content?: string;
+  updatedAt?: number;
 };
 
 export type ServerSentEventString = object;
@@ -595,11 +834,8 @@ export type UserChatHistoryItemVO = {
   appId?: number;
   appName?: string;
   createTime?: string;
-  /** 上次修改时间 */
   updateTime?: string;
-  /** AI 消息摘要行 */
   summaryText?: string;
-  /** AI 消息自然语言正文 */
   naturalLanguage?: string;
 };
 
@@ -692,6 +928,30 @@ export type UserPageUsingGetResponses = {
    * OK
    */
   200: PageUser;
+};
+
+export type UserPersonalizationUpdateRequest = {
+  appStyle?: string;
+  answerStyle?: string;
+};
+
+export type UserPersonalizationUsingGetResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseUserPersonalizationVO;
+};
+
+export type UserPersonalizationUsingPutResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseBoolean;
+};
+
+export type UserPersonalizationVO = {
+  appStyle?: string;
+  answerStyle?: string;
 };
 
 export type UserQueryRequest = {

@@ -1,0 +1,7 @@
+interface:
+  display_name: "cr-information"
+  short_description: "Collect CR context and summary"
+  default_prompt: "Use $cr-information to summarize context, risks, and decisions for my change request."
+
+policy:
+  allow_implicit_invocation: true

@@ -13,8 +13,21 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Loop 注入服务。
- * 校验 loopId 归属后在 userMessage 后缀拼接 [loop_skill] 块。
- * 优先读 Redis 缓存，miss 则回填 MySQL。
+ *
+ * <p>在 SSE 生成入口 ChatToGenCodeImpl 的后半段被调用，向 userMessage 后缀拼接
+ * {@code [loop_skill name="..."]} tagged 块。</p>
+ *
+ * <p>注入顺序：personalization → 用户消息 → loop_skill（Loop 离用户最近，覆盖最外层）。</p>
+ *
+ * <p>缓存策略（Cache-Aside）：
+ * <ul>
+ *   <li>key: {@code loop:compiled:{loopId}}，TTL 30+random(5)min
+ *       随机抖动防缓存雪崩，参考 UserPersonalizationServiceImpl</li>
+ *   <li>未命中时写空值占位 {@code {}} TTL 60s，防缓存穿透</li>
+ * </ul></p>
+ *
+ * <p>无 Loop / loopId 无效 / 校验不通过 → 跳过注入（不抛异常）。
+ * 这是有意的优雅降级：不应因 Loop 异常阻塞正常生成流程。</p>
  */
 @Slf4j
 @Service
@@ -55,17 +68,19 @@ public class LoopInjectService {
     }
 
     /**
-     * 校验 loopId 是否属于 app 的 app_loop 库，或是用户自有 Loop。
+     * 校验 loopId 是否属于 app 的 app_loop 库，或是用户自有（未删除）。
+     * <p>两步校验：先查 app_loop 表 + Loop 有效态，再查用户自有 Loop。</p>
      */
     private boolean validateLoop(Long userId, Long appId, Long loopId) {
-        // 先查 app_loop
+        // 先查 app_loop，找到后再验 Loop 未被逻辑删除
         long count = appLoopMapper.selectCountByQuery(
                 new QueryWrapper().eq("app_id", appId).eq("loop_id", loopId)
         );
         if (count > 0) {
-            return true;
+            Loop loop = loopMapper.selectOneById(loopId);
+            return loop != null && loop.getIsDelete() != 1;
         }
-        // 再查用户的 Loop
+        // 再查用户的 Loop（自己创建的 Loop 即使未加入应用库也可注入）
         count = loopMapper.selectCountByQuery(
                 new QueryWrapper().eq("id", loopId).eq("user_id", userId).eq("is_delete", 0)
         );

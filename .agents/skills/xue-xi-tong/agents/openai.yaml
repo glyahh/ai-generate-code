@@ -1,0 +1,7 @@
+interface:
+  display_name: "xue-xi-tong"
+  short_description: "Learning plan and study help"
+  default_prompt: "Use $xue-xi-tong to create a learning plan and explain key concepts with practice tasks."
+
+policy:
+  allow_implicit_invocation: true

@@ -4,24 +4,6 @@ import request from '@/request';
 
 import * as API from './types';
 
-/** 此处后端没有提供注释 POST /chatHistory/admin */
-export function chatHistoryAdminUsingPost({
-  body,
-  options,
-}: {
-  body: API.ChatHistoryQueryRequest;
-  options?: { [key: string]: unknown };
-}) {
-  return request<API.BaseResponsePageChatHistory>('/chatHistory/admin', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    data: body,
-    ...(options || {}),
-  });
-}
-
 /** 此处后端没有提供注释 GET /chatHistory/app/${param0} */
 export function chatHistoryAppAppIdUsingGet({
   params,
@@ -37,11 +19,7 @@ export function chatHistoryAppAppIdUsingGet({
     `/chatHistory/app/${param0}`,
     {
       method: 'GET',
-      params: {
-        // size has a default value: 10
-        size: '10',
-        ...queryParams,
-      },
+      params: { ...queryParams },
       ...(options || {}),
     }
   );
@@ -58,7 +36,7 @@ export function chatHistoryOpenApiExportAppIdUsingGet({
 }) {
   const { appId: param0, ...queryParams } = params;
 
-  return request<API.BaseResponseListChatHistoryVO>(
+  return request<API.BaseResponseString>(
     `/chatHistory/export/${param0}`,
     {
       method: 'GET',
@@ -86,52 +64,59 @@ export function chatHistoryMyUsingPost({
   });
 }
 
-/** 此处后端没有提供注释 GET /chatHistory/roundCount/${param0} */
-export function chatHistoryRoundCountAppIdUsingGet({
+/** 此处后端没有提供注释 POST /chatHistory/deleteByAppId/${param0} */
+export function chatHistoryDeleteByAppIdUsingPost({
   params,
   options,
 }: {
   // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
-  params: API.ChatHistoryRoundCountAppIdUsingGetParams;
+  params: API.ChatHistoryDeleteByAppIdUsingPostParams;
   options?: { [key: string]: unknown };
 }) {
   const { appId: param0, ...queryParams } = params;
 
-  return request<API.BaseResponseInteger>(`/chatHistory/roundCount/${param0}`, {
+  return request<API.BaseResponseBoolean>(
+    `/chatHistory/deleteByAppId/${param0}`,
+    {
+      method: 'POST',
+      params: { ...queryParams },
+      ...(options || {}),
+    }
+  );
+}
+
+/** 此处后端没有提供注释 GET /chatHistory/search */
+export function chatHistorySearchUsingGet({
+  params,
+  options,
+}: {
+  // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
+  params: API.ChatHistorySearchUsingGetParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponsePageChatHistoryAppVO>('/chatHistory/search', {
     method: 'GET',
-    params: { ...queryParams },
+    params: {
+      ...params,
+    },
     ...(options || {}),
   });
 }
 
-/** 此处后端没有提供注释 POST /chatHistory/save */
-export function chatHistorySaveUsingPost({
+/** 此处后端没有提供注释 POST /chatHistory/admin/page/vo */
+export function chatHistoryAdminUsingPost({
   body,
   options,
 }: {
-  body: API.ChatHistory;
+  body: API.ChatHistoryQueryRequest;
   options?: { [key: string]: unknown };
 }) {
-  return request<API.BaseResponseBoolean>('/chatHistory/save', {
+  return request<API.BaseResponsePageChatHistoryAppVO>('/chatHistory/admin/page/vo', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     data: body,
-    ...(options || {}),
-  });
-}
-
-/** 用户删除某应用全部对话历史 POST /chatHistory/deleteByAppId/${param0} */
-export function chatHistoryDeleteByAppIdUsingPost({
-  appId,
-  options,
-}: {
-  appId: number;
-  options?: { [key: string]: unknown };
-}) {
-  return request<API.BaseResponseBoolean>(`/chatHistory/deleteByAppId/${appId}`, {
-    method: 'POST',
     ...(options || {}),
   });
 }

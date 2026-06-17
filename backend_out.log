@@ -1,0 +1,72 @@
+[INFO] Scanning for projects...
+Downloading from central: https://repo.maven.apache.org/maven2/org/springframework/boot/maven-metadata.xml
+Downloading from central: https://repo.maven.apache.org/maven2/io/github/git-commit-id/maven-metadata.xml
+Downloading from central: https://repo.maven.apache.org/maven2/org/flywaydb/maven-metadata.xml
+Downloading from central: https://repo.maven.apache.org/maven2/org/cyclonedx/maven-metadata.xml
+Progress (1): 234 BProgress (2): 234 B | 255 BProgress (3): 234 B | 255 B | 249 BProgress (4): 234 B | 255 B | 249 B | 243 B                                           Downloaded from central: https://repo.maven.apache.org/maven2/org/springframework/boot/maven-metadata.xml (249 B at 158 B/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/jooq/maven-metadata.xml
+Downloaded from central: https://repo.maven.apache.org/maven2/org/cyclonedx/maven-metadata.xml (243 B at 153 B/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/maven-metadata.xml
+Downloaded from central: https://repo.maven.apache.org/maven2/io/github/git-commit-id/maven-metadata.xml (255 B at 159 B/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/liquibase/maven-metadata.xml
+Downloaded from central: https://repo.maven.apache.org/maven2/org/flywaydb/maven-metadata.xml (234 B at 146 B/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/graalvm/buildtools/maven-metadata.xml
+Progress (1): 375 BProgress (2): 375 B | 398 BProgress (3): 375 B | 398 B | 242 BProgress (4): 375 B | 398 B | 242 B | 394 B                                           Downloaded from central: https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/maven-metadata.xml (375 B at 1.1 kB/s)
+Downloaded from central: https://repo.maven.apache.org/maven2/org/graalvm/buildtools/maven-metadata.xml (242 B at 740 B/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-metadata.xml
+Downloaded from central: https://repo.maven.apache.org/maven2/org/jooq/maven-metadata.xml (398 B at 1.1 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/codehaus/mojo/maven-metadata.xml
+Downloaded from central: https://repo.maven.apache.org/maven2/org/liquibase/maven-metadata.xml (394 B at 1.2 kB/s)
+Progress (1): 3.1 kBProgress (1): 7.7 kBProgress (1): 12 kB Progress (2): 12 kB | 3.8 kBProgress (2): 17 kB | 3.8 kBProgress (2): 20 kB | 3.8 kBProgress (2): 21 kB | 3.8 kBProgress (2): 21 kB | 9.3 kBProgress (2): 21 kB | 14 kB                            Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-metadata.xml (14 kB at 40 kB/s)
+Downloaded from central: https://repo.maven.apache.org/maven2/org/codehaus/mojo/maven-metadata.xml (21 kB at 33 kB/s)
+[INFO] 
+[INFO] ------------------< com.dbts:glyahh-ai-generate-code >------------------
+[INFO] Building glyahh-ai-generate-code 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] >>> spring-boot:3.5.10:run (default-cli) > test-compile @ glyahh-ai-generate-code >>>
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ glyahh-ai-generate-code ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] Copying 18 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ glyahh-ai-generate-code ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ glyahh-ai-generate-code ---
+[INFO] skip non existing resourceDirectory D:\mainJava\all Code\program\glyahh-ai-generate-code\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ glyahh-ai-generate-code ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 42 source files with javac [debug parameters release 21] to target\test-classes
+[INFO] /D:/mainJava/all Code/program/glyahh-ai-generate-code/src/test/java/com/dbts/glyahhaigeneratecode/core/CodeParserTest.java: D:\mainJava\all Code\program\glyahh-ai-generate-code\src\test\java\com\dbts\glyahhaigeneratecode\core\CodeParserTest.java使用或覆盖了已过时的 API。
+[INFO] /D:/mainJava/all Code/program/glyahh-ai-generate-code/src/test/java/com/dbts/glyahhaigeneratecode/core/CodeParserTest.java: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /D:/mainJava/all Code/program/glyahh-ai-generate-code/src/test/java/com/dbts/glyahhaigeneratecode/controller/ChatToGenCodeControllerWorkflowTest.java:[68,17] 无法将类 com.dbts.glyahhaigeneratecode.controller.ChatToGenCodeController中的方法 chatToGenCode应用到给定类型;
+  需要: java.lang.Long,java.lang.String,java.lang.Long,jakarta.servlet.http.HttpServletRequest
+  找到:    long,java.lang.String,jakarta.servlet.http.HttpServletRequest
+  原因: 实际参数列表和形式参数列表长度不同
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  14.256 s
+[INFO] Finished at: 2026-06-18T00:42:18+08:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:testCompile (default-testCompile) on project glyahh-ai-generate-code: Compilation failure
+[ERROR] /D:/mainJava/all Code/program/glyahh-ai-generate-code/src/test/java/com/dbts/glyahhaigeneratecode/controller/ChatToGenCodeControllerWorkflowTest.java:[68,17] 无法将类 com.dbts.glyahhaigeneratecode.controller.ChatToGenCodeController中的方法 chatToGenCode应用到给定类型;
+[ERROR]   需要: java.lang.Long,java.lang.String,java.lang.Long,jakarta.servlet.http.HttpServletRequest
+[ERROR]   找到:    long,java.lang.String,jakarta.servlet.http.HttpServletRequest
+[ERROR]   原因: 实际参数列表和形式参数列表长度不同
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

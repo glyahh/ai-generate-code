@@ -1,0 +1,7 @@
+interface:
+  display_name: "git_commit"
+  short_description: "6-block commit/PR summary from git diff"
+  default_prompt: "Use $git_commit to read my git diff and output the strict 6-block Chinese commit summary in a single ```text code block."
+
+policy:
+  allow_implicit_invocation: true

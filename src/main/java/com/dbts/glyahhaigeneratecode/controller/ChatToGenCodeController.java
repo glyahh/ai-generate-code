@@ -43,8 +43,9 @@ public class ChatToGenCodeController {
     @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "你先别急")
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                                        @RequestParam String message,
+                                                       @RequestParam(required = false) Long loopId,
                                                        HttpServletRequest request) {
-        return toSseEvent(chatToGenCodeService.chatToGenCode(appId, message, getLoginUserWithValidation(appId, message, request)));
+        return toSseEvent(chatToGenCodeService.chatToGenCode(appId, message, loopId, getLoginUserWithValidation(appId, message, request)));
     }
 
     @GetMapping(value = "/gen/workflow", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

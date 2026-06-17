@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/pptx-work/**)",
+      "Bash(python scripts/thumbnail.py \"AI-Code-Generation-Platform.pptx\" thumbnails --cols 4)",
+      "Bash(pip install *)",
+      "Bash(unzip -o /c/Users/gyb10/.m2/repository/dev/langchain4j/langchain4j-open-ai/1.1.0/langchain4j-open-ai-1.1.0.jar \"dev/langchain4j/model/openai/internal/Json.class\" -d /tmp/chatextract)",
+      "Bash(unzip -o /c/Users/gyb10/.m2/repository/dev/langchain4j/langchain4j-open-ai/1.1.0/langchain4j-open-ai-1.1.0.jar \"dev/langchain4j/model/openai/OpenAiChatRequestParameters.class\" -d /tmp/chatextract)",
+      "Read(//tmp/chatextract/dev/langchain4j/model/openai/**)",
+      "Bash(unzip -o /c/Users/gyb10/.m2/repository/dev/langchain4j/langchain4j-open-ai/1.1.0/langchain4j-open-ai-1.1.0.jar \"dev/langchain4j/http/client/HttpClient.class\" -d /tmp/chatextract)",
+      "Read(//tmp/chatextract/dev/langchain4j/http/client/**)",
+      "Read(//c/Users/gyb10/.claude/plans/**)"
+    ],
+    "additionalDirectories": [
+      "d:\\mainJava\\all Code\\program\\glyahh-ai-generate-code\\workspace\\slides",
+      "D:\\pptx-work",
+      "C:\\Users\\gyb10\\.claude\\skills\\pptx\\scripts"
+    ]
+  }
+}

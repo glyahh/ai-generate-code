@@ -1,0 +1,65 @@
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+]
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+
+[mcp_servers.context7.http_headers]
+CONTEXT7_API_KEY = "ctx7sk-dfbe5691-1ec9-43cd-8156-4c4849fe3972"
+
+[mcp_servers.edgeone-pages-mcp-server]
+command = "npx"
+args = [
+    "-y",
+    "edgeone-pages-mcp",
+]
+
+[mcp_servers.edgeone-pages-mcp-server.env]
+EDGEONE_PAGES_API_TOKEN = "B6obtBcCBar4hrBzhkKYZlMzlRYOUsmEJHK0NoHxMBA="
+EDGEONE_PAGES_PROJECT_NAME = ""
+
+[mcp_servers.firecrawl-mcp]
+command = "npx"
+args = [
+    "-y",
+    "firecrawl-mcp",
+]
+
+[mcp_servers.firecrawl-mcp.env]
+FIRECRAWL_API_KEY = "fc-01720455479749a496e295a6eba81bf0"
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+
+[mcp_servers.github.http_headers]
+Authorization = "GITHUB_PAT_PLACEHOLDER"
+
+[mcp_servers.playwright-mcp]
+command = "npx"
+args = [
+    "-y",
+    "playwright-mcp@latest",
+]
+
+[mcp_servers.search-scrape]
+command = "npx"
+args = [
+    "-y",
+    "serper-search-scrape-mcp-server",
+]
+
+[mcp_servers.search-scrape.env]
+SERPER_API_KEY = ""
+
+[mcp_servers.streamline-mcp]
+url = "https://public-api.streamlinehq.com/mcp"
+
+[mcp_servers.streamline-mcp.http_headers]
+X-API-Key = "CsOOUZossdohiByw.4e3596fcd25e748e188d4312d68ab2b6"
+
+[mcp_servers.web-to-mcp]
+url = "https://web-to-mcp.com/mcp/b1d0d3ce-a26a-4328-b089-84e145d4753c/"

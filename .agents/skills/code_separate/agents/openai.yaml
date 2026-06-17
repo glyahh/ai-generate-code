@@ -1,0 +1,7 @@
+interface:
+  display_name: "code_separate"
+  short_description: "Decouple code with architecture scan; preserve user code verbatim"
+  default_prompt: "Use /code_separate or $code_separate to decouple/extract code: scan module tree + CLAUDE.md first, migrate user-written blocks verbatim via manual add/delete only (no scripts), then optimize call-site wiring only."
+
+policy:
+  allow_implicit_invocation: false

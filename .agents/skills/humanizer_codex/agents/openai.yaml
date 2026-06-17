@@ -1,0 +1,7 @@
+interface:
+  display_name: "humanizer_codex"
+  short_description: "Rewrite to sound natural"
+  default_prompt: "Use /humanizer_codex (or $humanizer_codex) to rewrite my text to be natural, concise, and professional."
+
+policy:
+  allow_implicit_invocation: true

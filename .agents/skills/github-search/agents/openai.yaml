@@ -1,0 +1,7 @@
+interface:
+  display_name: "github-search"
+  short_description: "Search GitHub for references"
+  default_prompt: "Use $github-search to find relevant GitHub repos/issues/PRs for this topic and summarize what matters."
+
+policy:
+  allow_implicit_invocation: true

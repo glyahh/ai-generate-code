@@ -1,0 +1,7 @@
+interface:
+  display_name: "search"
+  short_description: "Search the web with sourced results"
+  default_prompt: "Use $search to look up information and return conclusions with sources."
+
+policy:
+  allow_implicit_invocation: true
