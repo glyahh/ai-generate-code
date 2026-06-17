@@ -156,7 +156,7 @@ public class LoopServiceImpl implements LoopService {
 
         if (StrUtil.isNotBlank(req.getSearchText())) {
             qw.and(w -> w.like("loop_name", req.getSearchText())
-                    .or().like("description", req.getSearchText()));
+                    .or(q -> q.like("description", req.getSearchText())));
         }
 
         Page<Loop> page = loopMapper.paginate(Page.of(req.getPageNum(), req.getPageSize()), qw);
