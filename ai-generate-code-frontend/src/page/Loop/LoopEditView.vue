@@ -1,20 +1,15 @@
 <template>
-  <div class="loop-edit">
-    <h1>编辑 Loop</h1>
-  </div>
+  <LoopCreateView :edit-id="id" />
 </template>
 
 <script setup lang="ts">
+import LoopCreateView from './LoopCreateView.vue'
+
+defineProps<{
+  id: string
+}>()
 </script>
 
 <style scoped>
-.loop-edit {
-  padding: 24px;
-}
-
-.loop-edit h1 {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
+/* LoopEditView 完全委托给 LoopCreateView */
 </style>
