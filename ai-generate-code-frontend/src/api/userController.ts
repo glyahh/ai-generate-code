@@ -275,3 +275,41 @@ export function userUpdateUsingPost({
     ...(options || {}),
   });
 }
+
+/** 用户个性化配置 VO */
+export interface UserPersonalizationVO {
+  appStyle?: string;
+  answerStyle?: string;
+}
+
+/** 用户个性化配置更新请求 */
+export interface UserPersonalizationUpdateRequest {
+  appStyle?: string;
+  answerStyle?: string;
+}
+
+/** 获取当前登录用户的个性化配置 GET /user/personalization */
+export function userPersonalizationGetUsingGet(options?: Record<string, any>) {
+  return request<UserPersonalizationVO>('/user/personalization', {
+    method: 'GET',
+    ...(options || {}),
+  });
+}
+
+/** 保存当前登录用户的个性化配置 PUT /user/personalization */
+export function userPersonalizationPutUsingPut({
+  body,
+  options,
+}: {
+  body: UserPersonalizationUpdateRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<boolean>('/user/personalization', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}

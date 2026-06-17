@@ -15,6 +15,7 @@ import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
+import com.dbts.glyahhaigeneratecode.service.UserPersonalizationService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ChatToGenCode;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +54,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
     private final StreamHandlerExecutor streamHandlerExecutor;
 
+    private final UserPersonalizationService userPersonalizationService;
     /**
      * 统一入口：基于应用配置和用户输入触发代码生成（流式）
      *
@@ -108,7 +110,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         }
 
         // 6. 调用 AI 生成代码（流式）- 此时不执行压缩，压缩作为 Flux 的第一个阶段
-        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId, firstRound);
+        String enhancedMessage = injectPersonalizationPrompt(message, user.getId());
+        Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(enhancedMessage, codeGenTypeEnum, appId, firstRound);
         Flux<String> handlerFlux = streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message, roundId);
 
         // 7. 在 AI 生成流前插入压缩阶段
@@ -171,8 +174,9 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         }
 
         // 获取一手流式string代码（此时不执行压缩，压缩作为 Flux 的第一个阶段）
+        String enhancedMessage = injectPersonalizationPrompt(message, user.getId());
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
-                message, codeGenTypeEnum, appId, firstRound);
+                enhancedMessage, codeGenTypeEnum, appId, firstRound);
 
         Flux<String> handlerFlux = streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, true, firstRound, message, roundId)
                 .doOnError(InputGuardrailException.class, e -> {
@@ -273,4 +277,15 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         }
         return initPrompt + System.lineSeparator() + message;
     }
+
+    /**
+     * 若用户已配置个性化 prompt，将其作为前缀注入 userMessage。
+     * 优先级：低于本轮用户显式指令、高于系统默认 SystemMessage。
+     * 空配置时原样返回 message。
+     */
+    private String injectPersonalizationPrompt(String message, Long userId) {
+        String injectBlock = userPersonalizationService.buildInjectPrompt(userId);
+        return StrUtil.isBlank(injectBlock) ? message : injectBlock + message;
+    }
+
 }

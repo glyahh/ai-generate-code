@@ -1,10 +1,42 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
 import { useAppearanceStore, CODE_THEME_OPTIONS, DEFAULT_CODE_TYPE_OPTIONS } from '@/stores/appearance'
 
 const router = useRouter()
 const store = useAppearanceStore()
+const collapseMotionDesc = ref(true) // 减少动画说明列表默认折叠
+
+const previewCode = `function hello() {
+  const msg = "你好，世界！";
+  console.log(msg);
+  document.body.append(msg);
+}
+
+hello();`
+
+/** 简约的 JS 语法高亮 */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+const highlightedPreview = computed(() => {
+  const escaped = escapeHtml(previewCode)
+  return escaped
+    .replace(/(\/\/[^\r\n]*)/g, '<span class="code-comment">$1</span>')
+    .replace(/(["'`])(?:\\.|(?!\1)[\s\S])*?\1/g, '<span class="code-string">$&</span>')
+    .replace(
+      /\b(const|let|var|function|return|if|else|switch|case|break|default|for|while|do|continue|import|from|export|class|extends|new|this|async|await|try|catch|finally|throw|null|undefined|true|false)\b/g,
+      '<span class="code-keyword">$1</span>',
+    )
+    .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="code-number">$1</span>')
+    .replace(/([=+\-*/%<>!&|^~?:]+)/g, '<span class="code-operator">$1</span>')
+    .replace(/\b([A-Za-z_$][\w$]*)(?=\s*\()/g, '<span class="code-function">$1</span>')
+})
 
 function goBack() {
   router.back()
@@ -104,6 +136,13 @@ function goBack() {
           <a-button size="small" @click="store.codeFontSize = store.DEFAULTS.codeFontSize">重置</a-button>
         </div>
       </div>
+
+      <!-- 代码字号预览 -->
+      <div class="appearance-row appearance-row--code-preview">
+        <pre class="code-preview"
+          :style="{ fontSize: store.codeFontSize + 'px' }"
+        ><code v-html="highlightedPreview"></code></pre>
+      </div>
     </section>
 
     <!-- C. 界面密度 -->
@@ -133,14 +172,22 @@ function goBack() {
       <!-- 减少动画详情与演示 -->
       <div class="appearance-row appearance-row--motion-detail">
         <div class="motion-detail">
-          <div class="motion-detail__label">关闭后以下动画将被抑制：</div>
-          <ul class="motion-detail__list">
-            <li>页面切换过渡（背景色、文字色）</li>
-            <li>元素展开与折叠（代码块、工具卡片）</li>
-            <li>加载脉冲（工具调用、打字指示器、工作流步骤）</li>
-            <li>装饰循环（首页漂浮、光束旋转、渐变位移）</li>
-            <li>hover 位移与阴影过渡</li>
-          </ul>
+          <div
+            class="motion-detail__label motion-detail__label--clickable"
+            @click="collapseMotionDesc = !collapseMotionDesc"
+          >
+            <span class="motion-detail__arrow" :class="{ 'motion-detail__arrow--expanded': !collapseMotionDesc }">▶</span>
+            关闭后以下动画将被抑制：
+          </div>
+          <div v-show="!collapseMotionDesc" class="motion-detail__collapse-wrap">
+            <ul class="motion-detail__list">
+              <li>页面切换过渡（背景色、文字色）</li>
+              <li>元素展开与折叠（代码块、工具卡片）</li>
+              <li>加载脉冲（工具调用、打字指示器、工作流步骤）</li>
+              <li>装饰循环（首页漂浮、光束旋转、渐变位移）</li>
+              <li>hover 位移与阴影过渡</li>
+            </ul>
+          </div>
           <div class="motion-demo">
             <div class="motion-demo__header">对比演示</div>
             <div class="motion-demo__body">
@@ -422,7 +469,69 @@ function goBack() {
   color: var(--text-base, #1f1f1f);
 }
 
-/* 响应式 */
+/* ---------- 代码字号预览 ---------- */
+.appearance-row--code-preview {
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+  display: flex;
+  align-items: stretch;
+}
+
+.code-preview {
+  flex: 1;
+  margin: 0;
+  padding: 10px 14px;
+  font-family: var(--code-font-family, Consolas, Monaco, "Courier New", monospace);
+  line-height: 1.7;
+  color: var(--code-text, #d4d4d4);
+  background: var(--code-bg, #1e1e1e);
+  border-radius: var(--radius-sm, 6px);
+  white-space: pre;
+  tab-size: 2;
+}
+
+.code-preview code {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+}
+
+.code-preview :deep(.code-keyword) { color: var(--code-keyword, #569cd6); font-weight: 500; }
+.code-preview :deep(.code-string) { color: var(--code-string, #e6b450); }
+.code-preview :deep(.code-comment) { color: var(--code-comment, #7f8ea3); font-style: italic; }
+.code-preview :deep(.code-number) { color: var(--code-number, #c4b5fd); }
+.code-preview :deep(.code-operator) { color: var(--code-operator, #f38ba8); }
+.code-preview :deep(.code-function) { color: var(--code-function, #7ee787); }
+
+/* ---------- 减少动画折叠 ---------- */
+.motion-detail__label--clickable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 150ms ease;
+}
+
+.motion-detail__label--clickable:hover {
+  color: var(--color-primary, #1677ff);
+}
+
+.motion-detail__arrow {
+  display: inline-block;
+  font-size: 10px;
+  margin-right: 4px;
+  transition: transform 150ms ease;
+  transform: rotate(0deg);
+}
+
+.motion-detail__arrow--expanded {
+  transform: rotate(90deg);
+}
+
+.motion-detail__collapse-wrap {
+  overflow: hidden;
+  transition: max-height 200ms ease, opacity 150ms ease;
+}
+
+/* ---------- 响应式 ---------- */
 @media (max-width: 576px) {
   .appearance-page {
     padding: 16px;
@@ -445,6 +554,10 @@ function goBack() {
   .row-control--slider {
     min-width: unset;
     width: 100%;
+  }
+
+  .appearance-row--code-preview {
+    padding: 4px var(--spacing-md, 16px);
   }
 }
 </style>

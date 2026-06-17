@@ -12,9 +12,10 @@ import {
   TeamOutlined,
   SafetyCertificateOutlined,
   HistoryOutlined,
+  StarOutlined,
 } from '@ant-design/icons-vue'
 
-type MenuKey = 'password' | 'profile' | 'apply' | 'history'
+type MenuKey = 'password' | 'profile' | 'apply' | 'history' | 'personalization'
 
 const userLoginStore = UserLoginStore()
 const activeMenu = ref<MenuKey>('profile')
@@ -25,6 +26,7 @@ const isAdmin = computed(() => userLoginStore.userLogin?.userRole === 'admin')
 const menuItems = computed(() => {
   const items: { key: MenuKey; label: string; icon: any }[] = [
     { key: 'profile', label: '基本资料', icon: UserOutlined },
+    { key: 'personalization', label: '个性化', icon: StarOutlined },
     { key: 'password', label: '安全设置', icon: LockOutlined },
     { key: 'apply', label: '申请管理', icon: TeamOutlined },
   ]
@@ -120,6 +122,33 @@ async function handleProfileSubmit() {
   } finally {
     profileLoading.value = false
   }
+}
+
+const personalizationForm = ref({ appStyle: '', answerStyle: '' })
+const personalizationLoading = ref(false)
+
+async function loadPersonalization() {
+  try {
+    const res = await userPersonalizationGetUsingGet()
+    if (res?.data) {
+      personalizationForm.value = { appStyle: res.data.appStyle, answerStyle: res.data.answerStyle }
+    }
+  } catch (e: any) { message.error('loading') }
+}
+
+function customCount(val) {
+  const remaining = 2000 - String(val ?? '').length
+  return remaining > 0 ? '还可输入 ' + remaining + ' 字' : '已达上限'
+}
+
+async function handlePersonalizationSubmit() {
+  personalizationLoading.value = true
+  try {
+    const res = await userPersonalizationPutUsingPut({ body: { appStyle: personalizationForm.value.appStyle, answerStyle: personalizationForm.value.answerStyle } })
+    if (res?.data === true) message.success('保存成功')
+    else message.error('内容不为空')
+  } catch (e: any) { message.error('内容不为空') }
+  finally { personalizationLoading.value = false }
 }
 
 // 申请管理 / 用户请求（模拟数据）
@@ -276,6 +305,42 @@ watch(
             </div>
           </section>
 
+          <section v-else-if="activeMenu === 'personalization'" class="work-panel">
+            <h3 class="panel-title">个性化</h3>
+            <p class="panel-desc">配置你的代码生成偏好，每次生成时 AI 将参考以下指南</p>
+            <div class="form-card">
+              <a-form layout="vertical">
+                <a-form-item label="应用风格">
+                  <a-textarea v-model:value="personalizationForm.appStyle" placeholder="例如：我喜欢简洁、使用毛玻璃效果、主色调为蓝色..." :rows="5" size="large" :maxlength="2000" :show-count="customCount" />
+                </a-form-item>
+                <a-form-item label="回答风格">
+                  <a-textarea v-model:value="personalizationForm.answerStyle" placeholder="例如：用正式的语气回答，代码与解释交替..." :rows="5" size="large" :maxlength="2000" :show-count="customCount" />
+                </a-form-item>
+                <a-button type="primary" size="large" :loading="personalizationLoading" class="submit-btn"
+                  @click="handlePersonalizationSubmit">
+                  保存配置
+                </a-button>
+              </a-form>
+            </div>
+          </section>
+          <section v-else-if="activeMenu === 'personalization'" class="work-panel">
+            <h3 class="panel-title">个性化</h3>
+            <p class="panel-desc">配置你的代码生成偏好，每次生成时 AI 将参考以下指南</p>
+            <div class="form-card">
+              <a-form layout="vertical">
+                <a-form-item label="应用风格">
+                  <a-textarea v-model:value="personalizationForm.appStyle" placeholder="例如：我喜欢简洁、使用毛玻璃效果、主色调为蓝色..." :rows="5" size="large" :maxlength="2000" :show-count="customCount" />
+                </a-form-item>
+                <a-form-item label="回答风格">
+                  <a-textarea v-model:value="personalizationForm.answerStyle" placeholder="例如：用正式的语气回答，代码与解释交替..." :rows="5" size="large" :maxlength="2000" :show-count="customCount" />
+                </a-form-item>
+                <a-button type="primary" size="large" :loading="personalizationLoading" class="submit-btn"
+                  @click="handlePersonalizationSubmit">
+                  保存配置
+                </a-button>
+              </a-form>
+            </div>
+          </section>
           <section v-else-if="activeMenu === 'password'" class="work-panel">
             <h3 class="panel-title">安全设置</h3>
             <p class="panel-desc">修改登录密码，请先验证原密码</p>
