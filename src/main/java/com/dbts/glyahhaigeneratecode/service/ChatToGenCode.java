@@ -9,10 +9,11 @@ public interface ChatToGenCode {
      *
      * @param appId   应用 id
      * @param message 用户输入内容
+     * @param loopId  要注入的 Loop ID（可选）
      * @param user    当前登录用户
      * @return 代码内容的流式输出
      */
-    Flux<String> chatToGenCode(Long appId, String message, User user);
+    Flux<String> chatToGenCode(Long appId, String message, Long loopId, User user);
 
     /**
      * workflow 入口：复用现有会话与权限链路，通过工作流编排生成代码（流式）

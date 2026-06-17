@@ -18,6 +18,7 @@ import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.UserPersonalizationService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ChatToGenCode;
+import com.dbts.glyahhaigeneratecode.service.support.LoopInjectService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,15 +56,17 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     private final StreamHandlerExecutor streamHandlerExecutor;
 
     private final UserPersonalizationService userPersonalizationService;
+    private final LoopInjectService loopInjectService;
     /**
      * 统一入口：基于应用配置和用户输入触发代码生成（流式）
      *
      * @param appId   应用 id
      * @param message 用户输入内容
+     * @param loopId  要注入的 Loop ID（可选）
      * @param user    当前登录用户
      * @return 代码内容的流式输出
      */
-    public Flux<String> chatToGenCode(Long appId, String message, User user) {
+    public Flux<String> chatToGenCode(Long appId, String message, Long loopId, User user) {
         // 1. 基础参数校验
         validateParams(appId, message, user);
 
@@ -109,8 +112,9 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             lock.unlock();
         }
 
-        // 6. 调用 AI 生成代码（流式）- 此时不执行压缩，压缩作为 Flux 的第一个阶段
+        // 6. 注入个性化 prompt + loop skill（注入顺序：personalization → message → loop_skill）
         String enhancedMessage = injectPersonalizationPrompt(message, user.getId());
+        enhancedMessage = loopInjectService.injectIfPresent(enhancedMessage, user.getId(), appId, loopId);
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(enhancedMessage, codeGenTypeEnum, appId, firstRound);
         Flux<String> handlerFlux = streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message, roundId);
 
