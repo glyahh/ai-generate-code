@@ -13,6 +13,7 @@ userLoginStore.fetchLoginUser()
 const baseMenuItems = [
   { key: 'home', path: '/', label: '首页' },
   { key: 'code-generate', path: '/code/generate', label: '代码生成' },
+  { key: 'loop', path: '/loop', label: 'Loop' },
 ]
 
 /** 管理员专属菜单项（登录为 admin 时显示） */
@@ -90,6 +91,11 @@ function handleHistory() {
   router.push('/user/chats')
 }
 
+// 我的 Loop
+function handleMyLoop() {
+  router.push('/user/loops')
+}
+
 // 退出登录
 async function handleLogout() {
   if (isLoggingOut.value) return
@@ -145,6 +151,10 @@ async function handleLogout() {
               <div class="menu-item settings-item" @click="handleAppearance">
                 <SkinOutlined class="menu-icon" />
                 <span class="menu-text">外观设置</span>
+              </div>
+              <div class="menu-item settings-item" @click="handleMyLoop">
+                <RightOutlined class="menu-icon" />
+                <span class="menu-text">我的 Loop</span>
               </div>
               <div class="menu-item logout-item" @click="handleLogout" :class="{ 'loading': isLoggingOut }">
                 <RightOutlined class="menu-icon" />

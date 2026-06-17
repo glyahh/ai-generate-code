@@ -12,6 +12,10 @@ import AppChatView from '@/page/App/AppChatView.vue'
 import AppEditView from '@/page/App/AppEditView.vue'
 import CodeGenerateEntry from '@/page/App/CodeGenerateEntry.vue'
 import MainIndexView from '@/page/MainIndex/MainIndexView.vue'
+import LoopMarketView from '@/page/Loop/LoopMarketView.vue'
+import MyLoopView from '@/page/Loop/MyLoopView.vue'
+import LoopCreateView from '@/page/Loop/LoopCreateView.vue'
+import LoopEditView from '@/page/Loop/LoopEditView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -94,6 +98,28 @@ const router = createRouter({
       path: '/app/:id/edit',
       name: 'app-edit',
       component: AppEditView,
+      props: true,
+    },
+    // Loop 技能市场
+    {
+      path: '/loop',
+      name: 'loop-market',
+      component: LoopMarketView,
+    },
+    {
+      path: '/user/loops',
+      name: 'my-loop',
+      component: MyLoopView,
+    },
+    {
+      path: '/loop/create',
+      name: 'loop-create',
+      component: LoopCreateView,
+    },
+    {
+      path: '/loop/:id/edit',
+      name: 'loop-edit',
+      component: LoopEditView,
       props: true,
     },
   ],

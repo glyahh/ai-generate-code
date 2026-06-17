@@ -16,6 +16,7 @@ import com.dbts.glyahhaigeneratecode.model.DTO.AppAddRequest;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppAdminUpdateRequest;
 import com.dbts.glyahhaigeneratecode.model.DTO.AppUpdateRequest;
 import com.dbts.glyahhaigeneratecode.model.VO.ProjectFileVO;
+import com.dbts.glyahhaigeneratecode.service.AppLoopService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ProjectDownloadService;
 import com.dbts.glyahhaigeneratecode.service.ScreenshotService;
@@ -88,6 +89,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private ProjectDownloadService projectDownloadService;
 
+    @Resource
+    private AppLoopService appLoopService;
+
     @Override
     public long createApp (User loginUser, AppAddRequest appAddRequest) {
         App app = new App();
@@ -113,6 +117,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         //这里最好使用这个save,不要mapper中的insert,否则id会因为没有声明而被覆盖雪花算法的值,而且其他未声明的字段会报数据库不能非空
         boolean save = this.save(app);
         ThrowUtils.throwIf(!save, ErrorCode.OPERATION_ERROR, "创建应用失败");
+
+        // 创建成功后，如果有关联的 Loop 技能则绑定
+        if (appAddRequest.getLoopIds() != null && !appAddRequest.getLoopIds().isEmpty()) {
+            appLoopService.bindLoops(app.getId(), appAddRequest.getLoopIds(), "creation");
+        }
+
         return app.getId();
     }
 
