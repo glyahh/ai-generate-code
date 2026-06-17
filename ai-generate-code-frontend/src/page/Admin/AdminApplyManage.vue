@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { message, Modal as AModal } from 'ant-design-vue'
+import { message, Modal as AModal, Tabs, Table, Button, Tag, Space } from 'ant-design-vue'
 import type { ApplyVO } from '@/api'
 import { appApplyListPendingUsingPost, appApplyAgreeUsingPost, appApplyRejectUsingPost } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
@@ -11,9 +11,147 @@ const userLoginStore = UserLoginStore()
 
 const isAdmin = computed(() => userLoginStore.userLogin?.userRole === 'admin')
 
+const activeTab = ref('app-apply')
+
 const loading = ref(false)
 const applies = ref<ApplyVO[]>([])
 const activeIndex = ref(0)
+
+// ===== Loop 申请 =====
+const loopApplyLoading = ref(false)
+const loopApplyList = ref<any[]>([])
+const loopApplyPagination = ref({
+  current: 1,
+  pageSize: 20,
+  total: 0,
+  showSizeChanger: true,
+  showQuickJumper: true,
+  showTotal: (total: number) => `共 ${total} 条`,
+})
+
+const loopApplyColumns = [
+  { title: 'ID', dataIndex: 'id', key: 'id', width: 80, align: 'center' as const },
+  { title: 'Loop ID', dataIndex: 'loopId', key: 'loopId', width: 100, align: 'center' as const },
+  { title: '用户', dataIndex: 'userId', key: 'userId', width: 100, align: 'center' as const },
+  { title: '理由', dataIndex: 'applyReason', key: 'applyReason', ellipsis: true, width: 200 },
+  {
+    title: '状态',
+    dataIndex: 'status',
+    key: 'status',
+    width: 90,
+    align: 'center' as const,
+    customRender: ({ text }: { text?: number }) => {
+      if (text === 1) return h(Tag, { color: 'green' }, () => '已通过')
+      if (text === 2) return h(Tag, { color: 'red' }, () => '已拒绝')
+      return h(Tag, { color: 'orange' }, () => '待审核')
+    },
+  },
+  {
+    title: '创建时间',
+    dataIndex: 'createTime',
+    key: 'createTime',
+    width: 170,
+    customRender: ({ text }: { text?: string }) => formatDateTime(text),
+  },
+  {
+    title: '操作',
+    key: 'action',
+    width: 180,
+    align: 'center' as const,
+    customRender: ({ record }: { record: any }) => {
+      if (record.status !== 0) return h('span', { style: { color: '#999' } }, '已处理')
+      return h(Space, { size: 'small' }, () => [
+        h(Button, { size: 'small', type: 'primary', onClick: () => approveLoop(record) }, () => '通过'),
+        h(Button, { size: 'small', onClick: () => rejectLoop(record) }, () => '拒绝'),
+      ])
+    },
+  },
+]
+
+function formatDateTime(value?: string) {
+  if (!value) return '-'
+  try {
+    const date = new Date(value)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+      date.getDate(),
+    ).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(
+      date.getMinutes(),
+    ).padStart(2, '0')}`
+  } catch {
+    return value
+  }
+}
+
+async function loadLoopApplyList() {
+  loopApplyLoading.value = true
+  try {
+    // TODO: 替换为真实 API —— loopController / admin/list 或专项审批 API
+    // const res = await loopApplyAdminListUsingPost({
+    //   body: { pageCurrent: loopApplyPagination.value.current, pageSize: loopApplyPagination.value.pageSize },
+    // })
+    // if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+    //   loopApplyList.value = res.data.data.records || []
+    //   loopApplyPagination.value.total = res.data.data.totalRow || 0
+    // } else {
+    //   message.error(res.data.message || '获取 Loop 申请列表失败')
+    // }
+    console.log('load loop apply list placeholder')
+  } catch (e) {
+    console.error(e)
+    message.error('获取 Loop 申请列表失败，请稍后重试')
+  } finally {
+    loopApplyLoading.value = false
+  }
+}
+
+function handleLoopApplyTableChange(pag: any) {
+  loopApplyPagination.value.current = pag.current
+  loopApplyPagination.value.pageSize = pag.pageSize
+  void loadLoopApplyList()
+}
+
+async function approveLoop(record: any) {
+  loopApplyLoading.value = true
+  try {
+    // TODO: 替换为真实 API —— 审批通过，同时设 loop.priority=99
+    // const res = await loopApplyApproveUsingPost({ applyId: record.id })
+    // if (res.data.code === 0 || res.data.code === 20000) {
+    //   message.success('已通过，Loop 已上架精选')
+    //   await loadLoopApplyList()
+    // } else {
+    //   message.error(res.data.message || '操作失败')
+    // }
+    message.success('已通过，Loop 已上架精选')
+    console.log('approve loop placeholder', record.id)
+  } catch (e) {
+    console.error(e)
+    message.error('操作失败，请稍后重试')
+  } finally {
+    loopApplyLoading.value = false
+  }
+}
+
+async function rejectLoop(record: any) {
+  loopApplyLoading.value = true
+  try {
+    // TODO: 替换为真实 API —— 拒绝申请
+    // const res = await loopApplyRejectUsingPost({ applyId: record.id, reviewRemark: '管理员拒绝' })
+    // if (res.data.code === 0 || res.data.code === 20000) {
+    //   message.success('已拒绝该申请')
+    //   await loadLoopApplyList()
+    // } else {
+    //   message.error(res.data.message || '操作失败')
+    // }
+    message.success('已拒绝该申请')
+    console.log('reject loop placeholder', record.id)
+  } catch (e) {
+    console.error(e)
+    message.error('操作失败，请稍后重试')
+  } finally {
+    loopApplyLoading.value = false
+  }
+}
+// ===== /Loop 申请 =====
 
 // 拒绝弹窗
 const rejectModalVisible = ref(false)
@@ -163,121 +301,145 @@ function handleQuickLocate() {
 
 onMounted(() => {
   void loadPending()
+  void loadLoopApplyList()
 })
 </script>
 
 <template>
-  <div class="apply-manage-page">
-    <section class="left-column">
-      <h2 class="column-title">待处理请求</h2>
-      <p class="column-subtitle">
-        点击左侧列表中的用户或应用，右侧将展示详细信息。
-      </p>
-      <div class="apply-list" v-loading="loading">
-        <div
-          v-if="!applies.length"
-          class="empty-tip"
-        >
-          暂无待处理的用户请求。
+  <div class="apply-page-with-tabs">
+    <Tabs v-model:activeKey="activeTab" type="card" class="apply-tabs">
+      <Tabs.TabPane key="app-apply" tab="应用申请">
+        <div class="apply-manage-page">
+          <section class="left-column">
+            <h2 class="column-title">待处理请求</h2>
+            <p class="column-subtitle">
+              点击左侧列表中的用户或应用，右侧将展示详细信息。
+            </p>
+            <div class="apply-list" v-loading="loading">
+              <div
+                v-if="!applies.length"
+                class="empty-tip"
+              >
+                暂无待处理的用户请求。
+              </div>
+              <button
+                v-for="(item, index) in applies"
+                v-else
+                :key="`${item.userId}-${item.appId}-${index}`"
+                type="button"
+                class="apply-item"
+                :class="{ active: index === activeIndex }"
+                @click="selectApply(index)"
+              >
+                <div class="avatar-circle">
+                  <span>{{ (item.userId ?? 'U').toString().slice(-2) }}</span>
+                </div>
+                <div class="apply-meta">
+                  <div class="apply-id">
+                    {{ formatIdLabel(item) }}
+                  </div>
+                  <div class="apply-type">
+                    {{ formatOperate(item) }}
+                  </div>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section class="right-column" v-loading="detailLoading">
+            <div v-if="activeApply" class="detail-card">
+              <header class="detail-header">
+                <div class="detail-title-block">
+                  <div class="detail-tag">
+                    {{ formatOperate(activeApply) }}
+                  </div>
+                  <div class="detail-ids">
+                    <span>用户 ID：{{ activeApply.userId ?? '-' }}</span>
+                    <span v-if="activeApply.appId">App ID：{{ activeApply.appId }}</span>
+                  </div>
+                </div>
+              </header>
+
+              <main class="detail-body">
+                <div class="detail-section">
+                  <h3 class="section-title">申请理由</h3>
+                  <div class="reason-box">
+                    {{ activeApply.reason || '用户未填写具体理由。' }}
+                  </div>
+                </div>
+              </main>
+
+              <footer class="detail-footer">
+                <span class="footer-hint">请谨慎处理用户权限与应用展示相关的请求。</span>
+                <div class="footer-actions">
+                  <a-button @click="handleQuickLocate">
+                    一键查找
+                  </a-button>
+                  <a-button danger @click="handleDecision('reject')">
+                    拒绝
+                  </a-button>
+                  <a-button type="primary" @click="handleDecision('approve')">
+                    同意
+                  </a-button>
+                </div>
+              </footer>
+            </div>
+            <div v-else class="detail-empty">
+              请选择左侧列表中的一条请求查看详情。
+            </div>
+          </section>
+
+          <a-modal
+            v-model:open="rejectModalVisible"
+            title="拒绝该请求"
+            ok-text="确认拒绝"
+            cancel-text="取消"
+            :confirm-loading="detailLoading"
+            @ok="submitReject"
+            @cancel="closeRejectModal"
+          >
+            <div class="reject-form">
+              <div class="reject-field">
+                <label class="reject-label">审核备注（拒绝理由）<span class="required">*</span></label>
+                <a-textarea
+                  v-model:value="rejectReviewRemark"
+                  placeholder="请填写拒绝原因，将作为审核备注反馈给用户"
+                  :rows="3"
+                  allow-clear
+                />
+              </div>
+              <div class="reject-field">
+                <label class="reject-label">申请理由（可修改）</label>
+                <a-textarea
+                  v-model:value="rejectApplyReason"
+                  placeholder="可在此修改用户填写的申请理由，留空则保持原样"
+                  :rows="3"
+                  allow-clear
+                />
+                <p class="reject-hint">管理员可修改用户原本的申请理由文字，修改后将保存到该条申请记录中。</p>
+              </div>
+            </div>
+          </a-modal>
         </div>
-        <button
-          v-for="(item, index) in applies"
-          v-else
-          :key="`${item.userId}-${item.appId}-${index}`"
-          type="button"
-          class="apply-item"
-          :class="{ active: index === activeIndex }"
-          @click="selectApply(index)"
-        >
-          <div class="avatar-circle">
-            <span>{{ (item.userId ?? 'U').toString().slice(-2) }}</span>
+      </Tabs.TabPane>
+      <Tabs.TabPane key="loop-apply" tab="Loop 申请">
+        <div class="loop-apply-section">
+          <div class="loop-apply-header">
+            <h2>Loop 精选申请</h2>
+            <p class="loop-apply-subtitle">审核用户提交的 Loop 精选申请</p>
           </div>
-          <div class="apply-meta">
-            <div class="apply-id">
-              {{ formatIdLabel(item) }}
-            </div>
-            <div class="apply-type">
-              {{ formatOperate(item) }}
-            </div>
-          </div>
-        </button>
-      </div>
-    </section>
-
-    <section class="right-column" v-loading="detailLoading">
-      <div v-if="activeApply" class="detail-card">
-        <header class="detail-header">
-          <div class="detail-title-block">
-            <div class="detail-tag">
-              {{ formatOperate(activeApply) }}
-            </div>
-            <div class="detail-ids">
-              <span>用户 ID：{{ activeApply.userId ?? '-' }}</span>
-              <span v-if="activeApply.appId">App ID：{{ activeApply.appId }}</span>
-            </div>
-          </div>
-        </header>
-
-        <main class="detail-body">
-          <div class="detail-section">
-            <h3 class="section-title">申请理由</h3>
-            <div class="reason-box">
-              {{ activeApply.reason || '用户未填写具体理由。' }}
-            </div>
-          </div>
-        </main>
-
-        <footer class="detail-footer">
-          <span class="footer-hint">请谨慎处理用户权限与应用展示相关的请求。</span>
-          <div class="footer-actions">
-            <a-button @click="handleQuickLocate">
-              一键查找
-            </a-button>
-            <a-button danger @click="handleDecision('reject')">
-              拒绝
-            </a-button>
-            <a-button type="primary" @click="handleDecision('approve')">
-              同意
-            </a-button>
-          </div>
-        </footer>
-      </div>
-      <div v-else class="detail-empty">
-        请选择左侧列表中的一条请求查看详情。
-      </div>
-    </section>
-
-    <a-modal
-      v-model:open="rejectModalVisible"
-      title="拒绝该请求"
-      ok-text="确认拒绝"
-      cancel-text="取消"
-      :confirm-loading="detailLoading"
-      @ok="submitReject"
-      @cancel="closeRejectModal"
-    >
-      <div class="reject-form">
-        <div class="reject-field">
-          <label class="reject-label">审核备注（拒绝理由）<span class="required">*</span></label>
-          <a-textarea
-            v-model:value="rejectReviewRemark"
-            placeholder="请填写拒绝原因，将作为审核备注反馈给用户"
-            :rows="3"
-            allow-clear
+          <Table
+            :dataSource="loopApplyList"
+            :columns="loopApplyColumns"
+            :loading="loopApplyLoading"
+            :pagination="loopApplyPagination"
+            rowKey="id"
+            bordered
+            @change="handleLoopApplyTableChange"
           />
         </div>
-        <div class="reject-field">
-          <label class="reject-label">申请理由（可修改）</label>
-          <a-textarea
-            v-model:value="rejectApplyReason"
-            placeholder="可在此修改用户填写的申请理由，留空则保持原样"
-            :rows="3"
-            allow-clear
-          />
-          <p class="reject-hint">管理员可修改用户原本的申请理由文字，修改后将保存到该条申请记录中。</p>
-        </div>
-      </div>
-    </a-modal>
+      </Tabs.TabPane>
+    </Tabs>
   </div>
 </template>
 
@@ -511,6 +673,60 @@ onMounted(() => {
 
   .right-column {
     order: 2;
+  }
+}
+
+/* ===== Tabs 页面容器 ===== */
+.apply-page-with-tabs {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+.apply-tabs {
+  background: transparent;
+}
+
+.apply-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 16px;
+}
+
+.apply-tabs :deep(.ant-tabs-tab) {
+  font-size: 15px;
+  padding: 8px 20px;
+}
+
+/* ===== Loop 申请 ===== */
+.loop-apply-section {
+  background: var(--bg-card, #fff);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  padding: 24px;
+}
+
+.loop-apply-header {
+  margin-bottom: 20px;
+}
+
+.loop-apply-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.loop-apply-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+}
+
+@media (max-width: 768px) {
+  .apply-page-with-tabs {
+    padding: 16px 10px;
+  }
+
+  .loop-apply-section {
+    padding: 16px;
   }
 }
 </style>

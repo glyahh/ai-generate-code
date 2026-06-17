@@ -8,6 +8,7 @@ import AdminHome from '@/page/Admin/AdminHome.vue'
 import AdminAppManage from '@/page/Admin/AdminAppManage.vue'
 import AdminApplyManage from '@/page/Admin/AdminApplyManage.vue'
 import AdminChatManage from '@/page/Admin/AdminChatManage.vue'
+import AdminLoopManage from '@/page/Admin/AdminLoopManage.vue'
 import AppChatView from '@/page/App/AppChatView.vue'
 import AppEditView from '@/page/App/AppEditView.vue'
 import CodeGenerateEntry from '@/page/App/CodeGenerateEntry.vue'
@@ -79,6 +80,12 @@ const router = createRouter({
       path: '/admin/chats',
       name: 'admin-chats',
       component: AdminChatManage,
+    },
+    // 管理员 Loop 管理界面
+    {
+      path: '/admin/loops',
+      name: 'admin-loops',
+      component: AdminLoopManage,
     },
     // 应用ai交互界面 (用户查看创建的应用)
     {

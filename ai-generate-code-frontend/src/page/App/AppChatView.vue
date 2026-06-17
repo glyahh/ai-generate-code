@@ -57,6 +57,7 @@ import {
   type ToolWaitStatusView,
 } from '@/utils/toolWaitStatus'
 import { CodeGenTypeEnum } from '@/utils/CodeGenTypeEnum'
+import AppLoopInjectBar from '@/components/loop/AppLoopInjectBar.vue'
 import {
   attachVisualWebsiteEditor,
   formatSelectedElementForPrompt,
@@ -271,6 +272,10 @@ const analyzingHintCloser = ref<null | (() => void)>(null)
 
 // 仅用于把用户在首页选择的“代码类型”追加到发送给 AI 的 prompt 末尾（不回显到前端对话气泡）
 const codeTypePromptChoiceOnce = ref<string | null>(null)
+const selectedLoopId = ref(0)
+function onLoopSelect(loopId: number) {
+  selectedLoopId.value = loopId
+}
 
 /**
  * 多并发 SSE：每次 sendMessage 会创建一个独立的 EventSource。
@@ -2599,6 +2604,10 @@ async function sendMessage(text?: string) {
     })
     const apiBase = API_BASE_URL.replace(/\/$/, '')
     const endpoint = isAppWorkflowBeta() ? '/chat/gen/workflow' : '/chat/gen/code'
+    // loopId 仅支持 /gen/code 端点，/gen/workflow 暂不支持
+    if (selectedLoopId.value > 0 && endpoint === '/chat/gen/code') {
+      query.append('loopId', String(selectedLoopId.value))
+    }
     const url = `${apiBase}${endpoint}?${query.toString()}`
 
     const es = new EventSource(url, { withCredentials: true })
@@ -3306,6 +3315,8 @@ onBeforeUnmount(() => {
             </template>
           </template>
         </div>
+
+        <AppLoopInjectBar v-if="appId" :appId="Number(appId)" @select="onLoopSelect" />
 
         <div :class="['chat-input-bar', { 'chat-input-bar-readonly': isReadOnly }]">
           <div v-if="selectedElement" class="selected-element-alert">

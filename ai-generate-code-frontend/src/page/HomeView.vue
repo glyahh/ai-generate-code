@@ -27,6 +27,7 @@ import { normalizeDeployUrl } from '@/utils/deployUrl'
 import AppGenPipelineBadge from '@/components/app/AppGenPipelineBadge.vue'
 import { isAppWorkflowBetaFromApp, syncGenModeStorageForApp } from '@/utils/appGenPipeline'
 import { useAppearanceStore } from '@/stores/appearance'
+import LoopPickerTrigger from '@/components/loop/LoopPickerTrigger.vue'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -44,6 +45,12 @@ const selectedCodeType = ref<string>(
 const autoCodeTypeEnabled = ref(appearanceStore.defaultCodeType === 'auto')
 const workflowBetaEnabled = ref(appearanceStore.workflowEnabled)
 const workflowBetaTooltip = '该功能处于测试状态，可能不稳定'
+
+const selectedLoopIds = ref<number[]>([])
+const loopPickerRef = ref<InstanceType<typeof LoopPickerTrigger> | null>(null)
+function onLoopChange(ids: number[]) {
+  selectedLoopIds.value = ids
+}
 const workflowAdvantageTips = ['逻辑更严谨', '图片更贴切', '代码质量检测']
 
 const CODE_TYPE_CHOICES: Array<{
@@ -273,7 +280,9 @@ async function handleCreateApp() {
         initPrompt: content,
         codeGenType: autoCodeTypeEnabled.value ? undefined : selectedCodeType.value,
         isBeta: workflowBetaEnabled.value ? 1 : 0,
-      },
+        // TODO: openapi2ts 生成后移除 as any，loopIds 字段由后端 AppAddRequest 提供
+        loopIds: selectedLoopIds.value.length > 0 ? selectedLoopIds.value : undefined,
+      } as any,
     })
     if (isSuccess(res.data.code) && res.data.data) {
       const appId = res.data.data
@@ -632,6 +641,7 @@ onMounted(() => {
                     ?
                   </button>
                 </ATooltip>
+                <LoopPickerTrigger ref="loopPickerRef" @change="onLoopChange" />
                 <ATooltip :title="workflowBetaTooltip" placement="top">
                   <button
                     type="button"
