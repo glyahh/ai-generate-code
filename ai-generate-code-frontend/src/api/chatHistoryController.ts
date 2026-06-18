@@ -15,7 +15,7 @@ export function chatHistoryAppAppIdUsingGet({
 }) {
   const { appId: param0, ...queryParams } = params;
 
-  return request<API.BaseResponseAppChatHistoryPage>(
+  return request<API.BaseResponsePageChatHistory>(
     `/chatHistory/app/${param0}`,
     {
       method: 'GET',
@@ -70,7 +70,7 @@ export function chatHistoryDeleteByAppIdUsingPost({
   options,
 }: {
   // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
-  params: API.ChatHistoryDeleteByAppIdUsingPostParams;
+  params: API.ChatHistoryDeleteByAppIdAppIdUsingPostParams;
   options?: { [key: string]: unknown };
 }) {
   const { appId: param0, ...queryParams } = params;
@@ -85,24 +85,6 @@ export function chatHistoryDeleteByAppIdUsingPost({
   );
 }
 
-/** 此处后端没有提供注释 GET /chatHistory/search */
-export function chatHistorySearchUsingGet({
-  params,
-  options,
-}: {
-  // 叠加生成的Param类型 (非body参数openapi默认没有生成对象)
-  params: API.ChatHistorySearchUsingGetParams;
-  options?: { [key: string]: unknown };
-}) {
-  return request<API.BaseResponsePageChatHistoryAppVO>('/chatHistory/search', {
-    method: 'GET',
-    params: {
-      ...params,
-    },
-    ...(options || {}),
-  });
-}
-
 /** 此处后端没有提供注释 POST /chatHistory/admin/page/vo */
 export function chatHistoryAdminUsingPost({
   body,
@@ -111,7 +93,7 @@ export function chatHistoryAdminUsingPost({
   body: API.ChatHistoryQueryRequest;
   options?: { [key: string]: unknown };
 }) {
-  return request<API.BaseResponsePageChatHistoryAppVO>('/chatHistory/admin/page/vo', {
+  return request<API.BaseResponsePageChatHistory>('/chatHistory/admin/page/vo', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -119,4 +101,24 @@ export function chatHistoryAdminUsingPost({
     data: body,
     ...(options || {}),
   });
+}
+
+/** 此处后端没有提供注释 GET /chatHistory/roundCount/${param0} */
+export function chatHistoryRoundCountAppIdUsingGet({
+  params,
+  options,
+}: {
+  params: API.ChatHistoryRoundCountAppIdUsingGetParams;
+  options?: { [key: string]: unknown };
+}) {
+  const { appId: param0, ...queryParams } = params;
+
+  return request<API.ChatHistoryRoundCountAppIdUsingGetResponses[200]>(
+    `/chatHistory/roundCount/${param0}`,
+    {
+      method: 'GET',
+      params: { ...queryParams },
+      ...(options || {}),
+    }
+  );
 }
