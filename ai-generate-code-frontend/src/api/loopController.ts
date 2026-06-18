@@ -94,6 +94,23 @@ export function loopOpenApiDeleteUsingPost({
   });
 }
 
+/** 此处后端没有提供注释 POST /loop/admin/delete */
+export function loopAdminDeleteUsingPost({
+  params,
+  options,
+}: {
+  params: API.LoopOpenApiDeleteUsingPostParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseVoid>('/loop/admin/delete', {
+    method: 'POST',
+    params: {
+      ...params,
+    },
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 GET /loop/get/vo */
 export function loopGetVoUsingGet({
   params,
@@ -180,6 +197,76 @@ export function loopUpdateUsingPost({
       'Content-Type': 'application/json',
     },
     data: body,
+    ...(options || {}),
+  });
+}
+
+/** 公开探索 Loop（无 priority 过滤） POST /loop/public/list/page/vo */
+export function loopPublicListPageVoUsingPost({
+  body,
+  options,
+}: {
+  body: API.LoopQueryRequest;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseListLoopVO>('/loop/public/list/page/vo', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 管理员分页查询 Loop 申请列表 POST /loop/admin/apply/list */
+export function loopAdminApplyListUsingPost({
+  body,
+  options,
+}: {
+  body: API.LoopAdminListApplyUsingPostParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseListMapStringObject>('/loop/admin/apply/list', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 管理员通过 Loop 精选申请 POST /loop/admin/apply/approve */
+export function loopAdminApplyApproveUsingPost({
+  params,
+  options,
+}: {
+  params: API.LoopAdminApplyApproveUsingPostParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseVoid>('/loop/admin/apply/approve', {
+    method: 'POST',
+    params: {
+      ...params,
+    },
+    ...(options || {}),
+  });
+}
+
+/** 管理员拒绝 Loop 精选申请 POST /loop/admin/apply/reject */
+export function loopAdminApplyRejectUsingPost({
+  params,
+  options,
+}: {
+  params: API.LoopAdminApplyRejectUsingPostParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseVoid>('/loop/admin/apply/reject', {
+    method: 'POST',
+    params: {
+      ...params,
+    },
     ...(options || {}),
   });
 }

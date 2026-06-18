@@ -135,6 +135,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
+import { loopAddUsingPost, loopUpdateUsingPost, loopGetVoUsingGet } from '@/api/loopController'
 
 const props = defineProps<{
   editId?: string
@@ -276,18 +277,24 @@ const handleSave = async () => {
       workflowJson: JSON.stringify(buildWorkflowJson()),
     }
 
-    // TODO: openapi2ts 生成后替换为实际 API 调用
     if (isEditMode.value) {
-      // const res = await loopController.updateUsingPost({
-      //   id: resolvedEditId.value,
-      //   ...payload,
-      // })
-      console.log('更新 Loop', resolvedEditId.value, payload)
-      message.success('更新成功')
+      const res = await loopUpdateUsingPost({
+        body: { id: Number(resolvedEditId.value), ...payload },
+      })
+      if (res.data.code === 0 || res.data.code === 20000) {
+        message.success('更新成功')
+      } else {
+        message.error(res.data.message || '更新失败')
+        return
+      }
     } else {
-      // const res = await loopController.addUsingPost(payload)
-      console.log('创建 Loop', payload)
-      message.success('创建成功')
+      const res = await loopAddUsingPost({ body: payload })
+      if (res.data.code === 0 || res.data.code === 20000) {
+        message.success('创建成功')
+      } else {
+        message.error(res.data.message || '创建失败')
+        return
+      }
     }
     router.push('/user/loops')
   } catch (e) {
@@ -307,30 +314,30 @@ const handleCancel = () => {
 onMounted(async () => {
   if (resolvedEditId.value) {
     try {
-      // TODO: openapi2ts 生成后替换为实际 API 调用
-      // const res = await loopController.getVoUsingGet({ id: resolvedEditId.value })
-      // if (res.data?.code === 0 && res.data?.data) {
-      //   const data = res.data.data
-      //   form.loopName = data.loopName || ''
-      //   form.description = data.description || ''
-      //   form.visibility = data.visibility || 'private'
-      //
-      //   // 解析 workflowJson 回填 steps
-      //   if (data.workflowJson) {
-      //     try {
-      //       const parsed = JSON.parse(data.workflowJson)
-      //       if (parsed.steps && Array.isArray(parsed.steps)) {
-      //         parsed.steps.forEach((step: any) => {
-      //           const match = form.steps.find((s) => s.key === step.key)
-      //           if (match) match.content = step.content || ''
-      //         })
-      //       }
-      //     } catch (e) {
-      //       console.warn('workflowJson 解析失败', e)
-      //     }
-      //   }
-      // }
-      console.log('编辑模式加载 ID:', resolvedEditId.value)
+      const res = await loopGetVoUsingGet({ params: { id: Number(resolvedEditId.value) } })
+      if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+        const data = res.data.data
+        form.loopName = data.loopName || ''
+        form.description = data.description || ''
+        form.visibility = data.visibility || 'private'
+
+        // 解析 workflowJson 回填 steps
+        if (data.workflowJson) {
+          try {
+            const parsed = JSON.parse(data.workflowJson)
+            if (parsed.steps && Array.isArray(parsed.steps)) {
+              parsed.steps.forEach((step: any) => {
+                const match = form.steps.find((s) => s.key === step.key)
+                if (match) match.content = step.content || ''
+              })
+            }
+          } catch (e) {
+            console.warn('workflowJson 解析失败', e)
+          }
+        }
+      } else {
+        message.error(res.data.message || '加载 Loop 失败')
+      }
     } catch (e) {
       console.error('加载 Loop 失败', e)
       message.error('加载失败，请稍后重试')

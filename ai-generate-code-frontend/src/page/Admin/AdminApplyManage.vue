@@ -5,6 +5,11 @@ import { message, Modal as AModal, Tabs, Table, Button, Tag, Space } from 'ant-d
 import type { ApplyVO } from '@/api'
 import { appApplyListPendingUsingPost, appApplyAgreeUsingPost, appApplyRejectUsingPost } from '@/api/appController'
 import { UserLoginStore } from '@/stores/UserLogin'
+import {
+  loopAdminApplyListUsingPost,
+  loopAdminApplyApproveUsingPost,
+  loopAdminApplyRejectUsingPost,
+} from '@/api/loopController'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -85,17 +90,15 @@ function formatDateTime(value?: string) {
 async function loadLoopApplyList() {
   loopApplyLoading.value = true
   try {
-    // TODO: 替换为真实 API —— loopController / admin/list 或专项审批 API
-    // const res = await loopApplyAdminListUsingPost({
-    //   body: { pageCurrent: loopApplyPagination.value.current, pageSize: loopApplyPagination.value.pageSize },
-    // })
-    // if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
-    //   loopApplyList.value = res.data.data.records || []
-    //   loopApplyPagination.value.total = res.data.data.totalRow || 0
-    // } else {
-    //   message.error(res.data.message || '获取 Loop 申请列表失败')
-    // }
-    console.log('load loop apply list placeholder')
+    const res = await loopAdminApplyListUsingPost({
+      body: { pageNum: loopApplyPagination.value.current, pageSize: loopApplyPagination.value.pageSize },
+    })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      loopApplyList.value = res.data.data
+      loopApplyPagination.value.total = res.data.data.length || 0
+    } else {
+      message.error(res.data.message || '获取 Loop 申请列表失败')
+    }
   } catch (e) {
     console.error(e)
     message.error('获取 Loop 申请列表失败，请稍后重试')
@@ -113,16 +116,13 @@ function handleLoopApplyTableChange(pag: any) {
 async function approveLoop(record: any) {
   loopApplyLoading.value = true
   try {
-    // TODO: 替换为真实 API —— 审批通过，同时设 loop.priority=99
-    // const res = await loopApplyApproveUsingPost({ applyId: record.id })
-    // if (res.data.code === 0 || res.data.code === 20000) {
-    //   message.success('已通过，Loop 已上架精选')
-    //   await loadLoopApplyList()
-    // } else {
-    //   message.error(res.data.message || '操作失败')
-    // }
-    message.success('已通过，Loop 已上架精选')
-    console.log('approve loop placeholder', record.id)
+    const res = await loopAdminApplyApproveUsingPost({ params: { applyId: record.id } })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('已通过，Loop 已上架精选')
+      await loadLoopApplyList()
+    } else {
+      message.error(res.data.message || '操作失败')
+    }
   } catch (e) {
     console.error(e)
     message.error('操作失败，请稍后重试')
@@ -134,16 +134,15 @@ async function approveLoop(record: any) {
 async function rejectLoop(record: any) {
   loopApplyLoading.value = true
   try {
-    // TODO: 替换为真实 API —— 拒绝申请
-    // const res = await loopApplyRejectUsingPost({ applyId: record.id, reviewRemark: '管理员拒绝' })
-    // if (res.data.code === 0 || res.data.code === 20000) {
-    //   message.success('已拒绝该申请')
-    //   await loadLoopApplyList()
-    // } else {
-    //   message.error(res.data.message || '操作失败')
-    // }
-    message.success('已拒绝该申请')
-    console.log('reject loop placeholder', record.id)
+    const res = await loopAdminApplyRejectUsingPost({
+      params: { applyId: record.id, reviewRemark: '管理员拒绝' },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('已拒绝该申请')
+      await loadLoopApplyList()
+    } else {
+      message.error(res.data.message || '操作失败')
+    }
   } catch (e) {
     console.error(e)
     message.error('操作失败，请稍后重试')

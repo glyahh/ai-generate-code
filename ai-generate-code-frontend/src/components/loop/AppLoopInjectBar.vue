@@ -29,6 +29,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { message } from 'ant-design-vue'
+import { appLoopListVoUsingPost } from '@/api/appLoopController'
 
 const router = useRouter()
 
@@ -57,11 +59,14 @@ function goToMarket() {
 }
 
 onMounted(async () => {
-  // TODO: openapi2ts 生成后通过 appLoopController.listVO 加载
-  // const res = await appLoopController.listVO({ appId: props.appId })
-  // if (res.data.code === 0 || res.data.code === 20000) {
-  //   loopList.value = res.data.data || []
-  // }
+  try {
+    const res = await appLoopListVoUsingPost({ params: { appId: props.appId } })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      loopList.value = res.data.data
+    }
+  } catch (e) {
+    console.error('加载应用 Loop 列表失败', e)
+  }
 })
 </script>
 

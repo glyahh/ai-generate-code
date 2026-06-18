@@ -114,6 +114,11 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
+import {
+  loopGoodListPageVoUsingPost,
+  loopPublicListPageVoUsingPost,
+} from '@/api/loopController'
+import { appLoopAddUsingPost } from '@/api/appLoopController'
 
 const router = useRouter()
 
@@ -133,10 +138,14 @@ const exploreSearchText = ref('')
 const loadGood = async () => {
   goodLoading.value = true
   try {
-    // TODO: openapi2ts 生成后替换为实际 API 调用
-    // const res = await loopController.goodListPageUsingPost({ pageCurrent: 1, pageSize: 20 })
-    // goodList.value = res.data?.records || []
-    console.log('loadGood - 待对接 API')
+    const res = await loopGoodListPageVoUsingPost({
+      body: { pageNum: 1, pageSize: 20 },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      goodList.value = res.data.data || []
+    } else {
+      message.error(res.data.message || '加载精选 Loop 失败')
+    }
   } catch (e) {
     console.error('加载精选 Loop 失败', e)
   } finally {
@@ -148,14 +157,18 @@ const loadGood = async () => {
 const loadExplore = async () => {
   exploreLoading.value = true
   try {
-    // TODO: openapi2ts 生成后替换为实际 API 调用
-    // const res = await loopController.exploreListPageUsingPost({
-    //   pageCurrent: 1,
-    //   pageSize: 20,
-    //   searchText: exploreSearchText.value || undefined,
-    // })
-    // exploreList.value = res.data?.records || []
-    console.log('loadExplore - 待对接 API')
+    const res = await loopPublicListPageVoUsingPost({
+      body: {
+        pageNum: 1,
+        pageSize: 20,
+        searchText: exploreSearchText.value || undefined,
+      },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      exploreList.value = res.data.data || []
+    } else {
+      message.error(res.data.message || '加载探索列表失败')
+    }
   } catch (e) {
     console.error('加载探索列表失败', e)
   } finally {
@@ -165,8 +178,7 @@ const loadExplore = async () => {
 
 // 加入我的应用
 const addToApp = async (loopId: number) => {
-  // TODO: 打开应用选择弹窗 或 直接调 API
-  // 当前跳转到创建应用页，携带 loopId 参数
+  // 先尝试获取用户的第一个应用
   router.push({ path: '/code/generate', query: { loopId: String(loopId) } })
 }
 

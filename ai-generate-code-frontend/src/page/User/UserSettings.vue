@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { UserLoginStore } from '@/stores/UserLogin'
-import { userUpdateUsingPut } from '@/api/userController'
+import { userUpdateUsingPut, userPersonalizationGetUsingGet, userPersonalizationPutUsingPut } from '@/api/userController'
 import type { UserUpdateRequest } from '@/api/types'
 import type { ApplyHistoryVO } from '@/api/types'
 import { appApplyListMyHistoryUsingPost, appApplyUsingPost } from '@/api/appController'
@@ -131,12 +131,12 @@ async function loadPersonalization() {
   try {
     const res = await userPersonalizationGetUsingGet()
     if (res?.data) {
-      personalizationForm.value = { appStyle: res.data.appStyle, answerStyle: res.data.answerStyle }
+      personalizationForm.value = { appStyle: res.data.appStyle ?? '', answerStyle: res.data.answerStyle ?? '' }
     }
   } catch (e: any) { message.error('loading') }
 }
 
-function customCount(val) {
+function customCount(val: string) {
   const remaining = 2000 - String(val ?? '').length
   return remaining > 0 ? '还可输入 ' + remaining + ' 字' : '已达上限'
 }
@@ -305,24 +305,6 @@ watch(
             </div>
           </section>
 
-          <section v-else-if="activeMenu === 'personalization'" class="work-panel">
-            <h3 class="panel-title">个性化</h3>
-            <p class="panel-desc">配置你的代码生成偏好，每次生成时 AI 将参考以下指南</p>
-            <div class="form-card">
-              <a-form layout="vertical">
-                <a-form-item label="应用风格">
-                  <a-textarea v-model:value="personalizationForm.appStyle" placeholder="例如：我喜欢简洁、使用毛玻璃效果、主色调为蓝色..." :rows="5" size="large" :maxlength="2000" :show-count="customCount" />
-                </a-form-item>
-                <a-form-item label="回答风格">
-                  <a-textarea v-model:value="personalizationForm.answerStyle" placeholder="例如：用正式的语气回答，代码与解释交替..." :rows="5" size="large" :maxlength="2000" :show-count="customCount" />
-                </a-form-item>
-                <a-button type="primary" size="large" :loading="personalizationLoading" class="submit-btn"
-                  @click="handlePersonalizationSubmit">
-                  保存配置
-                </a-button>
-              </a-form>
-            </div>
-          </section>
           <section v-else-if="activeMenu === 'personalization'" class="work-panel">
             <h3 class="panel-title">个性化</h3>
             <p class="panel-desc">配置你的代码生成偏好，每次生成时 AI 将参考以下指南</p>

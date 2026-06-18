@@ -6,6 +6,7 @@ import com.dbts.glyahhaigeneratecode.model.DTO.LoopQueryRequest;
 import com.dbts.glyahhaigeneratecode.model.VO.LoopVO;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Loop 领域服务接口。
@@ -43,6 +44,11 @@ public interface LoopService {
     List<LoopVO> goodListPage(LoopQueryRequest req);
 
     /**
+     * 分页查询公开 Loop（所有 visibility=public 的，不带 priority 过滤）。
+     */
+    List<LoopVO> publicListPage(LoopQueryRequest req);
+
+    /**
      * 导入 Loop（解析 frontmatter + body → workflowJson）。
      */
     Long importLoop(String rawContent, Long userId);
@@ -61,4 +67,26 @@ public interface LoopService {
      * 管理员更新 Loop（可调整 priority）。
      */
     void adminUpdate(LoopUpdateRequest req);
+
+    /**
+     * 管理员删除 Loop（绕过用户归属校验）。
+     */
+    void adminDeleteLoop(Long id);
+
+    // ==================== 管理员 Loop 申请审批 ====================
+
+    /**
+     * 管理员分页查询 Loop 精选申请列表。
+     */
+    List<Map<String, Object>> adminListApply(LoopQueryRequest req);
+
+    /**
+     * 管理员通过 Loop 精选申请（设 priority=99 + 更新申请状态）。
+     */
+    void adminApproveApply(Long applyId, Long reviewUserId);
+
+    /**
+     * 管理员拒绝 Loop 精选申请。
+     */
+    void adminRejectApply(Long applyId, String reviewRemark, Long reviewUserId);
 }

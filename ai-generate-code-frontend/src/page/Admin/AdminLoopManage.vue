@@ -4,6 +4,11 @@ import { useRouter } from 'vue-router'
 import { Table, Button, Modal, Tag, Space, message } from 'ant-design-vue'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import { UserLoginStore } from '@/stores/UserLogin'
+import {
+  loopAdminListPageVoUsingPost,
+  loopAdminUpdateUsingPost,
+  loopAdminDeleteUsingPost,
+} from '@/api/loopController'
 
 const router = useRouter()
 const userLoginStore = UserLoginStore()
@@ -47,17 +52,14 @@ async function loadData() {
   }
   loading.value = true
   try {
-    // TODO: 替换为真实 API —— loopController.adminListPage
-    // const res = await loopAdminListPageVoUsingPost({
-    //   body: { pageCurrent: pagination.value.current, pageSize: pagination.value.pageSize },
-    // })
-    // if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
-    //   tableData.value = res.data.data.records || []
-    //   pagination.value.total = res.data.data.totalRow || 0
-    // } else {
-    //   message.error(res.data.message || '获取 Loop 列表失败')
-    // }
-    console.log('load loop data placeholder')
+    const res = await loopAdminListPageVoUsingPost({
+      body: { pageNum: pagination.value.current, pageSize: pagination.value.pageSize },
+    })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      tableData.value = res.data.data
+    } else {
+      message.error(res.data.message || '获取 Loop 列表失败')
+    }
   } catch (e) {
     console.error(e)
     message.error('获取 Loop 列表失败，请稍后重试')
@@ -77,18 +79,15 @@ async function handleSetGood(record: any) {
   if (!record.id) return
   loading.value = true
   try {
-    // TODO: 替换为真实 API —— loopController.adminUpdate
-    // const res = await loopAdminUpdateUsingPost({
-    //   body: { id: record.id, priority: 99 },
-    // })
-    // if (res.data.code === 0 || res.data.code === 20000) {
-    //   message.success('已通过，Loop 已上架精选')
-    //   await loadData()
-    // } else {
-    //   message.error(res.data.message || '操作失败')
-    // }
-    message.success('已通过，Loop 已上架精选')
-    console.log('set good placeholder', record.id)
+    const res = await loopAdminUpdateUsingPost({
+      body: { id: record.id, priority: 99 },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('已通过，Loop 已上架精选')
+      await loadData()
+    } else {
+      message.error(res.data.message || '操作失败')
+    }
   } catch (e) {
     console.error(e)
     message.error('操作失败，请稍后重试')
@@ -111,18 +110,14 @@ async function handleDeleteConfirm() {
   if (!deletingId.value) return
   loading.value = true
   try {
-    // TODO: 替换为真实 API —— loopController.delete
-    // const res = await loopDeleteUsingPost({ id: deletingId.value })
-    // if (res.data.code === 0 || res.data.code === 20000) {
-    //   message.success('删除成功')
-    //   closeDeleteModal()
-    //   await loadData()
-    // } else {
-    //   message.error(res.data.message || '删除失败')
-    // }
-    message.success('删除成功')
-    closeDeleteModal()
-    console.log('delete placeholder', deletingId.value)
+    const res = await loopAdminDeleteUsingPost({ params: { id: deletingId.value } })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('删除成功')
+      closeDeleteModal()
+      await loadData()
+    } else {
+      message.error(res.data.message || '删除失败')
+    }
   } catch (e) {
     console.error(e)
     message.error('删除失败，请稍后重试')

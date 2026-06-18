@@ -646,6 +646,30 @@ export type LoopGoodListPageVoUsingPostResponses = {
   200: BaseResponseListLoopVO;
 };
 
+export type LoopPublicListPageVoUsingPostResponses = {
+  /**
+   * OK
+   */
+  200: BaseResponseListLoopVO;
+};
+
+export type LoopAdminListApplyUsingPostParams = {
+  pageNum?: number;
+  pageSize?: number;
+  sortField?: string;
+  sortOrder?: string;
+  searchText?: string;
+};
+
+export type LoopAdminApplyApproveUsingPostParams = {
+  applyId: number;
+};
+
+export type LoopAdminApplyRejectUsingPostParams = {
+  applyId: number;
+  reviewRemark?: string;
+};
+
 export type LoopMyListPageVoUsingPostResponses = {
   /**
    * OK

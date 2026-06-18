@@ -131,7 +131,7 @@ function handleDelete(record: UserChatHistoryItemVO) {
     onOk: async () => {
       deletingAppId.value = appId
       try {
-        const res = await chatHistoryDeleteByAppIdUsingPost({ appId })
+        const res = await chatHistoryDeleteByAppIdUsingPost({ params: { appId } })
         if (res.data.code === 0 || res.data.code === 20000) {
           message.success('对话记录已删除')
           void loadData()

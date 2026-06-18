@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Loop 控制层。
@@ -89,11 +90,19 @@ public class LoopController {
     }
 
     /**
-     * 分页查询精选 Loop（公开可见）。
+     * 分页查询精选 Loop（priority >= 99，公开可见）。
      */
     @PostMapping("/good/list/page/vo")
     public BaseResponse<List<LoopVO>> goodListPage(@RequestBody LoopQueryRequest req) {
         return ResultUtils.success(loopService.goodListPage(req));
+    }
+
+    /**
+     * 分页查询公开 Loop（所有 visibility=public 的 Loop，不带 priority 过滤）。用于市场「探索」Tab。
+     */
+    @PostMapping("/public/list/page/vo")
+    public BaseResponse<List<LoopVO>> publicListPage(@RequestBody LoopQueryRequest req) {
+        return ResultUtils.success(loopService.publicListPage(req));
     }
 
     /**
@@ -136,6 +145,52 @@ public class LoopController {
     @MyRole(role = UserConstant.ADMIN_ROLE)
     public BaseResponse<Void> adminUpdate(@RequestBody LoopUpdateRequest req) {
         loopService.adminUpdate(req);
+        return ResultUtils.success(null);
+    }
+
+    /**
+     * 管理员删除 Loop（绕过用户归属校验）。
+     */
+    @PostMapping("/admin/delete")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Void> adminDelete(@RequestParam Long id) {
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "ID 不能为空");
+        loopService.adminDeleteLoop(id);
+        return ResultUtils.success(null);
+    }
+
+    // ==================== 管理员 Loop 申请审批 ====================
+
+    /**
+     * 管理员分页查询 Loop 精选申请列表。
+     */
+    @PostMapping("/admin/apply/list")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<List<Map<String, Object>>> adminListApply(@RequestBody LoopQueryRequest req) {
+        return ResultUtils.success(loopService.adminListApply(req));
+    }
+
+    /**
+     * 管理员通过 Loop 精选申请。
+     */
+    @PostMapping("/admin/apply/approve")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Void> adminApproveApply(@RequestParam Long applyId, HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        loopService.adminApproveApply(applyId, loginUser.getId());
+        return ResultUtils.success(null);
+    }
+
+    /**
+     * 管理员拒绝 Loop 精选申请。
+     */
+    @PostMapping("/admin/apply/reject")
+    @MyRole(role = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Void> adminRejectApply(@RequestParam Long applyId,
+                                                @RequestParam(required = false) String reviewRemark,
+                                                HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        loopService.adminRejectApply(applyId, reviewRemark, loginUser.getId());
         return ResultUtils.success(null);
     }
 }

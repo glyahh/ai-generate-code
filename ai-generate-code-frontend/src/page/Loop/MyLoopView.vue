@@ -155,6 +155,12 @@ visibility: public
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
+import {
+  loopMyListPageVoUsingPost,
+  loopOpenApiDeleteUsingPost,
+  loopApplyUsingPost,
+  loopOpenApiImportUsingPost,
+} from '@/api/loopController'
 
 const router = useRouter()
 
@@ -191,10 +197,13 @@ const handleEdit = (id: number) => {
 // 删除 Loop
 const handleDelete = async (loop: any) => {
   try {
-    // TODO: openapi2ts 生成后替换为实际 API 调用
-    // await loopController.deleteUsingPost({ id: loop.id })
-    message.success('删除成功')
-    myList.value = myList.value.filter((item: any) => item.id !== loop.id)
+    const res = await loopOpenApiDeleteUsingPost({ params: { id: loop.id } })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('删除成功')
+      myList.value = myList.value.filter((item: any) => item.id !== loop.id)
+    } else {
+      message.error(res.data.message || '删除失败')
+    }
   } catch (e) {
     console.error('删除失败', e)
   }
@@ -212,13 +221,18 @@ const handleSubmitApply = async () => {
   if (!applyingLoop.value) return
   applying.value = true
   try {
-    // TODO: openapi2ts 生成后替换为实际 API 调用
-    // await loopController.applyUsingPost({
-    //   loopId: applyingLoop.value.id,
-    //   reason: applyReason.value || undefined,
-    // })
-    message.success('申请已提交，等待管理员审核')
-    showApplyModal.value = false
+    const res = await loopApplyUsingPost({
+      params: {
+        loopId: applyingLoop.value.id,
+        reason: applyReason.value || undefined,
+      },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('申请已提交，等待管理员审核')
+      showApplyModal.value = false
+    } else {
+      message.error(res.data.message || '申请失败')
+    }
   } catch (e) {
     console.error('申请失败', e)
   } finally {
@@ -234,13 +248,15 @@ const handleImport = async () => {
   }
   importing.value = true
   try {
-    // TODO: openapi2ts 生成后替换为实际 API 调用
-    // const res = await loopController.importUsingPost({ rawContent: importContent.value })
-    message.success('导入成功')
-    showImportModal.value = false
-    importContent.value = ''
-    // 重新加载列表
-    await loadMyList()
+    const res = await loopOpenApiImportUsingPost({ body: importContent.value.trim() })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('导入成功')
+      showImportModal.value = false
+      importContent.value = ''
+      await loadMyList()
+    } else {
+      message.error(res.data.message || '导入失败')
+    }
   } catch (e) {
     console.error('导入失败', e)
   } finally {
@@ -252,10 +268,14 @@ const handleImport = async () => {
 const loadMyList = async () => {
   loading.value = true
   try {
-    // TODO: openapi2ts 生成后替换为实际 API 调用
-    // const res = await loopController.myListPageUsingPost({ pageCurrent: 1, pageSize: 50 })
-    // myList.value = res.data?.records || []
-    console.log('loadMyList - 待对接 API')
+    const res = await loopMyListPageVoUsingPost({
+      body: { pageNum: 1, pageSize: 50 },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      myList.value = res.data.data || []
+    } else {
+      message.error(res.data.message || '加载失败')
+    }
   } catch (e) {
     console.error('加载我的 Loop 失败', e)
   } finally {

@@ -23,6 +23,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { message } from 'ant-design-vue'
+import { loopMyListPageVoUsingPost } from '@/api/loopController'
 
 const router = useRouter()
 const visible = ref(false)
@@ -41,11 +43,16 @@ function goToMarket() {
 }
 
 onMounted(async () => {
-  // TODO: openapi2ts 生成后通过 loopController.myListPage 加载
-  // const res = await loopController.myListPage({ pageCurrent: 1, pageSize: 50 })
-  // if (res.data.code === 0 || res.data.code === 20000) {
-  //   loopList.value = res.data.data || []
-  // }
+  try {
+    const res = await loopMyListPageVoUsingPost({
+      body: { pageNum: 1, pageSize: 50 },
+    })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      loopList.value = res.data.data
+    }
+  } catch (e) {
+    console.error('加载 Loop 列表失败', e)
+  }
 })
 
 defineExpose({ selectedIds })

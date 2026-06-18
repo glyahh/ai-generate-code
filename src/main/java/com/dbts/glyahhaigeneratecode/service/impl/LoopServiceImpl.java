@@ -204,6 +204,24 @@ public class LoopServiceImpl implements LoopService {
         return page.getRecords().stream().map(this::toVO).collect(Collectors.toList());
     }
 
+    // ==================== 公开探索 ====================
+
+    @Override
+    public List<LoopVO> publicListPage(LoopQueryRequest req) {
+        QueryWrapper qw = new QueryWrapper()
+                .eq("is_delete", 0)
+                .eq("visibility", "public")
+                .orderBy("create_time", false);
+
+        if (StrUtil.isNotBlank(req.getSearchText())) {
+            String searchText = "%" + req.getSearchText() + "%";
+            qw.and(new RawQueryCondition("(loop_name LIKE ? OR description LIKE ?)", searchText, searchText));
+        }
+
+        Page<Loop> page = loopMapper.paginate(Page.of(req.getPageNum(), req.getPageSize()), qw);
+        return page.getRecords().stream().map(this::toVO).collect(Collectors.toList());
+    }
+
     // ==================== 导入 ====================
 
     @Override
@@ -335,6 +353,95 @@ public class LoopServiceImpl implements LoopService {
         loopMapper.update(loop);
 
         stringRedisTemplate.delete("loop:compiled:" + loop.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "good_loop_page", allEntries = true)
+    public void adminDeleteLoop(Long id) {
+        Loop loop = loopMapper.selectOneById(id);
+        ThrowUtils.throwIf(loop == null, ErrorCode.NOT_FOUND_ERROR, "Loop不存在");
+
+        // 清理关联表
+        appLoopMapper.deleteByQuery(new QueryWrapper().eq("loop_id", id));
+
+        loop.setIsDelete(1);
+        loopMapper.update(loop);
+
+        // 清理 Redis
+        stringRedisTemplate.delete("loop:compiled:" + id);
+        Set<String> appIds = stringRedisTemplate.opsForSet().members("loop:app_ids:" + id);
+        if (appIds != null && !appIds.isEmpty()) {
+            stringRedisTemplate.delete(appIds.stream().map(aid -> "app:loop:ids:" + aid).collect(Collectors.toList()));
+        }
+        stringRedisTemplate.delete("loop:app_ids:" + id);
+    }
+
+    // ==================== 管理员 Loop 申请审批 ====================
+
+    @Override
+    public List<Map<String, Object>> adminListApply(LoopQueryRequest req) {
+        // 从 user_loop_apply 查 status=0 的申请，关联 loop 表获取名称
+        QueryWrapper qw = new QueryWrapper()
+                .eq("status", 0)
+                .orderBy("create_time", false);
+        Page<UserLoopApply> page = userLoopApplyMapper.paginate(
+                Page.of(req.getPageNum(), req.getPageSize()), qw);
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (UserLoopApply apply : page.getRecords()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", apply.getId());
+            item.put("loopId", apply.getLoopId());
+            item.put("userId", apply.getUserId());
+            item.put("applyReason", apply.getApplyReason());
+            item.put("status", apply.getStatus());
+            item.put("createTime", apply.getCreateTime());
+            // 补充 loopName
+            Loop loop = loopMapper.selectOneById(apply.getLoopId());
+            item.put("loopName", loop != null ? loop.getLoopName() : "");
+            result.add(item);
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "good_loop_page", allEntries = true)
+    public void adminApproveApply(Long applyId, Long reviewUserId) {
+        UserLoopApply apply = userLoopApplyMapper.selectOneById(applyId);
+        ThrowUtils.throwIf(apply == null, ErrorCode.NOT_FOUND_ERROR, "申请不存在");
+        ThrowUtils.throwIf(apply.getStatus() != 0, ErrorCode.OPERATION_ERROR, "申请已处理");
+
+        // 设 Loop priority=99
+        Loop loop = loopMapper.selectOneById(apply.getLoopId());
+        ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
+                ErrorCode.NOT_FOUND_ERROR, "Loop 不存在或已删除");
+        loop.setPriority(99);
+        loopMapper.update(loop);
+
+        // 更新申请状态
+        apply.setStatus(1);
+        apply.setReviewUserId(reviewUserId);
+        apply.setReviewTime(java.time.LocalDateTime.now());
+        userLoopApplyMapper.update(apply);
+
+        // 清理缓存
+        stringRedisTemplate.delete("loop:compiled:" + loop.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void adminRejectApply(Long applyId, String reviewRemark, Long reviewUserId) {
+        UserLoopApply apply = userLoopApplyMapper.selectOneById(applyId);
+        ThrowUtils.throwIf(apply == null, ErrorCode.NOT_FOUND_ERROR, "申请不存在");
+        ThrowUtils.throwIf(apply.getStatus() != 0, ErrorCode.OPERATION_ERROR, "申请已处理");
+
+        apply.setStatus(2);
+        apply.setReviewUserId(reviewUserId);
+        apply.setReviewRemark(reviewRemark != null ? reviewRemark : "");
+        apply.setReviewTime(java.time.LocalDateTime.now());
+        userLoopApplyMapper.update(apply);
     }
 
     // ==================== 工具方法 ====================

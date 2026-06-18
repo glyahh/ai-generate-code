@@ -277,13 +277,13 @@ export function userUpdateUsingPost({
 }
 
 /** 用户个性化配置 VO */
-export interface UserPersonalizationVO {
+interface UserPersonalizationVO {
   appStyle?: string;
   answerStyle?: string;
 }
 
 /** 用户个性化配置更新请求 */
-export interface UserPersonalizationUpdateRequest {
+interface UserPersonalizationUpdateRequest {
   appStyle?: string;
   answerStyle?: string;
 }
