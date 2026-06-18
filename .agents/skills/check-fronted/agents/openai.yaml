@@ -1,7 +1,0 @@
-interface:
-  display_name: "check-fronted"
-  short_description: "Frontend audit and issue triage"
-  default_prompt: "Use $check-fronted to audit my frontend project and propose prioritized fixes."
-
-policy:
-  allow_implicit_invocation: true

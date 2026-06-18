@@ -1,8 +1,0 @@
-interface:
-  display_name: "build-frontend"
-  short_description: "Frontend build/refactor with UX rules"
-  default_prompt: "Use /build-frontend to write or modify frontend code with strict extraction + commenting rules, feature-first structure, minimal-change bugfix strategy, and UX/a11y guidance via /ui-ux-pro-max and /frontend-design."
-
-policy:
-  allow_implicit_invocation: false
-

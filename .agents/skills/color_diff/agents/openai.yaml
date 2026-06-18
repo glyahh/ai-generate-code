@@ -1,7 +1,0 @@
-interface:
-  display_name: "color_diff"
-  short_description: "Apply UI/code changes from red/yellow/green/blue box and arrow annotated screenshots"
-  default_prompt: "Use /color_diff or $color_diff: read annotated screenshot(s), build a per-box checklist (red=delete, yellow=modify per user text, green=layout baseline, blue=optimize without logic change, arrows=focus/target), user prompt overrides defaults, then implement and deliver the color_diff summary table."
-
-policy:
-  allow_implicit_invocation: false

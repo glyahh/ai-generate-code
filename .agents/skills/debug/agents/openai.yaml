@@ -1,7 +1,0 @@
-interface:
-  display_name: "debug"
-  short_description: "Debug and root-cause analysis"
-  default_prompt: "Use $debug to help reproduce and debug this issue, then propose a minimal fix."
-
-policy:
-  allow_implicit_invocation: true

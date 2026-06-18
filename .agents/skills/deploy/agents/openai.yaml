@@ -1,7 +1,0 @@
-interface:
-  display_name: "deploy"
-  short_description: "Deploy checklist and commands"
-  default_prompt: "Use $deploy to produce a safe deployment plan, including rollback steps."
-
-policy:
-  allow_implicit_invocation: true

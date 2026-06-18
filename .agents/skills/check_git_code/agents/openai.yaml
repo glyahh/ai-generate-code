@@ -1,7 +1,0 @@
-interface:
-  display_name: "check_git_code"
-  short_description: "Pre-push git diff review: motive, logic gaps, architecture fit"
-  default_prompt: "Use $check_git_code to review my current git diff before pushing: summarize motive, find logic gaps vs CLAUDE.md, and print the structured report. Do not run tests unless I ask."
-
-policy:
-  allow_implicit_invocation: true

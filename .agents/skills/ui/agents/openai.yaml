@@ -1,7 +1,0 @@
-interface:
-  display_name: "UI"
-  short_description: "Fixed image modules — registry ID embed, no AI redraw"
-  default_prompt: "Use /UI or $UI: register fixed JPG/PNG in imageModuleRegistry, implement FixedImageModule, use [fixed_image module=\"id\"] embed syntax for text+image mix, forbid picsum/placeholder/redraw, deliver registry + component + parser + prompt rules."
-
-policy:
-  allow_implicit_invocation: false
