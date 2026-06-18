@@ -76,11 +76,12 @@ public class LoopServiceImpl implements LoopService {
         loop.setIsDelete(0);
         loopMapper.insert(loop);
 
-        // 写 Redis 缓存（compiledPrompt 注入用）
+        // 写 Redis 缓存
         String cacheKey = "loop:compiled:" + loop.getId();
         stringRedisTemplate.opsForValue().set(
                 cacheKey,
                 loop.getCompiledPrompt(),
+                // 抖动防雪崩
                 30L + (long) (Math.random() * 5),
                 TimeUnit.MINUTES
         );
@@ -90,6 +91,7 @@ public class LoopServiceImpl implements LoopService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    // 全部清除key: good_loop_page下的value
     @CacheEvict(value = "good_loop_page", allEntries = true)
     public void updateLoop(LoopUpdateRequest req, Long userId) {
         Loop loop = loopMapper.selectOneById(req.getId());
@@ -173,6 +175,7 @@ public class LoopServiceImpl implements LoopService {
                 .orderBy("create_time", false);
 
         if (StrUtil.isNotBlank(req.getSearchText())) {
+            // 给mybatis-flux做模糊匹配
             String searchText = "%" + req.getSearchText() + "%";
             qw.and(new RawQueryCondition("(loop_name LIKE ? OR description LIKE ?)", searchText, searchText));
         }
@@ -182,6 +185,7 @@ public class LoopServiceImpl implements LoopService {
     }
 
     @Override
+    // 直接从redis中取出List<LoopVO>,如果命中缓存再走下面的方法
     @Cacheable(value = "good_loop_page", key = "T(com.dbts.glyahhaigeneratecode.utils.CacheKeyUtils).generateKey(#req)")
     public List<LoopVO> goodListPage(LoopQueryRequest req) {
         QueryWrapper qw = new QueryWrapper()
@@ -304,6 +308,7 @@ public class LoopServiceImpl implements LoopService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    // 在执行方法前先删除good_loop_page下的所有value
     @CacheEvict(value = "good_loop_page", allEntries = true)
     public void adminUpdate(LoopUpdateRequest req) {
         ThrowUtils.throwIf(req.getId() == null, ErrorCode.PARAMS_ERROR, "ID不能为空");

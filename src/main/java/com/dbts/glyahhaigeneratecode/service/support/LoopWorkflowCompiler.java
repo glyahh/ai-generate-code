@@ -28,6 +28,7 @@ public class LoopWorkflowCompiler {
             return "";
         }
         try {
+            // 把json格式拆解成树形结构
             JsonNode root = MAPPER.readTree(workflowJson);
             JsonNode steps = root.get("steps");
             if (steps == null || !steps.isArray()) {
@@ -42,7 +43,7 @@ public class LoopWorkflowCompiler {
             }
             return String.join("\n\n", blocks);
         } catch (Exception e) {
-            log.warn("LoopWorkflowCompiler compile failed for json: {}", workflowJson, e);
+            log.warn("LoopWorkflowCompiler失败编译json->string注入: {}", workflowJson, e);
             return "";
         }
     }

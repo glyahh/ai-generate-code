@@ -19,6 +19,7 @@ import LoopCreateView from '@/page/Loop/LoopCreateView.vue'
 import LoopEditView from '@/page/Loop/LoopEditView.vue'
 
 const router = createRouter({
+  // 去掉地址栏默认的 # 哈希符号，实现真实的 URL
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     // 首页
@@ -113,20 +114,25 @@ const router = createRouter({
       name: 'loop-market',
       component: LoopMarketView,
     },
+    // 我的Loop
     {
       path: '/user/loops',
       name: 'my-loop',
       component: MyLoopView,
     },
+    // 创建Loop
     {
       path: '/loop/create',
       name: 'loop-create',
       component: LoopCreateView,
     },
+    // 编辑loop
     {
+      // 动态路由id到不同的loop上
       path: '/loop/:id/edit',
       name: 'loop-edit',
       component: LoopEditView,
+      // 将路由 params 参数自动转为组件 props,可以直接通过 props.id 拿到id
       props: true,
     },
   ],

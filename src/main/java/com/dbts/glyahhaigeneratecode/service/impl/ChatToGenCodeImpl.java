@@ -56,6 +56,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
     private final StreamHandlerExecutor streamHandlerExecutor;
 
     private final UserPersonalizationService userPersonalizationService;
+
     private final LoopInjectService loopInjectService;
     /**
      * 统一入口：基于应用配置和用户输入触发代码生成（流式）

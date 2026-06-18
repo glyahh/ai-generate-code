@@ -67,6 +67,37 @@ temp/**
 ### Shared Cursor Assets (keep tracked) ###
 !.cursor/skills/**
 
+### Local IDE / Tooling config (local only, DO NOT COMMIT) ###
+.agents/
+.claude/
+.codex/
+.firecrawl/
+.editorconfig
+AGENTS.md
+CLAUDE.md
+tools/
+
+### Cursor local state (local only, DO NOT COMMIT) ###
+.cursor/commands/
+.cursor/plans/
+.cursor/rules/
+.cursor/debug-*
+.cursor/hooks.json
+.cursor/codex-*
+
+### Extra Cursor skills (local only, DO NOT COMMIT) ###
+.cursor/skills/check_git_code/
+.cursor/skills/code_separate/
+.cursor/skills/exam_codex/
+.cursor/skills/firecrawl-mcp/
+.cursor/skills/git_commit/
+.cursor/skills/super_code_test/
+.cursor/skills/ui/
+
+### Compiled Python cache (DO NOT COMMIT) ###
+__pycache__/
+*.pyc
+
 ### Local Bug Notes (DO NOT COMMIT) ###
 bugs/
 .worktrees/
