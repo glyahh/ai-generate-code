@@ -74,17 +74,24 @@ public class LoopServiceImpl implements LoopService {
         loop.setSourceType(req.getSourceType() != null ? req.getSourceType() : "created");
         loop.setVisibility(req.getVisibility() != null ? req.getVisibility() : "private");
         loop.setIsDelete(0);
-        loopMapper.insert(loop);
+        loop.setCreateTime(java.time.LocalDateTime.now());
+        loop.setUpdateTime(java.time.LocalDateTime.now());
+        int affected = loopMapper.insert(loop);
+        log.info("addLoop insert affected={}, id={}, loopName={}", affected, loop.getId(), loop.getLoopName());
 
-        // 写 Redis 缓存
-        String cacheKey = "loop:compiled:" + loop.getId();
-        stringRedisTemplate.opsForValue().set(
-                cacheKey,
-                loop.getCompiledPrompt(),
-                // 抖动防雪崩
-                30L + (long) (Math.random() * 5),
-                TimeUnit.MINUTES
-        );
+        // 写 Redis 缓存（非关键路径，失败不阻断）
+        try {
+            String cacheKey = "loop:compiled:" + loop.getId();
+            stringRedisTemplate.opsForValue().set(
+                    cacheKey,
+                    loop.getCompiledPrompt(),
+                    // 抖动防雪崩
+                    30L + (long) (Math.random() * 5),
+                    TimeUnit.MINUTES
+            );
+        } catch (Exception e) {
+            log.warn("addLoop 写 Redis 缓存失败, id={}", loop.getId(), e);
+        }
 
         return loop.getId();
     }
@@ -117,6 +124,7 @@ public class LoopServiceImpl implements LoopService {
             loop.setWorkflowJson(req.getWorkflowJson());
             loop.setCompiledPrompt(LoopWorkflowCompiler.compile(req.getWorkflowJson()));
         }
+        loop.setUpdateTime(java.time.LocalDateTime.now());
         loopMapper.update(loop);
 
         // 删除 Redis 缓存
@@ -159,7 +167,9 @@ public class LoopServiceImpl implements LoopService {
 
     @Override
     public LoopVO getLoopVO(Long id) {
+        log.info("getLoopVO id={}", id);
         Loop loop = loopMapper.selectOneById(id);
+        log.info("getLoopVO result: loop={}, isDelete={}", loop != null ? loop.getId() : null, loop != null ? loop.getIsDelete() : -1);
         ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
                 ErrorCode.NOT_FOUND_ERROR, "Loop不存在");
         return toVO(loop);
@@ -305,6 +315,8 @@ public class LoopServiceImpl implements LoopService {
         apply.setOperate(1);
         apply.setStatus(0);
         apply.setApplyReason(reason != null ? reason : "");
+        apply.setCreateTime(java.time.LocalDateTime.now());
+        apply.setUpdateTime(java.time.LocalDateTime.now());
         userLoopApplyMapper.insert(apply);
     }
 
@@ -350,6 +362,7 @@ public class LoopServiceImpl implements LoopService {
             loop.setWorkflowJson(req.getWorkflowJson());
             loop.setCompiledPrompt(LoopWorkflowCompiler.compile(req.getWorkflowJson()));
         }
+        loop.setUpdateTime(java.time.LocalDateTime.now());
         loopMapper.update(loop);
 
         stringRedisTemplate.delete("loop:compiled:" + loop.getId());

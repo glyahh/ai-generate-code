@@ -30,35 +30,35 @@ public class UserLoopApply implements Serializable {
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
-    @Column("loopId")
+    @Column("loop_id")
     private Long loopId;
 
-    @Column("userId")
+    @Column("user_id")
     private Long userId;
 
     private Integer operate;
 
     private Integer status;
 
-    @Column("applyReason")
+    @Column("apply_reason")
     private String applyReason;
 
-    @Column("reviewUserId")
+    @Column("review_user_id")
     private Long reviewUserId;
 
-    @Column("reviewRemark")
+    @Column("review_remark")
     private String reviewRemark;
 
-    @Column("reviewTime")
+    @Column("review_time")
     private LocalDateTime reviewTime;
 
     // 让Mybatis认为这个是逻辑删除,在删除时采用软删除策略
-    @Column(value = "isDelete", isLogicDelete = true)
+    @Column(value = "is_delete", isLogicDelete = true)
     private Integer isDelete;
 
-    @Column("createTime")
+    @Column("create_time")
     private LocalDateTime createTime;
 
-    @Column("updateTime")
+    @Column("update_time")
     private LocalDateTime updateTime;
 }

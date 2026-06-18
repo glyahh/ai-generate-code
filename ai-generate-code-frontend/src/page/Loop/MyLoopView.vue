@@ -154,7 +154,7 @@ visibility: public
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import {
   loopMyListPageVoUsingPost,
   loopOpenApiDeleteUsingPost,
@@ -196,17 +196,26 @@ const handleEdit = (id: number) => {
 
 // 删除 Loop
 const handleDelete = async (loop: any) => {
-  try {
-    const res = await loopOpenApiDeleteUsingPost({ params: { id: loop.id } })
-    if (res.data.code === 0 || res.data.code === 20000) {
-      message.success('删除成功')
-      myList.value = myList.value.filter((item: any) => item.id !== loop.id)
-    } else {
-      message.error(res.data.message || '删除失败')
-    }
-  } catch (e) {
-    console.error('删除失败', e)
-  }
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除「${loop.loopName}」吗？删除后不可恢复。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      try {
+        const res = await loopOpenApiDeleteUsingPost({ params: { id: loop.id } })
+        if (res.data.code === 0 || res.data.code === 20000) {
+          message.success('删除成功')
+          myList.value = myList.value.filter((item: any) => item.id !== loop.id)
+        } else {
+          message.error(res.data.message || '删除失败')
+        }
+      } catch (e) {
+        console.error('删除失败', e)
+      }
+    },
+  })
 }
 
 // 打开申请精选弹窗

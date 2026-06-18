@@ -134,7 +134,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { loopAddUsingPost, loopUpdateUsingPost, loopGetVoUsingGet } from '@/api/loopController'
 
 const props = defineProps<{
@@ -268,6 +268,25 @@ const handleSave = async () => {
     return
   }
 
+  // 检查是否有未填写的步骤
+  const emptySteps = form.steps.filter((s) => !s.content.trim())
+  if (emptySteps.length > 0) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        Modal.confirm({
+          title: '部分步骤未填写',
+          content: `你只填写了 ${form.steps.length - emptySteps.length}/${form.steps.length} 步，空的步骤（${emptySteps.map(s => s.label).join('、')}）不会注入到提示中。确定保存？`,
+          okText: '确定保存',
+          cancelText: '继续编辑',
+          onOk: () => resolve(),
+          onCancel: () => reject(new Error('cancelled')),
+        })
+      })
+    } catch {
+      return // 用户点了"继续编辑"，不保存
+    }
+  }
+
   saving.value = true
   try {
     const payload = {
@@ -279,7 +298,7 @@ const handleSave = async () => {
 
     if (isEditMode.value) {
       const res = await loopUpdateUsingPost({
-        body: { id: Number(resolvedEditId.value), ...payload },
+        body: { id: resolvedEditId.value, ...payload },
       })
       if (res.data.code === 0 || res.data.code === 20000) {
         message.success('更新成功')
@@ -314,7 +333,7 @@ const handleCancel = () => {
 onMounted(async () => {
   if (resolvedEditId.value) {
     try {
-      const res = await loopGetVoUsingGet({ params: { id: Number(resolvedEditId.value) } })
+      const res = await loopGetVoUsingGet({ params: { id: resolvedEditId.value } })
       if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
         const data = res.data.data
         form.loopName = data.loopName || ''

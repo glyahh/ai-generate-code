@@ -42,6 +42,7 @@ public class AppLoopServiceImpl implements AppLoopService {
             al.setAppId(appId);
             al.setLoopId(loopId);
             al.setAddedFrom(addedFrom);
+            al.setCreateTime(java.time.LocalDateTime.now());
             appLoopMapper.insert(al);
             // 写反向索引：loop → app_ids
             redisTemplate.opsForSet().add("loop:app_ids:" + loopId, String.valueOf(appId));
@@ -61,6 +62,7 @@ public class AppLoopServiceImpl implements AppLoopService {
         al.setAppId(appId);
         al.setLoopId(loopId);
         al.setAddedFrom(addedFrom);
+        al.setCreateTime(java.time.LocalDateTime.now());
         try {
             appLoopMapper.insert(al);
             redisTemplate.opsForSet().add("loop:app_ids:" + loopId, String.valueOf(appId));

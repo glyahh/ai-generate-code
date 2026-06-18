@@ -24,15 +24,15 @@ public class AppLoop implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    @Column("appId")
+    @Column("app_id")
     private Long appId;
 
-    @Column("loopId")
+    @Column("loop_id")
     private Long loopId;
 
-    @Column("addedFrom")
+    @Column("added_from")
     private String addedFrom;
 
-    @Column("createTime")
+    @Column("create_time")
     private LocalDateTime createTime;
 }

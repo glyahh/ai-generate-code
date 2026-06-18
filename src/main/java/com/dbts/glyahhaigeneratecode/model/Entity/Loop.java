@@ -30,35 +30,35 @@ public class Loop implements Serializable {
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
-    @Column("loopName")
+    @Column("loop_name")
     private String loopName;
 
     private String description;
 
     private String cover;
 
-    @Column("userId")
+    @Column("user_id")
     private Long userId;
 
     private Integer priority;
 
-    @Column("workflowJson")
+    @Column("workflow_json")
     private String workflowJson;
 
-    @Column("compiledPrompt")
+    @Column("compiled_prompt")
     private String compiledPrompt;
 
-    @Column("sourceType")
+    @Column("source_type")
     private String sourceType;
 
     private String visibility;
 
-    @Column(value = "isDelete", isLogicDelete = true)
+    @Column(value = "is_delete", isLogicDelete = true)
     private Integer isDelete;
 
-    @Column("createTime")
+    @Column("create_time")
     private LocalDateTime createTime;
 
-    @Column("updateTime")
+    @Column("update_time")
     private LocalDateTime updateTime;
 }
