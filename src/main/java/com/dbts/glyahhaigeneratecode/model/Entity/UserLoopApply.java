@@ -52,6 +52,7 @@ public class UserLoopApply implements Serializable {
     @Column("reviewTime")
     private LocalDateTime reviewTime;
 
+    // 让Mybatis认为这个是逻辑删除,在删除时采用软删除策略
     @Column(value = "isDelete", isLogicDelete = true)
     private Integer isDelete;
 
