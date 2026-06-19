@@ -111,7 +111,7 @@
       <a-tabs v-model:activeKey="importTabKey" size="small">
         <a-tab-pane key="paste" tab="粘贴内容">
           <div class="import-tip">
-            <p>粘贴 <code>.md</code> 格式内容，支持 Frontmatter 自动解析：</p>
+            <p>粘贴 <code>.md</code> 或 <code>.json</code> 格式内容，自动识别并转换：</p>
             <pre class="import-example">---
 name: 我的技能
 description: 一个示例技能
@@ -127,18 +127,14 @@ visibility: public
           <a-textarea
             v-model:value="importContent"
             :rows="8"
-            placeholder="在此粘贴 .md 格式内容或 Loop JSON..."
+            placeholder="在此粘贴 .md 或 .json 格式内容..."
             :maxlength="10000"
             show-count
           />
         </a-tab-pane>
         <a-tab-pane key="file" tab="上传文件">
           <div class="import-tip">
-            <p>支持 <code>.md</code>（Skill 格式）和 <code>.json</code>（Loop 格式）文件，自动识别。</p>
-            <ul class="file-format-notes">
-              <li><strong>JSON</strong>：含 <code>templateId</code> + <code>steps</code> 视为 Loop 原生格式，直接入库</li>
-              <li><strong>MD</strong>：含 YAML frontmatter 的 Skill 格式，自动解析转换</li>
-            </ul>
+            <p>支持 <code>.md</code> 和 <code>.json</code> 文件，上传后自动识别格式并转换。</p>
           </div>
           <a-upload-dragger
             :before-upload="handleFileSelect"
@@ -539,6 +535,18 @@ onMounted(() => {
   color: var(--text-base, #1a1a1a);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* 限制上传拖拽区高度，避免超出弹窗白底 */
+.my-loop :deep(.ant-upload-drag) {
+  max-height: 160px;
+  overflow-y: auto;
+}
+.my-loop :deep(.ant-upload-drag .ant-upload-drag-icon) {
+  margin-bottom: 4px;
+}
+.my-loop :deep(.ant-upload-drag p.ant-upload-text) {
+  margin-bottom: 4px;
 }
 
 /* 响应式 */

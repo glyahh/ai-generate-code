@@ -18,7 +18,6 @@
               <span v-else>{{ idx + 1 }}</span>
             </div>
             <div class="flow-node-label">{{ step.label }}</div>
-            <div v-if="idx < templateSteps.length - 1" class="flow-connector" />
           </div>
         </div>
       </a-col>
@@ -89,12 +88,6 @@
                 :rows="8"
                 :placeholder="step.placeholder || ''"
               />
-              <div class="step-tip">
-                此步骤内容在编译时
-                <template v-if="step.content.trim()">将</template>
-                <template v-else>不</template>
-                会被注入到系统提示中
-              </div>
             </a-form-item>
           </div>
 
@@ -220,7 +213,7 @@ const handleSave = async () => {
       await new Promise<void>((resolve, reject) => {
         Modal.confirm({
           title: '部分步骤未填写',
-          content: `你只填写了 ${form.steps.length - emptySteps.length}/${form.steps.length} 步，空的步骤（${emptySteps.map(s => s.label).join('、')}）不会注入到提示中。确定保存？`,
+          content: `你只填写了 ${form.steps.length - emptySteps.length}/${form.steps.length} 步，空的步骤（${emptySteps.map(s => s.label).join('、')}）将被跳过，仅保存已填写内容。确定保存？`,
           okText: '确定保存',
           cancelText: '继续编辑',
           onOk: () => resolve(),
@@ -243,7 +236,7 @@ const handleSave = async () => {
 
     if (isEditMode.value) {
       const res = await loopUpdateUsingPost({
-        body: { id: resolvedEditId.value, ...payload },
+        body: { id: Number(resolvedEditId.value), ...payload },
       })
       if (res.data.code === 0 || res.data.code === 20000) {
         message.success('更新成功')
@@ -278,7 +271,7 @@ const handleCancel = () => {
 onMounted(async () => {
   if (resolvedEditId.value) {
     try {
-      const res = await loopGetVoUsingGet({ params: { id: resolvedEditId.value } })
+      const res = await loopGetVoUsingGet({ params: { id: Number(resolvedEditId.value) } })
       if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
         const data = res.data.data
         form.loopName = data.loopName || ''
@@ -386,14 +379,6 @@ onMounted(async () => {
   font-weight: 500;
 }
 
-.flow-connector {
-  width: 2px;
-  height: 20px;
-  background: var(--border-color, #e8e8e8);
-  margin-left: 13px;
-  flex-shrink: 0;
-}
-
 /* ===== 右侧：编辑区 ===== */
 .loop-right-col {
   min-height: 400px;
@@ -436,13 +421,6 @@ onMounted(async () => {
 
 .step-content-item {
   margin-bottom: 12px;
-}
-
-.step-tip {
-  font-size: 12px;
-  color: var(--text-muted, #999);
-  margin-top: 4px;
-  line-height: 1.5;
 }
 
 /* 步骤指示点 */
@@ -515,10 +493,6 @@ onMounted(async () => {
     padding: 8px;
     min-width: 60px;
     align-items: center;
-  }
-
-  .flow-connector {
-    display: none;
   }
 
   .flow-node-label {
