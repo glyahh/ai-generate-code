@@ -103,14 +103,16 @@
     <!-- 导入弹窗 -->
     <a-modal
       v-model:visible="showImportModal"
-      title="导入 Skill"
+      title="导入 Skill / Loop"
       :confirm-loading="importing"
       ok-text="导入"
       @ok="handleImport"
     >
-      <div class="import-tip">
-        <p>粘贴 <code>.md</code> 格式内容，支持 Frontmatter 自动解析：</p>
-        <pre class="import-example">---
+      <a-tabs v-model:activeKey="importTabKey" size="small">
+        <a-tab-pane key="paste" tab="粘贴内容">
+          <div class="import-tip">
+            <p>粘贴 <code>.md</code> 格式内容，支持 Frontmatter 自动解析：</p>
+            <pre class="import-example">---
 name: 我的技能
 description: 一个示例技能
 visibility: public
@@ -121,14 +123,38 @@ visibility: public
 
 ## 约束与边界
 - 输出简洁</pre>
-      </div>
-      <a-textarea
-        v-model:value="importContent"
-        :rows="10"
-        placeholder="在此粘贴 .md 格式内容..."
-        :maxlength="10000"
-        show-count
-      />
+          </div>
+          <a-textarea
+            v-model:value="importContent"
+            :rows="8"
+            placeholder="在此粘贴 .md 格式内容或 Loop JSON..."
+            :maxlength="10000"
+            show-count
+          />
+        </a-tab-pane>
+        <a-tab-pane key="file" tab="上传文件">
+          <div class="import-tip">
+            <p>支持 <code>.md</code>（Skill 格式）和 <code>.json</code>（Loop 格式）文件，自动识别。</p>
+            <ul class="file-format-notes">
+              <li><strong>JSON</strong>：含 <code>templateId</code> + <code>steps</code> 视为 Loop 原生格式，直接入库</li>
+              <li><strong>MD</strong>：含 YAML frontmatter 的 Skill 格式，自动解析转换</li>
+            </ul>
+          </div>
+          <a-upload-dragger
+            :before-upload="handleFileSelect"
+            accept=".md,.json"
+            :show-upload-list="false"
+          >
+            <p class="ant-upload-drag-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+              </svg>
+            </p>
+            <p class="ant-upload-text">点击或拖拽文件到此区域上传</p>
+            <p class="ant-upload-hint">支持 .md 和 .json 文件</p>
+          </a-upload-dragger>
+        </a-tab-pane>
+      </a-tabs>
     </a-modal>
 
     <!-- 申请精选确认弹窗 -->
@@ -172,6 +198,7 @@ const loading = ref(false)
 const showImportModal = ref(false)
 const importContent = ref('')
 const importing = ref(false)
+const importTabKey = ref('paste')
 
 // 申请弹窗
 const showApplyModal = ref(false)
@@ -249,7 +276,34 @@ const handleSubmitApply = async () => {
   }
 }
 
-// 导入
+// 文件上传预处理（读文件内容后调后端接口）
+const handleFileSelect = async (file: File): Promise<boolean> => {
+  const text = await file.text()
+  if (!text.trim()) {
+    message.warning('文件内容为空')
+    return false
+  }
+  importing.value = true
+  try {
+    const { loopOpenApiImportUsingPost } = await import('@/api/loopController')
+    const res = await loopOpenApiImportUsingPost({ body: text.trim() })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('导入成功')
+      showImportModal.value = false
+      await loadMyList()
+    } else {
+      message.error(res.data.message || '导入失败')
+    }
+  } catch (e) {
+    console.error('文件导入失败', e)
+    message.error('文件导入失败，请检查格式')
+  } finally {
+    importing.value = false
+  }
+  return false // 阻止默认上传行为
+}
+
+// 文本导入（粘贴内容）
 const handleImport = async () => {
   if (!importContent.value.trim()) {
     message.warning('请粘贴要导入的内容')

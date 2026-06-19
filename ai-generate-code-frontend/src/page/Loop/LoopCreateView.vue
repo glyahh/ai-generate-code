@@ -1,7 +1,7 @@
 <template>
   <div class="loop-create">
     <a-row :gutter="24">
-      <!-- 左侧：5 步流程图 + 导入区 -->
+      <!-- 左侧：5 步流程图 -->
       <a-col :xs="24" :md="8" class="loop-left-col">
         <div class="flow-diagram">
           <div
@@ -11,30 +11,15 @@
             :class="{ active: currentStep === idx }"
             @click="currentStep = idx"
           >
-            <div class="flow-node-index">{{ idx + 1 }}</div>
+            <div class="flow-node-index">
+              <svg v-if="step.icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path :d="step.icon" />
+              </svg>
+              <span v-else>{{ idx + 1 }}</span>
+            </div>
             <div class="flow-node-label">{{ step.label }}</div>
             <div v-if="idx < templateSteps.length - 1" class="flow-connector" />
           </div>
-        </div>
-
-        <!-- 导入区 -->
-        <a-divider class="import-divider">导入已有内容</a-divider>
-        <div class="import-area">
-          <a-textarea
-            v-model:value="importRaw"
-            :rows="6"
-            placeholder="粘贴以下格式自动解析&#10;&#10;---&#10;name: 我的技能&#10;description: 一个示例技能&#10;visibility: public&#10;---&#10;## 角色设定&#10;你是一个XX专家&#10;&#10;## 约束与边界&#10;- 输出简洁&#10;&#10;## 执行步骤&#10;1. 分析需求&#10;2. 生成代码"
-            class="import-textarea"
-          />
-          <a-button type="dashed" block class="import-btn" @click="parseImport">
-            <template #icon>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1v8M3 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M1 10v2a1 1 0 001 1h10a1 1 0 001-1v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
-            </template>
-            解析导入
-          </a-button>
         </div>
       </a-col>
 
@@ -60,8 +45,18 @@
             <a-col :span="12">
               <a-form-item label="可见性">
                 <a-radio-group v-model:value="form.visibility">
-                  <a-radio value="public">公开</a-radio>
-                  <a-radio value="private">私有</a-radio>
+                  <a-radio value="public">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                    </svg>
+                    公开
+                  </a-radio>
+                  <a-radio value="private">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
+                    </svg>
+                    私有
+                  </a-radio>
                 </a-radio-group>
               </a-form-item>
             </a-col>
@@ -120,9 +115,22 @@
           <a-form-item class="form-actions">
             <a-space>
               <a-button type="primary" @click="handleSave" :loading="saving">
+                <template #icon>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                    <polyline points="17,21 17,13 7,13 7,21" /><polyline points="7,3 7,8 15,8" />
+                  </svg>
+                </template>
                 保存
               </a-button>
-              <a-button @click="handleCancel">取消</a-button>
+              <a-button @click="handleCancel">
+                <template #icon>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </template>
+                取消
+              </a-button>
             </a-space>
           </a-form-item>
         </a-form>
@@ -149,16 +157,21 @@ const isEditMode = computed(() => !!resolvedEditId.value)
 
 const saving = ref(false)
 const currentStep = ref(0)
-const importRaw = ref('')
 
 const currentStepLabel = computed(() => templateSteps[currentStep.value]?.label ?? '')
 
+/** 5 步模板：每个步骤附带 SVG path 图标 */
 const templateSteps = [
-  { key: 'role', label: '角色设定', placeholder: '你扮演…\n例如：你是一个资深的 Vue 前端工程师' },
-  { key: 'context', label: '背景上下文', placeholder: '补充背景信息…\n例如：用户需要生成一个响应式管理后台' },
-  { key: 'constraints', label: '约束与边界', placeholder: '行为限制、输出规范…\n例如：- 使用 Vue 3 + TypeScript\n- 响应式布局\n- 输出简洁' },
-  { key: 'workflow', label: '执行步骤', placeholder: '1. 分析需求\n2. 设计数据流\n3. 生成核心代码\n4. 优化与打包' },
-  { key: 'output', label: '输出格式', placeholder: '返回 Markdown 格式结果\n或：生成可直接运行的 HTML 文件' },
+  { key: 'role', label: '角色设定', icon: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 3a4 4 0 100 8 4 4 0 000-8z',
+    placeholder: '你扮演…\n例如：你是一个资深的 Vue 前端工程师' },
+  { key: 'context', label: '背景上下文', icon: 'M9 12h6M9 16h6M12 2a10 10 0 110 20 10 10 0 010-20z',
+    placeholder: '补充背景信息…\n例如：用户需要生成一个响应式管理后台' },
+  { key: 'constraints', label: '约束与边界', icon: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z',
+    placeholder: '行为限制、输出规范…\n例如：- 使用 Vue 3 + TypeScript\n- 响应式布局\n- 输出简洁' },
+  { key: 'workflow', label: '执行步骤', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 5h6M9 12l2 2 4-4',
+    placeholder: '1. 分析需求\n2. 设计数据流\n3. 生成核心代码\n4. 优化与打包' },
+  { key: 'output', label: '输出格式', icon: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+    placeholder: '返回 Markdown 格式结果\n或：生成可直接运行的 HTML 文件' },
 ]
 
 const form = reactive<{
@@ -177,74 +190,6 @@ const form = reactive<{
     placeholder: s.placeholder,
   })),
 })
-
-// 解析导入：frontmatter → 名称/简介/可见性，body 按 ## 标题拆分映射到 steps
-const parseImport = () => {
-  const raw = importRaw.value.trim()
-  if (!raw) {
-    message.warning('请先粘贴要导入的内容')
-    return
-  }
-  try {
-    let name = '未命名技能'
-    let desc = ''
-    let vis = 'private'
-    let body = raw
-
-    if (raw.startsWith('---')) {
-      const endIdx = raw.indexOf('---', 3)
-      if (endIdx > 0) {
-        const front = raw.substring(3, endIdx).trim()
-        front.split('\n').forEach((line) => {
-          const trimmed = line.trim()
-          if (trimmed.startsWith('name:')) name = trimmed.substring(5).trim()
-          else if (trimmed.startsWith('description:')) desc = trimmed.substring(12).trim()
-          else if (trimmed.startsWith('visibility:')) vis = trimmed.substring(11).trim()
-        })
-        body = raw.substring(endIdx + 3).trim()
-      }
-    }
-
-    form.loopName = name
-    form.description = desc
-    form.visibility = vis
-
-    // 按 ## 标题拆分 body 填入对应步骤
-    const lines = body.split('\n')
-    let currentKey = ''
-    const contentMap: Record<string, string> = {}
-    for (const line of lines) {
-      const h2Match = line.match(/^##\s+(.+)/)
-      if (h2Match) {
-        const title = h2Match[1]?.trim() ?? ''
-        currentKey = mapLabelToKey(title)
-        if (!contentMap[currentKey]) contentMap[currentKey] = ''
-      } else if (currentKey) {
-        contentMap[currentKey] = (contentMap[currentKey] || '') + line + '\n'
-      }
-    }
-
-    form.steps.forEach((s) => {
-      const stepContent = contentMap[s.key]
-      if (stepContent) s.content = stepContent.trim()
-    })
-
-    message.success('解析成功，请确认并保存')
-  } catch (e) {
-    console.error('解析失败', e)
-    message.error('解析失败，请检查格式是否正确')
-  }
-}
-
-// 将 ## 标题标签映射到 step key
-const mapLabelToKey = (label: string): string => {
-  if (label.includes('角色')) return 'role'
-  if (label.includes('背景') || label.includes('上下文')) return 'context'
-  if (label.includes('约束') || label.includes('边界')) return 'constraints'
-  if (label.includes('步骤') || label.includes('执行') || label.includes('工作流')) return 'workflow'
-  if (label.includes('输出') || label.includes('格式')) return 'output'
-  return 'role'
-}
 
 // 编译 workflowJson（仅非空步骤）
 const buildWorkflowJson = () => {
@@ -283,7 +228,7 @@ const handleSave = async () => {
         })
       })
     } catch {
-      return // 用户点了"继续编辑"，不保存
+      return
     }
   }
 
@@ -424,6 +369,12 @@ onMounted(async () => {
   transition: background var(--transition-duration, 0.2s) ease;
 }
 
+.flow-node-index svg {
+  width: 14px;
+  height: 14px;
+  color: #fff;
+}
+
 .flow-node.active .flow-node-index {
   background: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.2);
@@ -441,30 +392,6 @@ onMounted(async () => {
   background: var(--border-color, #e8e8e8);
   margin-left: 13px;
   flex-shrink: 0;
-}
-
-/* ===== 导入区 ===== */
-.import-divider {
-  margin: 20px 0 12px;
-  font-size: 12px;
-  color: var(--text-secondary, #666);
-}
-
-.import-area {
-  margin-bottom: 8px;
-}
-
-.import-textarea {
-  font-size: 12px;
-  font-family: var(--font-family-base, inherit);
-}
-
-.import-btn {
-  margin-top: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
 }
 
 /* ===== 右侧：编辑区 ===== */

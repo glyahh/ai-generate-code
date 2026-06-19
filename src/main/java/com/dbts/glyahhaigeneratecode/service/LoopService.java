@@ -54,6 +54,17 @@ public interface LoopService {
     Long importLoop(String rawContent, Long userId);
 
     /**
+     * 从市场克隆一个公开 Loop 到当前用户的个人库。
+     * <p>只会克隆 visibility=public 且未删除的 Loop。克隆后 sourceType=market_imported，
+     * visibility=private，priority=0。</p>
+     *
+     * @param loopId 市场中要导入的 Loop ID
+     * @param userId 当前用户 ID
+     * @return 新创建的 Loop ID（在当前用户名下）
+     */
+    Long marketImport(Long loopId, Long userId);
+
+    /**
      * 申请精选。
      */
     void applyGood(Long loopId, String reason, Long userId);

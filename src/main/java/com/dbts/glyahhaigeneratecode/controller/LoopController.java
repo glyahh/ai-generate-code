@@ -18,7 +18,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -115,6 +118,72 @@ public class LoopController {
                 ErrorCode.PARAMS_ERROR, "导入内容不能为空");
         Long id = loopService.importLoop(rawContent, loginUser.getId());
         return ResultUtils.success(id);
+    }
+
+    /**
+     * 从市场克隆一个公开 Loop 到当前用户的个人库。
+     * 市场只进个人库，不会直接绑定到应用，避免用户误把他人作品直挂到生产环境。
+     */
+    @PostMapping("/market/import")
+    public BaseResponse<Long> marketImport(@RequestParam Long loopId, HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        Long id = loopService.marketImport(loopId, loginUser.getId());
+        return ResultUtils.success(id);
+    }
+
+    /**
+     * 通过上传文件导入 Loop。
+     * <p>支持 .md（含 YAML frontmatter 的 Skill 格式）和 .json（标准 Loop workflowJson 格式）。
+     * 自动识别：合法 JSON 且含 templateId+steps 视为 Loop 原生格式直接入库；
+     * 含 YAML frontmatter 的视为 Skill，走 importLoop 转换。</p>
+     */
+    @PostMapping("/import/file")
+    public BaseResponse<Long> importFile(@RequestParam MultipartFile file, HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        ThrowUtils.throwIf(file == null || file.isEmpty(),
+                ErrorCode.PARAMS_ERROR, "上传文件不能为空");
+
+        String fileName = file.getOriginalFilename();
+        if (fileName == null || (!fileName.endsWith(".md") && !fileName.endsWith(".json"))) {
+            ThrowUtils.throwIf(true, ErrorCode.PARAMS_ERROR, "仅支持 .md 或 .json 格式文件");
+        }
+
+        try {
+            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+            ThrowUtils.throwIf(StrUtil.isBlank(content),
+                    ErrorCode.PARAMS_ERROR, "文件内容为空");
+
+            String trimmed = content.trim();
+
+            // 尝试识别为 JSON Loop 原生格式
+            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(trimmed);
+                    if (root.has("templateId") && root.has("steps") && root.get("steps").isArray()) {
+                        // 是标准 Loop JSON → 直接作为 workflowJson 创建
+                        String loopName = root.has("name") ? root.get("name").asText() : fileName.replaceAll("\\.\\w+$", "");
+                        LoopAddRequest req = new LoopAddRequest();
+                        req.setLoopName(loopName);
+                        req.setDescription(root.has("description") ? root.get("description").asText() : "");
+                        req.setWorkflowJson(trimmed);
+                        req.setSourceType("imported");
+                        req.setVisibility("private");
+                        return ResultUtils.success(loopService.addLoop(req, loginUser.getId()));
+                    }
+                } catch (Exception ignored) {
+                    // 不是合法 JSON Loop，继续按 Skill 方式解析
+                }
+            }
+
+            // 否则走现有 importLoop（解析 frontmatter + body → workflowJson）
+            Long id = loopService.importLoop(trimmed, loginUser.getId());
+            return ResultUtils.success(id);
+
+        } catch (IOException e) {
+            log.error("importFile 读取异常", e);
+            throw new RuntimeException("文件读取失败: " + e.getMessage(), e);
+        }
     }
 
     /**

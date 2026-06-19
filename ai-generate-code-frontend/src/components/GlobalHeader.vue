@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { userLogoutUsingPost } from '@/api/userController'
-import { RightOutlined, SettingOutlined, SkinOutlined } from '@ant-design/icons-vue'
+import { RightOutlined, SettingOutlined, SkinOutlined, AppstoreOutlined } from '@ant-design/icons-vue'
 
 const userLoginStore = UserLoginStore()
 userLoginStore.fetchLoginUser()
@@ -154,7 +154,7 @@ async function handleLogout() {
                 <span class="menu-text">外观设置</span>
               </div>
               <div class="menu-item settings-item" @click="handleMyLoop">
-                <RightOutlined class="menu-icon" />
+                <AppstoreOutlined class="menu-icon" />
                 <span class="menu-text">我的 Loop</span>
               </div>
               <div class="menu-item logout-item" @click="handleLogout" :class="{ 'loading': isLoggingOut }">

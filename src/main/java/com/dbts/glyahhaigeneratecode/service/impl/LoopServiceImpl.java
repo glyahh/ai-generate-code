@@ -288,6 +288,39 @@ public class LoopServiceImpl implements LoopService {
         return addLoop(req, userId);
     }
 
+    // ==================== 市场导入个人库 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long marketImport(Long loopId, Long userId) {
+        // 只允许克隆公开且未删除的 Loop。
+        // 这个约束有两层意思：一是非公开 Loop 不进入市场流通，二是已删除的残影不能被重新捞起。
+        Loop source = loopMapper.selectOneById(loopId);
+        ThrowUtils.throwIf(source == null || source.getIsDelete() == 1,
+                ErrorCode.NOT_FOUND_ERROR, "Loop 不存在或已删除");
+        ThrowUtils.throwIf(!"public".equals(source.getVisibility()),
+                ErrorCode.FORBIDDEN_ERROR, "只能导入公开 Loop");
+
+        // 克隆到当前用户个人库，sourceType=market_imported 区别于「自主创作」和「文件导入」。
+        // 名称附加「（导入）」后缀，让用户在个人库中能区分原创与市场收藏，避免同名混淆。
+        Loop clone = new Loop();
+        clone.setLoopName(source.getLoopName() + "（导入）");
+        clone.setDescription(source.getDescription());
+        clone.setCover("");
+        clone.setUserId(userId);
+        clone.setPriority(0);
+        clone.setWorkflowJson(source.getWorkflowJson());
+        clone.setCompiledPrompt(source.getCompiledPrompt());
+        clone.setSourceType("market_imported");
+        clone.setVisibility("private");
+        clone.setIsDelete(0);
+        clone.setCreateTime(java.time.LocalDateTime.now());
+        clone.setUpdateTime(java.time.LocalDateTime.now());
+        loopMapper.insert(clone);
+        log.info("marketImport: userId={} cloned loopId={} as new loopId={}", userId, loopId, clone.getId());
+        return clone.getId();
+    }
+
     // ==================== 申请精选 ====================
 
     @Override

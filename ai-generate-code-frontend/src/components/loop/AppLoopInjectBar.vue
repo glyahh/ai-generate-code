@@ -20,9 +20,30 @@
         </a-radio-button>
       </a-radio-group>
     </div>
-    <a-button type="link" size="small" class="inject-add-btn" @click="goToMarket">
-      + 添加
-    </a-button>
+    <!-- 改为从「我的 Loop」选择添加，不走市场 -->
+    <a-popover v-model:open="addPopoverOpen" trigger="click" placement="topRight">
+      <template #content>
+        <div class="my-loop-picker">
+          <div v-if="myLoopList.length === 0" class="picker-empty">
+            <p>暂无 Loop，先去创作或导入</p>
+            <a-button type="link" size="small" @click="goCreate">去创作</a-button>
+          </div>
+          <div v-else class="picker-list">
+            <a-checkbox-group v-model:value="selectedAddIds">
+              <div v-for="loop in myLoopList" :key="loop.id" class="picker-item">
+                <a-checkbox :value="loop.id">{{ loop.loopName }}</a-checkbox>
+              </div>
+            </a-checkbox-group>
+            <a-button type="primary" size="small" block :loading="adding" @click="handleAddToApp" class="picker-add-btn">
+              添加到当前应用
+            </a-button>
+          </div>
+        </div>
+      </template>
+      <a-button type="link" size="small" class="inject-add-btn">
+        + 添加
+      </a-button>
+    </a-popover>
   </div>
 </template>
 
@@ -31,6 +52,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { appLoopListVoUsingPost } from '@/api/appLoopController'
+import { loopMyListPageVoUsingPost } from '@/api/loopController'
 
 const router = useRouter()
 
@@ -42,9 +64,16 @@ const emit = defineEmits<{
   (e: 'select', loopId: number): void
 }>()
 
+// 已有绑定
 const loopList = ref<any[]>([])
 const selectedLoopId = ref(0)
 const searchText = ref('')
+
+// 「我的 Loop」添加弹窗
+const addPopoverOpen = ref(false)
+const myLoopList = ref<any[]>([])
+const selectedAddIds = ref<number[]>([])
+const adding = ref(false)
 
 const filteredList = computed(() => {
   if (!searchText.value) return loopList.value
@@ -54,18 +83,55 @@ const filteredList = computed(() => {
 
 watch(selectedLoopId, (val) => emit('select', val))
 
-function goToMarket() {
-  router.push('/loop')
+function goCreate() {
+  router.push('/loop/create')
 }
 
-onMounted(async () => {
+// 从「我的 Loop」选择添加到当前应用
+async function handleAddToApp() {
+  if (selectedAddIds.value.length === 0) {
+    message.warning('请至少选择一个 Loop')
+    return
+  }
+  adding.value = true
   try {
+    const { appLoopAddUsingPost } = await import('@/api/appLoopController')
+    // 逐个添加到应用
+    for (const loopId of selectedAddIds.value) {
+      await appLoopAddUsingPost({ params: { appId: props.appId, loopId } })
+    }
+    message.success('添加成功')
+    addPopoverOpen.value = false
+    selectedAddIds.value = []
+    // 刷新列表
     const res = await appLoopListVoUsingPost({ params: { appId: props.appId } })
     if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
       loopList.value = res.data.data
     }
   } catch (e) {
-    console.error('加载应用 Loop 列表失败', e)
+    console.error('添加 Loop 失败', e)
+    message.error('添加失败，请稍后重试')
+  } finally {
+    adding.value = false
+  }
+}
+
+onMounted(async () => {
+  try {
+    // 加载当前应用已绑定的 Loop
+    const res = await appLoopListVoUsingPost({ params: { appId: props.appId } })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      loopList.value = res.data.data
+    }
+    // 同时加载「我的 Loop」供添加选择
+    const myRes = await loopMyListPageVoUsingPost({
+      body: { pageNum: 1, pageSize: 50 },
+    })
+    if ((myRes.data.code === 0 || myRes.data.code === 20000) && myRes.data.data) {
+      myLoopList.value = myRes.data.data
+    }
+  } catch (e) {
+    console.error('加载 Loop 列表失败', e)
   }
 })
 </script>
@@ -96,5 +162,23 @@ onMounted(async () => {
 }
 .inject-add-btn {
   flex-shrink: 0;
+}
+.my-loop-picker {
+  min-width: 240px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.picker-empty {
+  text-align: center;
+  padding: 16px;
+}
+.picker-list {
+  padding: 4px 0;
+}
+.picker-item {
+  padding: 4px 0;
+}
+.picker-add-btn {
+  margin-top: 8px;
 }
 </style>

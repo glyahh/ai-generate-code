@@ -53,6 +53,33 @@ public class AppLoopServiceImpl implements AppLoopService {
 
     @Override
     @Transactional
+    public void bindLoopsFromMyLoop(Long appId, List<Long> loopIds, Long userId, String addedFrom) {
+        if (loopIds == null || loopIds.isEmpty()) {
+            return;
+        }
+        for (Long loopId : loopIds) {
+            // 归属校验：只能绑用户自己创建的 Loop。
+            // 这是业务上的硬约束——市场 Loop 只能进个人库，不能直挂应用。
+            // 防止用户 A 拿到了用户 B 的 Loop ID 后越权绑定到自己的应用，产生数据归属与责任问题。
+            Loop loop = loopMapper.selectOneById(loopId);
+            ThrowUtils.throwIf(loop == null || loop.getIsDelete() == 1,
+                    ErrorCode.NOT_FOUND_ERROR, "Loop 不存在或已删除");
+            ThrowUtils.throwIf(!userId.equals(loop.getUserId()),
+                    ErrorCode.FORBIDDEN_ERROR, "只能从「我的 Loop」选择自己的 Loop 绑定到应用");
+
+            AppLoop al = new AppLoop();
+            al.setAppId(appId);
+            al.setLoopId(loopId);
+            al.setAddedFrom(addedFrom);
+            al.setCreateTime(java.time.LocalDateTime.now());
+            appLoopMapper.insert(al);
+            redisTemplate.opsForSet().add("loop:app_ids:" + loopId, String.valueOf(appId));
+        }
+        redisTemplate.delete("app:loop:ids:" + appId);
+    }
+
+    @Override
+    @Transactional
     public void addLoop(Long appId, Long loopId, String addedFrom) {
         // 先校验 Loop 是否存在且未删除，防止绑定无效 Loop
         Loop loop = loopMapper.selectOneById(loopId);

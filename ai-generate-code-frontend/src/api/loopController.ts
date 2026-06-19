@@ -270,3 +270,20 @@ export function loopAdminApplyRejectUsingPost({
     ...(options || {}),
   });
 }
+
+/** 从市场克隆公开 Loop 到当前用户个人库 POST /loop/market/import */
+export function loopMarketImportUsingPost({
+  params,
+  options,
+}: {
+  params: API.LoopMarketImportUsingPostParams;
+  options?: { [key: string]: unknown };
+}) {
+  return request<API.BaseResponseLong>('/loop/market/import', {
+    method: 'POST',
+    params: {
+      ...params,
+    },
+    ...(options || {}),
+  });
+}

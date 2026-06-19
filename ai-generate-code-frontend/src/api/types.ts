@@ -690,6 +690,10 @@ export type LoopOpenApiDeleteUsingPostResponses = {
 
 export type LoopOpenApiImportUsingPostBody = string;
 
+export type LoopMarketImportUsingPostParams = {
+  loopId: number;
+};
+
 export type LoopOpenApiImportUsingPostResponses = {
   /**
    * OK

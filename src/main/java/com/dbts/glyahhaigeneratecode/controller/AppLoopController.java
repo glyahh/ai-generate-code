@@ -20,7 +20,9 @@ import java.util.Map;
 /**
  * 应用 Loop 库控制器。
  * 管理应用与 Loop 技能的绑定关系。
- * <p>所有接口均需校验当前用户对 appId 的操作权限，防止越权绑定/解绑他人应用。</p>
+ * <p>市场 Loop 只能导入到「我的 Loop」个人库，不能直绑应用。
+ * 绑应用到应用必须走「我的 Loop」选择，且只能绑自己创建的 Loop。
+ * 这是设计约束：避免用户误把他人作品直挂到生产环境后产生连带责任。</p>
  */
 @Slf4j
 @RestController
@@ -45,24 +47,30 @@ public class AppLoopController {
     }
 
     /**
-     * 批量绑定 Loop 到应用（创建应用时使用）。
+     * 从「我的 Loop」批量绑定到应用（创建应用时使用）。
+     * <p>每个 Loop 必须属于当前用户，由 bindLoopsFromMyLoop 统一校验。
+     * 注意：这里不走 bindLoops（无归属校验），因为创建应用时用户选的是「我的 Loop」中的项，
+     * 已经过了 LoopPickerTrigger 的前端筛选，但后端仍需二次确认，防止篡改请求。</p>
      */
     @PostMapping("/bind")
-    public BaseResponse<Void> bind(@RequestParam Long appId, @RequestBody List<Long> loopIds,
-                                   HttpServletRequest request) {
+    public BaseResponse<Void> bindFromMyLoops(@RequestParam Long appId, @RequestBody List<Long> loopIds,
+                                              HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
         checkAppOwner(appId, request);
-        appLoopService.bindLoops(appId, loopIds, "creation");
+        appLoopService.bindLoopsFromMyLoop(appId, loopIds, loginUser.getId(), "creation");
         return ResultUtils.success(null);
     }
 
     /**
-     * 单个添加 Loop 到应用（从市场添加）。
+     * 从「我的 Loop」单个添加到应用（对话界面添加时使用）。
+     * <p>与前端的 AppLoopInjectBar「+ 添加」按钮对应：用户从自己的 Loop 列表中选择一个绑定到当前应用。</p>
      */
     @PostMapping("/add")
-    public BaseResponse<Void> add(@RequestParam Long appId, @RequestParam Long loopId,
-                                  HttpServletRequest request) {
+    public BaseResponse<Void> addFromMyLoop(@RequestParam Long appId, @RequestParam Long loopId,
+                                            HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
         checkAppOwner(appId, request);
-        appLoopService.addLoop(appId, loopId, "market");
+        appLoopService.bindLoopsFromMyLoop(appId, List.of(loopId), loginUser.getId(), "chat");
         return ResultUtils.success(null);
     }
 

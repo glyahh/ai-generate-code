@@ -1,8 +1,19 @@
 <template>
   <div class="loop-market">
     <div class="loop-market-header">
-      <h1>Loop 市场</h1>
-      <p>发现精选与公开 Loop，为你的应用注入强大技能</p>
+      <div class="loop-market-header-left">
+        <h1>Loop 市场</h1>
+        <p>发现精选与公开 Loop，为你的应用注入强大技能</p>
+      </div>
+      <a-button type="primary" class="create-loop-btn" @click="goCreate">
+        <template #icon>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <line x1="7" y1="1" x2="7" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            <line x1="1" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </template>
+        创作我的 Loop
+      </a-button>
     </div>
 
     <a-tabs v-model:activeKey="activeTab" class="loop-tabs">
@@ -50,8 +61,8 @@
               </div>
             </div>
             <div class="loop-card-actions">
-              <a-button type="primary" size="small" ghost @click.stop="addToApp(loop.id)">
-                加入我的应用
+              <a-button type="primary" size="small" ghost @click.stop="importToMyLoop(loop.id)">
+                导入到我的 Loop
               </a-button>
               <a-button size="small" @click.stop="viewDetail(loop.id)">详情</a-button>
             </div>
@@ -98,8 +109,8 @@
               </div>
             </div>
             <div class="loop-card-actions">
-              <a-button type="primary" size="small" ghost @click.stop="addToApp(loop.id)">
-                加入我的应用
+              <a-button type="primary" size="small" ghost @click.stop="importToMyLoop(loop.id)">
+                导入到我的 Loop
               </a-button>
               <a-button size="small" @click.stop="viewDetail(loop.id)">详情</a-button>
             </div>
@@ -118,7 +129,6 @@ import {
   loopGoodListPageVoUsingPost,
   loopPublicListPageVoUsingPost,
 } from '@/api/loopController'
-import { appLoopAddUsingPost } from '@/api/appLoopController'
 
 const router = useRouter()
 
@@ -133,6 +143,11 @@ const goodLoading = ref(false)
 const exploreList = ref<any[]>([])
 const exploreLoading = ref(false)
 const exploreSearchText = ref('')
+
+// 跳转创作页
+function goCreate() {
+  router.push('/loop/create')
+}
 
 // 加载精选 Loop
 const loadGood = async () => {
@@ -176,10 +191,25 @@ const loadExplore = async () => {
   }
 }
 
-// 加入我的应用
-const addToApp = async (loopId: number) => {
-  // 先尝试获取用户的第一个应用
-  router.push({ path: '/code/generate', query: { loopId: String(loopId) } })
+// 从市场导入到我的 Loop（不走应用绑定）
+const importToMyLoop = async (loopId: number) => {
+  try {
+    // 调用 /loop/market/import 克隆到用户个人库
+    const { loopMarketImportUsingPost } = await import('@/api/loopController')
+    const res = await loopMarketImportUsingPost({ params: { loopId } })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('已导入到「我的 Loop」，可在创建应用时绑定使用')
+    } else {
+      message.error(res.data.message || '导入失败')
+    }
+  } catch (e: any) {
+    if (e?.toString()?.includes('404')) {
+      message.warning('导入功能暂不可用，请稍后重试')
+    } else {
+      message.error('导入失败，请稍后重试')
+    }
+    console.error('导入 Loop 失败', e)
+  }
 }
 
 // 查看详情
@@ -200,19 +230,35 @@ onMounted(() => {
 }
 
 .loop-market-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 24px;
+  gap: 16px;
 }
 
-.loop-market-header h1 {
+.loop-market-header-left h1 {
   font-size: 24px;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
   color: var(--text-base, #1a1a1a);
 }
 
-.loop-market-header p {
+.loop-market-header-left p {
+  margin: 0;
   color: var(--text-secondary, #666);
   font-size: 14px;
+}
+
+.create-loop-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.create-loop-btn svg {
+  vertical-align: -2px;
 }
 
 .loop-tabs {
@@ -371,7 +417,12 @@ onMounted(() => {
     padding: 16px;
   }
 
-  .loop-market-header h1 {
+  .loop-market-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .loop-market-header-left h1 {
     font-size: 20px;
   }
 
