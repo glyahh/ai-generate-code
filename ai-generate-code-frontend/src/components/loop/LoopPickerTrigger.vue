@@ -6,17 +6,47 @@
         <a-button type="link" @click="goToMarket">前往 Loop 市场</a-button>
       </div>
       <div v-else class="picker-list">
-        <a-checkbox-group v-model:value="selectedIds">
+        <!-- 单选模式：可取消的自定义按钮 -->
+        <template v-if="singleSelect">
           <div v-for="loop in loopList" :key="loop.id" class="picker-item">
-            <a-checkbox :value="loop.id">{{ loop.loopName }}</a-checkbox>
+            <a-button
+              size="small"
+              :type="selectedSingleId === loop.id ? 'primary' : 'default'"
+              class="picker-radio-btn"
+              @click="onSingleSelect(loop)"
+            >
+              {{ loop.loopName }}
+            </a-button>
             <span class="picker-desc">{{ loop.description }}</span>
           </div>
-        </a-checkbox-group>
+          <!-- 已选中的 Loop compiledPrompt 预览 -->
+          <div v-if="selectedSingleLoop" class="picker-prompt-preview">
+            <div class="picker-preview-label">已选 Loop 注入内容预览</div>
+            <pre class="picker-preview-text">{{ selectedSingleLoop.compiledPrompt || '(无注入内容)' }}</pre>
+          </div>
+        </template>
+        <!-- 多选模式：checkbox（默认） -->
+        <template v-else>
+          <a-checkbox-group v-model:value="selectedIds">
+            <div v-for="loop in loopList" :key="loop.id" class="picker-item">
+              <a-checkbox :value="loop.id">{{ loop.loopName }}</a-checkbox>
+              <span class="picker-desc">{{ loop.description }}</span>
+            </div>
+          </a-checkbox-group>
+        </template>
       </div>
     </template>
-    <a-button class="loop-pill" :type="selectedIds.length > 0 ? 'primary' : 'default'">
-      <span class="loop-pill-text">Loop{{ selectedIds.length > 0 ? ' · ' + selectedIds.length : '' }}</span>
-    </a-button>
+    <div class="loop-pill-wrap">
+      <a-button class="loop-pill" :type="singleSelect ? (selectedSingleId ? 'primary' : 'default') : (selectedIds.length > 0 ? 'primary' : 'default')">
+        <span class="loop-pill-text">
+          Loop{{ singleSelect
+            ? (selectedSingleLoop ? ' · 已选' : '')
+            : (selectedIds.length > 0 ? ' · ' + selectedIds.length : '')
+          }}
+        </span>
+      </a-button>
+      <span v-if="showBeta" class="loop-pill-beta">beta</span>
+    </div>
   </a-popover>
 </template>
 
@@ -24,18 +54,70 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { loopMyListPageVoUsingPost } from '@/api/loopController'
+import { loopMyListPageVoUsingPost, loopGetVoUsingGet } from '@/api/loopController'
+
+interface SelectedLoopInfo {
+  id: string
+  loopName: string
+  compiledPrompt: string
+}
+
+const props = withDefaults(defineProps<{
+  singleSelect?: boolean
+  showBeta?: boolean
+}>(), {
+  singleSelect: false,
+  showBeta: false,
+})
 
 const router = useRouter()
 const visible = ref(false)
 const loopList = ref<any[]>([])
-const selectedIds = ref<number[]>([])
+const selectedIds = ref<string[]>([])
+const selectedSingleId = ref<string>('')
+const selectedSingleLoop = ref<SelectedLoopInfo | null>(null)
 
 const emit = defineEmits<{
-  (e: 'change', ids: number[]): void
+  (e: 'change', ids: string[]): void
+  (e: 'singleChange', info: SelectedLoopInfo | null): void
 }>()
 
 watch(selectedIds, (val) => emit('change', val), { deep: true })
+watch(selectedSingleLoop, (val) => emit('singleChange', val), { deep: true })
+
+async function onSingleSelect(loop: any) {
+  // 再次点击已选中的 Loop → 取消选择
+  if (selectedSingleId.value === loop.id) {
+    selectedSingleId.value = ''
+    selectedSingleLoop.value = null
+    return
+  }
+  selectedSingleId.value = loop.id
+  // 获取完整 LoopVO 以拿到 compiledPrompt
+  try {
+    const res = await loopGetVoUsingGet({ params: { id: loop.id } })
+    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+      selectedSingleLoop.value = {
+        id: String(loop.id),
+        loopName: loop.loopName,
+        compiledPrompt: res.data.data.compiledPrompt || '',
+      }
+    } else {
+      selectedSingleLoop.value = {
+        id: String(loop.id),
+        loopName: loop.loopName,
+        compiledPrompt: '',
+      }
+    }
+  } catch (e) {
+    console.error('获取 Loop 详情失败', e)
+    selectedSingleLoop.value = {
+      id: String(loop.id),
+      loopName: loop.loopName,
+      compiledPrompt: '',
+    }
+  }
+}
 
 function goToMarket() {
   visible.value = false
@@ -55,7 +137,7 @@ onMounted(async () => {
   }
 })
 
-defineExpose({ selectedIds })
+defineExpose({ selectedIds, selectedSingleId, selectedSingleLoop })
 </script>
 
 <style scoped>
@@ -71,16 +153,49 @@ defineExpose({ selectedIds })
 }
 .picker-item {
   padding: 6px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.picker-radio-btn {
+  font-size: 12px;
+  border-radius: 8px;
 }
 .picker-desc {
   font-size: 12px;
   color: var(--text-secondary, #6b7280);
-  margin-left: 24px;
+  margin-left: 0;
+  width: 100%;
+  padding-left: 4px;
   display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 200px;
+}
+.picker-prompt-preview {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+.picker-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+  margin-bottom: 4px;
+}
+.picker-preview-text {
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-base, #0f172a);
+  margin: 0;
 }
 .loop-pill {
   display: inline-flex;
@@ -109,5 +224,25 @@ defineExpose({ selectedIds })
 .loop-pill-text {
   position: relative;
   z-index: 1;
+}
+.loop-pill-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.loop-pill-beta {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-transform: uppercase;
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  pointer-events: none;
 }
 </style>

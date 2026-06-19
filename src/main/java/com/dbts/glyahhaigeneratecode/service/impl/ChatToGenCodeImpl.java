@@ -115,7 +115,17 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         // 6. 注入个性化 prompt + loop skill（注入顺序：personalization → message → loop_skill）
         String enhancedMessage = injectPersonalizationPrompt(message, user.getId());
+        String beforeLoop = enhancedMessage;
         enhancedMessage = loopInjectService.injectIfPresent(enhancedMessage, user.getId(), appId, loopId);
+        // 记录提示词拼接日志
+        log.info("===== Prompt 拼接日志 (appId={}, userId={}, loopId={}) =====", appId, user.getId(), loopId);
+        log.info("【原始用户消息】\n{}", message);
+        if (!enhancedMessage.equals(beforeLoop)) {
+            String loopPart = enhancedMessage.substring(beforeLoop.length());
+            log.info("【Loop 注入追加】\n{}", loopPart);
+        }
+        log.info("【最终拼接结果】\n{}", enhancedMessage);
+        log.info("===== Prompt 拼接日志结束 =====");
         Flux<String> result = aiCodeGeneratorFacade.generateAndSaveCodeStream(enhancedMessage, codeGenTypeEnum, appId, firstRound);
         Flux<String> handlerFlux = streamHandlerExecutor.doExecute(result, chatHistoryService, appId, user, codeGenTypeEnum, false, firstRound, message, roundId);
 

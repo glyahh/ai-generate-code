@@ -72,8 +72,13 @@ public class AppLoopServiceImpl implements AppLoopService {
             al.setLoopId(loopId);
             al.setAddedFrom(addedFrom);
             al.setCreateTime(java.time.LocalDateTime.now());
-            appLoopMapper.insert(al);
-            redisTemplate.opsForSet().add("loop:app_ids:" + loopId, String.valueOf(appId));
+            try {
+                appLoopMapper.insert(al);
+                redisTemplate.opsForSet().add("loop:app_ids:" + loopId, String.valueOf(appId));
+            } catch (org.springframework.dao.DuplicateKeyException e) {
+                // 已绑定过，幂等跳过——与 addLoop 的重复处理逻辑一致
+                log.warn("bindLoopsFromMyLoop duplicate ignored: appId={} loopId={}", appId, loopId);
+            }
         }
         redisTemplate.delete("app:loop:ids:" + appId);
     }

@@ -272,9 +272,29 @@ const analyzingHintCloser = ref<null | (() => void)>(null)
 
 // 仅用于把用户在首页选择的“代码类型”追加到发送给 AI 的 prompt 末尾（不回显到前端对话气泡）
 const codeTypePromptChoiceOnce = ref<string | null>(null)
-const selectedLoopId = ref(0)
-function onLoopSelect(loopId: number) {
+const selectedLoopId = ref<string | number>(0)
+const selectedLoopCompiledPrompt = ref<string>('')
+const selectedLoopName = ref<string>('')
+function onLoopSelect(loopId: string | number) {
   selectedLoopId.value = loopId
+  // 获取 Loop 详情以获得 compiledPrompt（Snowflake ID 用字符串传递避免精度丢失）
+  if (loopId) {
+    const idStr = String(loopId)
+    import('@/api/loopController').then(({ loopGetVoUsingGet }) => {
+      loopGetVoUsingGet({ params: { id: idStr as any } }).then(res => {
+        if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+          selectedLoopCompiledPrompt.value = res.data.data.compiledPrompt || ''
+          selectedLoopName.value = res.data.data.loopName || ''
+        }
+      }).catch(() => {
+        selectedLoopCompiledPrompt.value = ''
+        selectedLoopName.value = ''
+      })
+    })
+  } else {
+    selectedLoopCompiledPrompt.value = ''
+    selectedLoopName.value = ''
+  }
 }
 
 /**
@@ -2605,8 +2625,9 @@ async function sendMessage(text?: string) {
     const apiBase = API_BASE_URL.replace(/\/$/, '')
     const endpoint = isAppWorkflowBeta() ? '/chat/gen/workflow' : '/chat/gen/code'
     // loopId 仅支持 /gen/code 端点，/gen/workflow 暂不支持
-    if (selectedLoopId.value > 0 && endpoint === '/chat/gen/code') {
-      query.append('loopId', String(selectedLoopId.value))
+    const loopIdVal = selectedLoopId.value
+    if (loopIdVal && String(loopIdVal) !== '0' && endpoint === '/chat/gen/code') {
+      query.append('loopId', String(loopIdVal))
     }
     const url = `${apiBase}${endpoint}?${query.toString()}`
 
@@ -2865,11 +2886,31 @@ async function loadAppInfo() {
               : null
           codeTypePromptChoiceOnce.value = codeTypeChoice
 
+          // 读取从首页传递的 loopId 参数（字符串传递，Snowflake ID 不可转 Number）
+          const autoLoopId = route.query.loopId
+          if (autoLoopId && String(autoLoopId).trim()) {
+            selectedLoopId.value = String(autoLoopId).trim()
+          }
+
+          // 先获取 Loop 详情以填充 compiledPrompt（用于调试日志），再发送消息
+          const loopDetailPromise = (autoLoopId && String(autoLoopId).trim())
+            ? import('@/api/loopController').then(({ loopGetVoUsingGet }) =>
+                loopGetVoUsingGet({ params: { id: String(autoLoopId).trim() as any } }).then(res => {
+                  if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
+                    selectedLoopCompiledPrompt.value = res.data.data.compiledPrompt || ''
+                    selectedLoopName.value = res.data.data.loopName || ''
+                  }
+                }).catch(() => {})
+              )
+            : Promise.resolve()
+
           // 清除 query 参数，避免刷新页面时重复自动发送
           router.replace({
             name: 'app-chat',
             params: { id: appId.value },
           })
+          // 等待 Loop 详情加载完成后发送消息（prompt log 需要 compiledPrompt）
+          await loopDetailPromise
           await sendMessage(appInfo.value.initPrompt)
         } else {
           // 其他情况：只预填到输入框，等待用户确认提交
@@ -3316,7 +3357,7 @@ onBeforeUnmount(() => {
           </template>
         </div>
 
-        <AppLoopInjectBar v-if="appId" :appId="Number(appId)" @select="onLoopSelect" />
+        <AppLoopInjectBar v-if="appId" :appId="appId" @select="onLoopSelect" />
 
         <div :class="['chat-input-bar', { 'chat-input-bar-readonly': isReadOnly }]">
           <div v-if="selectedElement" class="selected-element-alert">

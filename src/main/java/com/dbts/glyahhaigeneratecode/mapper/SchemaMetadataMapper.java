@@ -15,4 +15,10 @@ public interface SchemaMetadataMapper {
             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = #{tableName} AND COLUMN_NAME = #{columnName}
             """)
     Long countColumn(@Param("tableName") String tableName, @Param("columnName") String columnName);
+
+    @Select("""
+            SELECT COUNT(*) FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = #{tableName}
+            """)
+    Long countTable(@Param("tableName") String tableName);
 }

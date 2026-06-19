@@ -1,5 +1,7 @@
 package com.dbts.glyahhaigeneratecode.model.VO;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 import java.io.Serial;
@@ -15,6 +17,7 @@ public class LoopVO implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
     private String loopName;
@@ -23,6 +26,7 @@ public class LoopVO implements Serializable {
 
     private String cover;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long userId;
 
     private Integer priority;

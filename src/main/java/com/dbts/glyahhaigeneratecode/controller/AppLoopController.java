@@ -75,6 +75,24 @@ public class AppLoopController {
     }
 
     /**
+     * 从「我的 Loop」批量添加到应用（对话界面批量添加时使用）。
+     * <p>与前端 AppLoopInjectBar「添加到当前应用」按钮对应：用户从自己的 Loop 列表中
+     * 批量选择多个绑定到当前应用。</p>
+     */
+    @PostMapping("/batch/add")
+    public BaseResponse<Void> batchAddFromMyLoop(@RequestParam Long appId, @RequestBody List<Long> loopIds,
+                                                  HttpServletRequest request) {
+        User loginUser = userService.getUserInSession(request);
+        checkAppOwner(appId, request);
+        ThrowUtils.throwIf(loopIds == null || loopIds.isEmpty(),
+                ErrorCode.PARAMS_ERROR, "Loop ID 列表不能为空");
+        for (Long loopId : loopIds) {
+            appLoopService.bindLoopsFromMyLoop(appId, List.of(loopId), loginUser.getId(), "chat");
+        }
+        return ResultUtils.success(null);
+    }
+
+    /**
      * 查询应用绑定的 Loop 摘要列表。
      */
     @PostMapping("/list/vo")

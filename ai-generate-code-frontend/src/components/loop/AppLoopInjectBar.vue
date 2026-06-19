@@ -57,11 +57,11 @@ import { loopMyListPageVoUsingPost } from '@/api/loopController'
 const router = useRouter()
 
 const props = defineProps<{
-  appId: number
+  appId: string
 }>()
 
 const emit = defineEmits<{
-  (e: 'select', loopId: number): void
+  (e: 'select', loopId: string | number): void
 }>()
 
 // 已有绑定
@@ -72,7 +72,7 @@ const searchText = ref('')
 // 「我的 Loop」添加弹窗
 const addPopoverOpen = ref(false)
 const myLoopList = ref<any[]>([])
-const selectedAddIds = ref<number[]>([])
+const selectedAddIds = ref<string[]>([])
 const adding = ref(false)
 
 const filteredList = computed(() => {
@@ -87,7 +87,7 @@ function goCreate() {
   router.push('/loop/create')
 }
 
-// 从「我的 Loop」选择添加到当前应用
+// 从「我的 Loop」选择批量添加到当前应用
 async function handleAddToApp() {
   if (selectedAddIds.value.length === 0) {
     message.warning('请至少选择一个 Loop')
@@ -95,21 +95,29 @@ async function handleAddToApp() {
   }
   adding.value = true
   try {
-    const { appLoopAddUsingPost } = await import('@/api/appLoopController')
-    // 逐个添加到应用
-    for (const loopId of selectedAddIds.value) {
-      await appLoopAddUsingPost({ params: { appId: props.appId, loopId } })
-    }
-    message.success('添加成功')
-    addPopoverOpen.value = false
-    selectedAddIds.value = []
-    // 刷新列表
-    const res = await appLoopListVoUsingPost({ params: { appId: props.appId } })
-    if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
-      loopList.value = res.data.data
+    // 使用 bulk request 调用批量添加端点
+    const { default: request } = await import('@/request')
+    const res = await request({
+      url: '/app/loop/batch/add',
+      method: 'POST',
+      params: { appId: props.appId },
+      data: selectedAddIds.value.map(Number),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (res.data.code === 0 || res.data.code === 20000) {
+      message.success('批量添加成功')
+      addPopoverOpen.value = false
+      selectedAddIds.value = []
+      // 刷新列表
+      const listRes = await appLoopListVoUsingPost({ params: { appId: props.appId } })
+      if ((listRes.data.code === 0 || listRes.data.code === 20000) && listRes.data.data) {
+        loopList.value = listRes.data.data
+      }
+    } else {
+      message.error(res.data.message || '批量添加失败')
     }
   } catch (e) {
-    console.error('添加 Loop 失败', e)
+    console.error('批量添加 Loop 失败', e)
     message.error('添加失败，请稍后重试')
   } finally {
     adding.value = false

@@ -236,7 +236,7 @@ const handleSave = async () => {
 
     if (isEditMode.value) {
       const res = await loopUpdateUsingPost({
-        body: { id: Number(resolvedEditId.value), ...payload },
+        body: { id: resolvedEditId.value, ...payload },
       })
       if (res.data.code === 0 || res.data.code === 20000) {
         message.success('更新成功')
@@ -271,7 +271,7 @@ const handleCancel = () => {
 onMounted(async () => {
   if (resolvedEditId.value) {
     try {
-      const res = await loopGetVoUsingGet({ params: { id: Number(resolvedEditId.value) } })
+      const res = await loopGetVoUsingGet({ params: { id: resolvedEditId.value } })
       if ((res.data.code === 0 || res.data.code === 20000) && res.data.data) {
         const data = res.data.data
         form.loopName = data.loopName || ''
@@ -294,10 +294,12 @@ onMounted(async () => {
         }
       } else {
         message.error(res.data.message || '加载 Loop 失败')
+        router.push('/user/loops')
       }
     } catch (e) {
       console.error('加载 Loop 失败', e)
       message.error('加载失败，请稍后重试')
+      router.push('/user/loops')
     }
   }
 })

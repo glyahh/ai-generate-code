@@ -46,10 +46,30 @@ const autoCodeTypeEnabled = ref(appearanceStore.defaultCodeType === 'auto')
 const workflowBetaEnabled = ref(appearanceStore.workflowEnabled)
 const workflowBetaTooltip = '该功能处于测试状态，可能不稳定'
 
-const selectedLoopIds = ref<number[]>([])
+const selectedLoopId = ref<string>('')
+const selectedLoopCompiledPrompt = ref<string>('')
 const loopPickerRef = ref<InstanceType<typeof LoopPickerTrigger> | null>(null)
-function onLoopChange(ids: number[]) {
-  selectedLoopIds.value = ids
+function onLoopChange(ids: string[]) {
+  // 单选模式下不使用此事件
+}
+function onLoopSingleChange(info: { id: string; loopName: string; compiledPrompt: string } | null) {
+  if (info) {
+    selectedLoopId.value = info.id
+    selectedLoopCompiledPrompt.value = info.compiledPrompt || ''
+    // 选中 Loop 时自动关闭工作流生成
+    workflowBetaEnabled.value = false
+  } else {
+    selectedLoopId.value = ''
+    selectedLoopCompiledPrompt.value = ''
+  }
+}
+
+function handleWorkflowToggle() {
+  if (selectedLoopId.value) {
+    message.warning('暂不支持该功能，请先取消 Loop 选择')
+    return
+  }
+  workflowBetaEnabled.value = !workflowBetaEnabled
 }
 const workflowAdvantageTips = ['逻辑更严谨', '图片更贴切', '代码质量检测']
 
@@ -274,6 +294,8 @@ async function handleCreateApp() {
 
   creating.value = true
   try {
+    // 不在此处注入 compiledPrompt 到 initPrompt，避免重复注入。
+    // 注入由后端 LoopInjectService 在首次发送时通过 loopId 参数自动完成。
     const res = await appAddUsingPost({
       body: {
         appName: buildAppNameFromPrompt(content),
@@ -281,22 +303,27 @@ async function handleCreateApp() {
         codeGenType: autoCodeTypeEnabled.value ? undefined : selectedCodeType.value,
         isBeta: workflowBetaEnabled.value ? 1 : 0,
         // TODO: openapi2ts 生成后移除 as any，loopIds 字段由后端 AppAddRequest 提供
-        loopIds: selectedLoopIds.value.length > 0 ? selectedLoopIds.value : undefined,
+        loopIds: selectedLoopId.value ? [selectedLoopId.value] : undefined,
       } as any,
     })
     if (isSuccess(res.data.code) && res.data.data) {
       const appId = res.data.data
       message.success('应用创建成功，正在进入对话页面')
       // 添加 autoSend 标识，表示从首页创建，需要自动提交初始提示词
+      const query: Record<string, string> = {
+        autoSend: 'true',
+        genMode: workflowBetaEnabled.value ? 'workflow' : 'legacy',
+        // 兼容参数：当前约束由后端按 app.codeGenType 控制
+        codeTypeChoice: selectedCodeTypeLabel.value,
+      }
+      // 如果勾选了 Loop，传递 loopId 到聊天页
+      if (selectedLoopId.value) {
+        query.loopId = selectedLoopId.value
+      }
       router.push({
         name: 'app-chat',
         params: { id: appId },
-        query: {
-          autoSend: 'true',
-          genMode: workflowBetaEnabled.value ? 'workflow' : 'legacy',
-          // 兼容参数：当前约束由后端按 app.codeGenType 控制
-          codeTypeChoice: selectedCodeTypeLabel.value,
-        },
+        query,
       })
     } else {
       message.error(res.data.message || '创建应用失败')
@@ -621,37 +648,37 @@ onMounted(() => {
                 支持自然语言描述，越具体效果越好
               </div>
               <div class="prompt-actions">
-                <ATooltip placement="top">
-                  <template #title>
-                    <div class="workflow-help-tooltip">
-                      <div
-                        v-for="tip in workflowAdvantageTips"
-                        :key="tip"
-                        class="workflow-help-tooltip-item"
-                      >
-                        {{ tip }}
-                      </div>
-                    </div>
-                  </template>
-                  <button
-                    type="button"
-                    class="workflow-help-btn"
-                    aria-label="工作流生成优势说明"
-                  >
-                    ?
-                  </button>
-                </ATooltip>
-                <LoopPickerTrigger ref="loopPickerRef" @change="onLoopChange" />
-                <ATooltip :title="workflowBetaTooltip" placement="top">
+                <!-- Loop 按钮（带 beta 标志） -->
+                <LoopPickerTrigger ref="loopPickerRef" :single-select="true" :show-beta="true" @single-change="onLoopSingleChange" />
+                <!-- 工作流生成按钮（? 帮助按钮在里面，Loop 选择时禁用，去掉 beta 标志） -->
+                <ATooltip :title="selectedLoopId ? '已选择 Loop 时暂不支持工作流生成' : workflowBetaTooltip" placement="top">
                   <button
                     type="button"
                     class="workflow-beta-btn"
-                    :class="{ 'workflow-beta-btn--active': workflowBetaEnabled }"
-                    @click="workflowBetaEnabled = !workflowBetaEnabled"
+                    :class="{
+                      'workflow-beta-btn--active': workflowBetaEnabled && !selectedLoopId,
+                      'workflow-beta-btn--disabled': !!selectedLoopId,
+                    }"
+                    @click="handleWorkflowToggle"
                   >
                     <span class="workflow-beta-btn-icon" aria-hidden="true" />
                     <span class="workflow-beta-btn-text">工作流生成</span>
-                    <span class="workflow-beta-btn-badge">beta</span>
+                    <span class="workflow-beta-btn-help">
+                      <ATooltip placement="top" :mouseenter-delay="0.3">
+                        <template #title>
+                          <div class="workflow-help-tooltip">
+                            <div
+                              v-for="tip in workflowAdvantageTips"
+                              :key="tip"
+                              class="workflow-help-tooltip-item"
+                            >
+                              {{ tip }}
+                            </div>
+                          </div>
+                        </template>
+                        <span class="workflow-beta-help-icon">?</span>
+                      </ATooltip>
+                    </span>
                   </button>
                 </ATooltip>
                 <div class="code-type-picker-wrap">
@@ -1196,32 +1223,6 @@ onMounted(() => {
   align-items: center;
 }
 
-.workflow-help-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  background: var(--bg-card, rgba(255, 255, 255, 0.72));
-  color: var(--text-base, rgba(15, 23, 42, 0.72));
-  cursor: help;
-  font-size: 13px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition:
-    transform 0.16s ease-out,
-    box-shadow 0.16s ease-out,
-    border-color 0.16s ease-out;
-}
-
-.workflow-help-btn:hover {
-  transform: translateY(-1px);
-  border-color: rgba(59, 130, 246, 0.4);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
-}
-
 .workflow-help-tooltip {
   display: flex;
   flex-direction: column;
@@ -1259,6 +1260,18 @@ onMounted(() => {
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
 }
 
+/* 选择 Loop 时禁用工作流生成 */
+.workflow-beta-btn--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+}
+.workflow-beta-btn--disabled:hover {
+  transform: none;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
 .workflow-beta-btn-icon {
   width: 18px;
   height: 18px;
@@ -1283,6 +1296,32 @@ onMounted(() => {
   font-weight: 600;
 }
 
+/* ? 帮助图标嵌入在工作流按钮内 */
+.workflow-beta-btn-help {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+}
+.workflow-beta-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-secondary, rgba(15, 23, 42, 0.5));
+  background: rgba(15, 23, 42, 0.06);
+  cursor: help;
+  transition: background 0.12s, color 0.12s;
+}
+.workflow-beta-help-icon:hover {
+  background: rgba(59, 130, 246, 0.14);
+  color: #3b82f6;
+}
+
 .workflow-beta-btn-badge {
   padding: 1px 6px;
   border-radius: 999px;
@@ -1292,6 +1331,7 @@ onMounted(() => {
   color: var(--text-secondary, #475569);
   background: rgba(148, 163, 184, 0.2);
 }
+
 
 .workflow-beta-btn--active {
   border-color: rgba(59, 130, 246, 0.48);
