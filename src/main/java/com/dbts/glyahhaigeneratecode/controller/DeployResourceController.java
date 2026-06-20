@@ -53,6 +53,9 @@ public class DeployResourceController {
 
             return ResponseEntity.ok()
                     .header("Content-Type", getContentTypeWithCharset(filePath))
+                    .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    .header("Pragma", "no-cache")
+                    .header("Expires", "0")
                     .body(resource);
 
         } catch (Exception e) {
