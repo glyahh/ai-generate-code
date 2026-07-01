@@ -69,7 +69,7 @@ function handleWorkflowToggle() {
     message.warning('暂不支持该功能，请先取消 Loop 选择')
     return
   }
-  workflowBetaEnabled.value = !workflowBetaEnabled
+  workflowBetaEnabled.value = !workflowBetaEnabled.value
 }
 const workflowAdvantageTips = ['逻辑更严谨', '图片更贴切', '代码质量检测']
 

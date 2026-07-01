@@ -126,7 +126,7 @@ export function applyToDocument(settings: AppearanceSettings): void {
 }
 
 /** 根据当前设置生成 Ant Design ConfigProvider theme 对象 */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function resolveThemeConfig(settings: {
   isDark: boolean
   primaryColor: string

@@ -139,7 +139,7 @@ public class JsonMessageStreamHandler {
                                           AtomicBoolean hasToolCall,
                                           AtomicBoolean firstRoundToolViolationNotified) {
         StreamMessage streamMessage;
-        // 1. 反序列化为 StreamMessage；失败则丢弃该行（避免整条 SSE 崩）
+        // 1. 反序列化为 StreamMessage；失败则丢弃该行
         try {
             streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
         } catch (Exception e) {
