@@ -297,8 +297,7 @@ public class MemoryShrinkServiceImpl extends ServiceImpl<MemoryShrinkMapper, Mem
                 userSummary = row.getMessage();
                 anchor = row.getAnchorCreateTime();
             }
-            if (userSummary != null && aiSummary == null
-                    && ChatHistoryMessageTypeEnum.AI.getValue().equals(row.getMessageType())) {
+            if (userSummary != null && aiSummary == null && ChatHistoryMessageTypeEnum.AI.getValue().equals(row.getMessageType())) {
                 aiSummary = row.getMessage();
             }
         }

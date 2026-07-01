@@ -1,85 +1,48 @@
 package com.dbts.glyahhaigeneratecode.service.impl;
 
-import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.config.ConversationMemoryProperties;
-import com.dbts.glyahhaigeneratecode.constant.AppConstant;
-import com.dbts.glyahhaigeneratecode.constant.ConversationMemoryConstant;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryDirStabilitySupport;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryManifestSupport;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryManifestSupport.ManifestBundle;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryRefArchiver;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryStateCache;
 import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryStateInjectSupport;
-import com.dbts.glyahhaigeneratecode.model.memory.FileNoteEntry;
+import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemorySummarySupport;
 import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.mapper.ConversationMemoryRefMapper;
-import com.dbts.glyahhaigeneratecode.mapper.ConversationMemoryStateMapper;
 import com.dbts.glyahhaigeneratecode.mapper.SnapshotHistoryMapper;
-import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
-import com.dbts.glyahhaigeneratecode.model.Entity.ConversationMemoryState;
-import com.dbts.glyahhaigeneratecode.model.Entity.SnapshotHistory;
 import com.dbts.glyahhaigeneratecode.model.VO.ConversationMemoryInjectResult;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ConversationMemoryStateService;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mybatisflex.core.query.QueryWrapper;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-/**
- * 会话记忆状态服务实现。
- */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ConversationMemoryStateServiceImpl implements ConversationMemoryStateService {
 
-    private final ConversationMemoryStateMapper conversationMemoryStateMapper;
-    private final ConversationMemoryRefMapper conversationMemoryRefMapper;
-    private final SnapshotHistoryMapper snapshotHistoryMapper;
+    private final ConversationMemoryStateCache stateCache;
+    private final ConversationMemoryRefArchiver refArchiver;
+    private final ConversationMemoryStateInjectSupport injectSupport;
     private final ChatHistoryMapper chatHistoryMapper;
-    private final StringRedisTemplate stringRedisTemplate;
-    private final ObjectMapper objectMapper;
+    private final SnapshotHistoryMapper snapshotHistoryMapper;
+    private final ConversationMemoryRefMapper conversationMemoryRefMapper;
     private final ConversationMemoryProperties properties;
-    private final ConversationMemoryStateInjectSupport conversationMemoryStateInjectSupport;
+    private final TransactionTemplate transactionTemplate;
 
-
-    /**
-     * 轮次完成后更新 memory_state/ref/snapshot 并写 Redis 热缓存。
-     *
-     * @param appId           应用 id
-     * @param roundId         轮次 id（chat_history.id）
-     * @param userId          用户 id
-     * @param codeGenTypeEnum 代码生成类型
-     * @param workflowMode    是否 workflow
-     * @param bufferChars     本轮输出字符数
-     * @param elapsedMs       轮次耗时毫秒
-     * @return 无
-     */
     @Override
-    public void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum, boolean workflowMode, int bufferChars, long elapsedMs) {
+    public void onRoundCompleted(Long appId, Long roundId, Long userId, CodeGenTypeEnum codeGenTypeEnum,
+                                 boolean workflowMode, int bufferChars, long elapsedMs) {
         if (appId == null || appId <= 0 || roundId == null || roundId <= 0) {
             return;
         }
@@ -94,61 +57,69 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
         String dbStatus = "ok";
         String fileNoteStatus = "none";
         try {
-            // 1. 目录稳定性检查，防止 workflow 落盘尚未完成就生成 manifest。
-            Path projectRoot = resolveProjectRoot(appId, codeGenTypeEnum);
-            awaitStableDirectory(projectRoot);
+            Path projectRoot = ConversationMemoryManifestSupport.resolveProjectRoot(appId, codeGenTypeEnum);
+            ConversationMemoryDirStabilitySupport.awaitStableDirectory(
+                    projectRoot,
+                    properties.getManifestStableRetryTimes(),
+                    properties.getManifestStableRetrySleepMs());
 
-            // 2. 构建当前 manifest，并读取上一轮快照做 diff。
-            ManifestBundle current = buildManifest(projectRoot);
+            ManifestBundle current = ConversationMemoryManifestSupport.buildManifest(projectRoot);
             manifestFilesCount = current.items().size();
-            ManifestBundle previous = findLatestManifest(appId);
-            List<String> changedFiles = diffChangedFiles(previous, current);
+            ManifestBundle previous = ConversationMemoryManifestSupport.findLatestManifest(
+                    appId, snapshotHistoryMapper, stateCache.getObjectMapper());
+            List<String> changedFiles = ConversationMemoryManifestSupport.diffChangedFiles(previous, current);
             changedFilesCount = changedFiles.size();
 
-            // 3. 保存 snapshot_history 真相源。
-            snapshotId = insertSnapshotHistory(appId, roundId, current);
-
-            // 4. 工具写盘 fileNote 批量摘要，再滚动维护 memory_state。
-            SummaryBundle summaryBundle = buildSummaryBundle(appId);
-            summarizeLevel = summaryBundle.level();
-            String fileNotesJson = conversationMemoryStateInjectSupport.resolveFileNotesJsonForUpsert(appId, roundId);
+            String fileNotesJson = injectSupport.resolveFileNotesJsonForUpsert(appId, roundId);
             fileNoteStatus = fileNotesJson == null ? "unchanged" : "ok";
-            upsertConversationMemoryState(appId, roundId, snapshotId, summaryBundle, changedFiles, fileNotesJson);
+            ConversationMemorySummarySupport.SummaryBundle summaryBundle =
+                    ConversationMemorySummarySupport.buildSummaryBundle(appId, chatHistoryMapper);
+            summarizeLevel = summaryBundle.level();
 
-            // 5. 超长 changed file 归档为 ref，避免主状态膨胀。
-            refArchivedCount = archiveLargeChangedFilesIfNeeded(appId, roundId, projectRoot, changedFiles);
+            long[] snapshotIdHolder = new long[]{0L};
+            transactionTemplate.executeWithoutResult(status -> {
+                long insertedSnapshotId = ConversationMemoryManifestSupport.insertSnapshotHistory(
+                        appId, roundId, current, snapshotHistoryMapper, stateCache.getObjectMapper());
+                if (insertedSnapshotId <= 0) {
+                    throw new IllegalStateException("insert snapshot history failed");
+                }
+                snapshotIdHolder[0] = insertedSnapshotId;
+                try {
+                    stateCache.upsert(appId, roundId, insertedSnapshotId, summaryBundle, changedFiles, fileNotesJson);
+                } catch (Exception e) {
+                    throw new IllegalStateException("upsert conversation memory state failed", e);
+                }
+            });
+            snapshotId = snapshotIdHolder[0];
 
-            // 6. Redis 热缓存：state/ref/page 分层写入并分别设置 TTL。
+            // refArchivedCount = refArchiver.archiveLargeChangedFilesIfNeeded(appId, roundId, projectRoot, changedFiles);
+
             try {
-                cacheMemoryStateToRedis(appId);
+                stateCache.cacheToRedis(appId);
+                stateCache.bumpAiVisibleMemoryVersion(appId, "round_completed:" + roundId + ":" + snapshotId);
                 redisStatus = "hit";
             } catch (Exception redisEx) {
                 redisStatus = "fallback";
-                log.warn("会话记忆 Redis 回填失败，允许后续 DB 回源，appId={}, roundId={}", appId, roundId, redisEx);
+                log.warn("conversation memory redis backfill failed, fallback to DB, appId={}, roundId={}",
+                        appId, roundId, redisEx);
             }
         } catch (Exception e) {
             dbStatus = "skip";
-            log.warn("onRoundCompleted 持久化失败但已隔离主链路，appId={}, roundId={}", appId, roundId, e);
+            log.warn("onRoundCompleted persistence failed and was isolated, appId={}, roundId={}", appId, roundId, e);
         } finally {
-            // 7. 固化可观测字段，便于排查 manifest/摘要/Redis 抖动问题。
             long finalElapsed = System.currentTimeMillis() - start;
             log.info("onRoundCompleted metrics appId={} roundId={} snapshotId={} manifestFilesCount={} changedFilesCount={} bufferChars={} summarizeLevel={} refArchivedCount={} fileNoteStatus={} elapsedMs={} redisHit={} dbFallback={} workflowMode={} userId={}",
                     appId, roundId, snapshotId, manifestFilesCount, changedFilesCount, bufferChars, summarizeLevel,
-                    refArchivedCount, fileNoteStatus, Math.max(elapsedMs, finalElapsed), redisStatus, dbStatus, workflowMode, userId);
+                    refArchivedCount, fileNoteStatus, Math.max(elapsedMs, finalElapsed), redisStatus, dbStatus,
+                    workflowMode, userId);
         }
     }
 
-    /**
-     * 加载 memory_state 并执行按需 readFile 分页注入。
-     *
-     * @param appId           应用 id
-     * @param chatMemory      聊天内存
-     * @param codeGenTypeEnum 代码生成类型
-     * @param maxCount        历史消息上限
-     * @return 注入结果
-     */
     @Override
-    public ConversationMemoryInjectResult loadConversationMemoryStateAndInject (Long appId, MessageWindowChatMemory chatMemory, CodeGenTypeEnum codeGenTypeEnum, int maxCount) {
+    public ConversationMemoryInjectResult loadConversationMemoryStateAndInject(Long appId,
+                                                                               MessageWindowChatMemory chatMemory,
+                                                                               CodeGenTypeEnum codeGenTypeEnum,
+                                                                               int maxCount) {
         if (appId == null || appId <= 0) {
             return ConversationMemoryInjectResult.builder()
                     .source("db")
@@ -157,68 +128,26 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
                     .build();
         }
 
-        // 1. 先读 Redis，miss 再回源 DB。
-        // 将redis的string(Json)格式转成map
-        Map<String, Object> state = loadStateFromRedisOrDb(appId);
-        List<String> changedFiles = parseChangedFiles(state.get("changedFilesJson"));
-        Map<String, FileNoteEntry> fileNotes = conversationMemoryStateInjectSupport.parseFileNotes(state.get("fileNotesJson"));
-        // TODO (memory-v4): 将 state 中的 softSummary/hardSummary 以 SystemMessage 注入 chatMemory，
-        //  用于长会话引导模型优先看 changedFiles / 调 readFile；需与 trySummarizeOldestRoundsIfNeeded 的合并策略协调，
-        //  避免摘要行覆盖或挤掉注入块。
+        Map<String, Object> state = stateCache.loadFromRedisOrDb(appId);
+        List<String> changedFiles = stateCache.parseChangedFiles(state.get("changedFilesJson"));
+        int taggedInjected = injectSupport.injectMemoryTaggedMessages(
+                chatMemory,
+                changedFiles,
+                injectSupport.parseFileNotes(state.get("fileNotesJson")));
 
-        int taggedInjected = conversationMemoryStateInjectSupport.injectMemoryTaggedMessages(chatMemory, changedFiles, fileNotes);
-
-        // 经过测试发现:
-        // 关闭 [memory_inject] 磁盘文件头注入循环，仅保留 tagged 短索引（policy/index/fileNote）。
-        // 模型需通过 readFile 工具获取文件完整内容，以磁盘为准。
-
-        String source = "redis";
-        if (state.isEmpty()) {
-            source = "db";
-        }
+        String source = state.isEmpty() ? "db" : "redis";
         return ConversationMemoryInjectResult.builder()
-                // 从何处拿到的数据
                 .source(source)
                 .injectedMessageCount(Math.min(taggedInjected, Math.max(0, maxCount)))
                 .changedFiles(changedFiles)
                 .build();
     }
 
-    /**
-     * 将文件片段以 {@link SystemMessage} 注入聊天内存（参考资料语义，避免与用户指令混淆）。
-     *
-     * @param chatMemory 聊天内存
-     * @param root 项目根目录
-     * @param file 当前文件
-     * @param content 读取到的分页内容
-     * @return 无
-     */
-    private void addInjectedFileToMemory(MessageWindowChatMemory chatMemory, Path root, Path file, String content) {
-        if (chatMemory == null || root == null || file == null || StrUtil.isBlank(content)) {
-            return;
-        }
-        String relative = root.relativize(file).toString().replace('\\', '/');
-        String header = relative;
-        if (header.length() > ConversationMemoryConstant.INJECT_FILE_HEADER_MAX_LENGTH) {
-            header = header.substring(0, ConversationMemoryConstant.INJECT_FILE_HEADER_MAX_LENGTH);
-        }
-        // 1. 注入格式保持可读，便于模型识别来源文件与分页内容。
-        // 2. 使用 [memory_inject] 前缀标记，避免与用户原始输入混淆。
-        String injectedMessage = "[memory_inject] file=" + header + "\n" + content;
-        chatMemory.add(SystemMessage.from(injectedMessage));
-    }
-
-    /**
-     * 定时清理 ref/snapshot 旧数据，失败不影响主链路。
-     *
-     * @return 无
-     */
     @Override
     @Scheduled(cron = "0 0/30 * * * ?")
     public void cleanupMemoryRefsAndSnapshots() {
         try {
             conversationMemoryRefMapper.deleteByCreatedBeforeDays(properties.getRefKeepDaysPerApp());
-
             conversationMemoryRefMapper.deleteExcessRowsPerApp(properties.getRefKeepCountPerApp());
 
             List<Long> appIds = conversationMemoryRefMapper.selectDistinctAppIds();
@@ -235,608 +164,7 @@ public class ConversationMemoryStateServiceImpl implements ConversationMemorySta
 
             snapshotHistoryMapper.deleteOlderThan30Days();
         } catch (Exception e) {
-            log.warn("会话记忆清理任务失败（已隔离），error={}", e.getMessage(), e);
+            log.warn("conversation memory cleanup failed and was isolated, error={}", e.getMessage(), e);
         }
-    }
-
-    /**
-     * 等待目录元信息稳定，避免生成中的文件被半读。
-     *
-     * @param root 代码目录
-     * @return 无
-     */
-    private void awaitStableDirectory(Path root) {
-        if (root == null) {
-            return;
-        }
-        int retryTimes = Math.max(1, properties.getManifestStableRetryTimes());
-        long sleepMs = Math.max(50L, properties.getManifestStableRetrySleepMs());
-        long lastCount = -1;
-        long lastMtime = -1;
-        for (int i = 0; i < retryTimes; i++) {
-            DirMetrics metrics = collectDirMetrics(root);
-            if (metrics.fileCount() == lastCount && metrics.latestMtime() == lastMtime) {
-                return;
-            }
-            lastCount = metrics.fileCount();
-            lastMtime = metrics.latestMtime();
-            if (i < retryTimes - 1) {
-                try {
-                    Thread.sleep(sleepMs);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        }
-    }
-
-    /**
-     * 统计目录文件数与最新修改时间用于稳定性判定。
-     *
-     * @param root 代码目录
-     * @return 目录指标
-     */
-    private DirMetrics collectDirMetrics(Path root) {
-        if (root == null || !Files.isDirectory(root)) {
-            return new DirMetrics(0, 0);
-        }
-        long count = 0;
-        long maxMtime = 0;
-        try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> files = walk.filter(Files::isRegularFile).toList();
-            count = files.size();
-            for (Path path : files) {
-                try {
-                    long mtime = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis();
-                    if (mtime > maxMtime) {
-                        maxMtime = mtime;
-                    }
-                } catch (IOException ignore) {
-                    // 单文件失败忽略
-                }
-            }
-        } catch (Exception ignore) {
-            // 目录不可读时返回默认值
-        }
-        return new DirMetrics(count, maxMtime);
-    }
-
-    /**
-     * 解析项目根目录。
-     *
-     * @param appId           应用 id
-     * @param codeGenTypeEnum 代码生成类型
-     * @return 项目根路径
-     */
-    private Path resolveProjectRoot(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
-        if (codeGenTypeEnum == CodeGenTypeEnum.VUE) {
-            return Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, "vue_project_" + appId);
-        }
-        String type = codeGenTypeEnum == null ? CodeGenTypeEnum.MULTI_FILE.getValue() : codeGenTypeEnum.getValue();
-        return Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, type + "_" + appId);
-    }
-
-    /**
-     * 生成当前代码目录 manifest。
-     *
-     * @param root 代码目录
-     * @return manifest 包
-     */
-    private ManifestBundle buildManifest(Path root) {
-        if (root == null || !Files.isDirectory(root)) {
-            return new ManifestBundle(Collections.emptyList());
-        }
-        List<ManifestItem> items = new ArrayList<>();
-        try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> files = walk
-                    .filter(Files::isRegularFile)
-                    .filter(path -> !isIgnoredPath(root, path))
-                    .filter(path -> isTextCodeFile(path))
-                    .sorted(Comparator.comparing(path -> root.relativize(path).toString(), String.CASE_INSENSITIVE_ORDER))
-                    .toList();
-            for (Path file : files) {
-                try {
-                    String relative = root.relativize(file).toString().replace('\\', '/');
-                    long size = Files.size(file);
-                    long mtime = Files.getLastModifiedTime(file).toMillis();
-                    String lang = detectLang(relative);
-                    String hash = sha256Hex(Files.readAllBytes(file));
-                    items.add(new ManifestItem(relative, hash, size, mtime, lang));
-                } catch (Exception ignore) {
-                    // 单文件读取失败跳过
-                }
-            }
-        } catch (Exception e) {
-            log.warn("构建 manifest 失败，root={}", root, e);
-        }
-        return new ManifestBundle(items);
-    }
-
-    /**
-     * 从 snapshot_history 读取最新 manifest。
-     *
-     * @param appId 应用 id
-     * @return manifest 包
-     */
-    private ManifestBundle findLatestManifest(Long appId) {
-        try {
-            QueryWrapper queryWrapper = new QueryWrapper();
-            queryWrapper.eq(SnapshotHistory::getAppId, appId);
-            queryWrapper.orderBy(SnapshotHistory::getId, false);
-            queryWrapper.limit(1);
-            List<SnapshotHistory> list = snapshotHistoryMapper.selectListByQuery(queryWrapper);
-            if (list == null || list.isEmpty()) {
-                return null;
-            }
-            String json = list.getFirst().getManifestJson();
-            if (StrUtil.isBlank(json)) {
-                return null;
-            }
-            List<ManifestItem> items = objectMapper.readValue(json, new TypeReference<>() {
-            });
-            return new ManifestBundle(items == null ? Collections.emptyList() : items);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * 计算前后 manifest changedFiles。
-     *
-     * @param previous 上一轮 manifest
-     * @param current  当前 manifest
-     * @return changedFiles
-     */
-    private List<String> diffChangedFiles(ManifestBundle previous, ManifestBundle current) {
-        if (current == null || current.items().isEmpty()) {
-            return Collections.emptyList();
-        }
-        if (previous == null || previous.items().isEmpty()) {
-            return current.items().stream().map(ManifestItem::path).limit(20).toList();
-        }
-        Map<String, ManifestItem> prevMap = previous.items().stream()
-                .collect(Collectors.toMap(ManifestItem::path, item -> item, (a, b) -> a));
-        List<String> changed = new ArrayList<>();
-        for (ManifestItem item : current.items()) {
-            ManifestItem prev = prevMap.get(item.path());
-            if (prev == null || !Objects.equals(prev.hash(), item.hash())) {
-                changed.add(item.path());
-            }
-        }
-        return changed;
-    }
-
-    /**
-     * 写入 snapshot_history。
-     *
-     * @param appId    应用 id
-     * @param roundId  轮次 id
-     * @param manifest manifest
-     * @return snapshotId
-     */
-    private long insertSnapshotHistory(Long appId, Long roundId, ManifestBundle manifest) {
-        try {
-            String json = objectMapper.writeValueAsString(manifest.items());
-            SnapshotHistory row = SnapshotHistory.builder()
-                    .appId(appId)
-                    .roundId(roundId)
-                    .manifestJson(json)
-                    .filesCount(manifest.items().size())
-                    .createdAt(LocalDateTime.now())
-                    .build();
-            snapshotHistoryMapper.insert(row);
-            Long id = row.getId();
-            return id == null ? 0L : id;
-        } catch (Exception e) {
-            return 0L;
-        }
-    }
-
-    /**
-     * 构建软/硬摘要。
-     * <p>仅写入 conversation_memory_state / cm:state，{@link #loadConversationMemoryStateAndInject} 尚未注入模型。</p>
-     *
-     * @param appId 应用 id
-     * @return 摘要结果
-     */
-    private SummaryBundle buildSummaryBundle(Long appId) {
-        QueryWrapper queryWrapper = new QueryWrapper();
-        queryWrapper.eq(ChatHistory::getAppId, appId);
-        queryWrapper.eq(ChatHistory::getMessageType, "user");
-        queryWrapper.eq(ChatHistory::getIsDelete, 0);
-        long count = chatHistoryMapper.selectCountByQuery(queryWrapper);
-        if (count >= 24) {
-            return new SummaryBundle("hard", "最近高频编辑阶段，建议优先依据 changedFiles 与报错定位做增量修改。", "会话较长：建议按 changedFiles 优先读取并逐页 readFile。");
-        }
-        if (count >= 12) {
-            return new SummaryBundle("soft", "会话进入中长上下文阶段，建议优先按最新变更文件定位。", null);
-        }
-        return new SummaryBundle("none", null, null);
-    }
-
-    /**
-     * 更新 memory_state。
-     *
-     * @param appId        应用 id
-     * @param roundId      轮次 id
-     * @param snapshotId   快照 id
-     * @param summaryBundle 摘要
-     * @param changedFiles changedFiles
-     * @return 无
-     */
-    private void upsertConversationMemoryState(
-            Long appId,
-            Long roundId,
-            long snapshotId,
-            SummaryBundle summaryBundle,
-            List<String> changedFiles,
-            String fileNotesJson) throws Exception {
-        String changedFilesJson = objectMapper.writeValueAsString(changedFiles == null ? Collections.emptyList() : changedFiles);
-        conversationMemoryStateMapper.upsertByAppId(
-                appId,
-                roundId,
-                snapshotId <= 0 ? null : snapshotId,
-                summaryBundle.softSummary(),
-                summaryBundle.hardSummary(),
-                changedFilesJson,
-                fileNotesJson
-        );
-    }
-
-    /**
-     * 归档超长 changed file 到 ref。
-     *
-     * @param appId       应用 id
-     * @param roundId     轮次 id
-     * @param root        项目目录
-     * @param changedFiles changedFiles
-     * @return 归档数量
-     */
-    private int archiveLargeChangedFilesIfNeeded(Long appId, Long roundId, Path root, List<String> changedFiles) {
-        if (changedFiles == null || changedFiles.isEmpty() || root == null || !Files.isDirectory(root)) {
-            return 0;
-        }
-        int archived = 0;
-        for (String relative : changedFiles) {
-            try {
-                Path path = root.resolve(relative).normalize();
-                if (!path.startsWith(root) || !Files.isRegularFile(path)) {
-                    continue;
-                }
-                String content = Files.readString(path, StandardCharsets.UTF_8);
-                if (content.length() < 8000) {
-                    continue;
-                }
-                String refId = "ref-" + appId + "-" + roundId + "-" + sha256Hex(relative + ":" + content.substring(0, Math.min(2000, content.length())));
-                long bytes = content.getBytes(StandardCharsets.UTF_8).length;
-                // 写入 MySQL conversation_memory_ref：持久化本轮变更中的大文件全文（如 package-lock.json）。
-                // relative -> filePath，content -> content；真相源在 DB，Redis 仅为热缓存。
-                conversationMemoryRefMapper.insertIgnore(appId, roundId, refId, relative, content, bytes);
-
-                // TODO (memory-v4): 实现按 refId/filePath 从 cm:ref 或 conversation_memory_ref 读回并注入 ChatMemory；
-                // 当前仅归档，模型上下文不消费 ref。
-
-                // 写入 Redis cm:ref:{refId}：与上表 content 同文，TTL 见 conversation.memory.ref-ttl-seconds，过期后从 DB 回源。
-                cacheRefToRedis(refId, content);
-                archived++;
-            } catch (Exception ignore) {
-                // 单文件归档失败不影响主流程
-            }
-        }
-        return archived;
-    }
-
-    /**
-     * 缓存 memory_state 到 Redis。
-     *
-     * @param appId 应用 id
-     * @return 无
-     */
-    private void cacheMemoryStateToRedis(Long appId) throws Exception {
-        Map<String, Object> state = loadStateFromDb(appId);
-        if (state.isEmpty()) {
-            return;
-        }
-        String key = buildStateKey(appId);
-        String value = objectMapper.writeValueAsString(state);
-        stringRedisTemplate.opsForValue().set(key, value, properties.getStateTtlSeconds(), TimeUnit.SECONDS);
-    }
-
-    /**
-     * 读取 state（先 Redis 后 DB）。
-     *
-     * @param appId 应用 id
-     * @return 状态 map
-     */
-    private Map<String, Object> loadStateFromRedisOrDb(Long appId) {
-        String key = buildStateKey(appId);
-        try {
-            String cached = stringRedisTemplate.opsForValue().get(key);
-            if (StrUtil.isNotBlank(cached)) {
-                return objectMapper.readValue(cached, new TypeReference<>() {
-                });
-            }
-        } catch (Exception ignore) {
-            // Redis 失败回源 DB
-        }
-        Map<String, Object> dbState = loadStateFromDb(appId);
-        if (!dbState.isEmpty()) {
-            try {
-                stringRedisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(dbState), properties.getStateTtlSeconds(), TimeUnit.SECONDS);
-            } catch (Exception ignore) {
-                // 回填失败忽略
-            }
-        }
-        return dbState;
-    }
-
-    /**
-     * 从 DB 读取 memory_state。
-     *
-     * @param appId 应用 id
-     * @return 状态 map
-     */
-    private Map<String, Object> loadStateFromDb(Long appId) {
-        try {
-            QueryWrapper queryWrapper = new QueryWrapper();
-            queryWrapper.eq(ConversationMemoryState::getAppId, appId);
-            ConversationMemoryState row = conversationMemoryStateMapper.selectOneByQuery(queryWrapper);
-            if (row == null) {
-                return Collections.emptyMap();
-            }
-            Map<String, Object> map = new HashMap<>();
-            map.put("latestRoundId", row.getLatestRoundId());
-            map.put("latestSnapshotId", row.getLatestSnapshotId());
-            map.put("softSummary", row.getSoftSummary());
-            map.put("hardSummary", row.getHardSummary());
-            map.put("changedFilesJson", row.getChangedFilesJson());
-            map.put("fileNotesJson", row.getFileNotesJson());
-            return map;
-        } catch (Exception e) {
-            return Collections.emptyMap();
-        }
-    }
-
-    /**
-     * 解析 changedFiles JSON。
-     *
-     * @param changedFilesObj changedFiles 字段
-     * @return 文件列表
-     */
-    private List<String> parseChangedFiles(Object changedFilesObj) {
-        if (changedFilesObj == null) {
-            return Collections.emptyList();
-        }
-        String json = String.valueOf(changedFilesObj);
-        if (StrUtil.isBlank(json)) {
-            return Collections.emptyList();
-        }
-        try {
-            List<String> files = objectMapper.readValue(json, new TypeReference<>() {
-            });
-            return files == null ? Collections.emptyList() : files;
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
-    }
-
-    /**
-     * 收集注入候选文件并按优先级排序。
-     *
-     * @param root         项目目录
-     * @param changedFiles changedFiles
-     * @return 文件列表
-     */
-    private List<Path> collectInjectCandidates(Path root, List<String> changedFiles) {
-        if (root == null || !Files.isDirectory(root)) {
-            return Collections.emptyList();
-        }
-        List<Path> all;
-        try (Stream<Path> walk = Files.walk(root)) {
-            all = walk
-                    .filter(Files::isRegularFile)
-                    .filter(path -> !isIgnoredPath(root, path))
-                    .filter(this::isTextCodeFile)
-                    .toList();
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
-        Set<String> changedSet = new HashSet<>(changedFiles == null ? Collections.emptyList() : changedFiles);
-        List<Path> first = new ArrayList<>();
-        List<Path> second = new ArrayList<>();
-        List<Path> third = new ArrayList<>();
-        for (Path path : all) {
-            String relative = root.relativize(path).toString().replace('\\', '/');
-            String lower = relative.toLowerCase(Locale.ROOT);
-            if (lower.endsWith("main.java")
-                    || lower.contains("application.yml")
-                    || lower.contains("application.yaml")
-                    || lower.contains("router")
-                    || lower.endsWith("index.html")
-                    || lower.endsWith("app.vue")) {
-                first.add(path);
-                continue;
-            }
-            if (changedSet.contains(relative)) {
-                second.add(path);
-                continue;
-            }
-            third.add(path);
-        }
-        List<Path> merged = new ArrayList<>(first.size() + second.size() + third.size());
-        merged.addAll(first);
-        merged.addAll(second);
-        merged.addAll(third);
-        return merged;
-    }
-
-    /**
-     * 读取注入用文件头：直读磁盘并截断前 pageSize 字符，不经过 Redis 缓存。
-     *
-     * @param projectRoot 生成项目根目录（如 temp/code_output/vue_project_{appId}）
-     * @param relative    相对 projectRoot 的路径
-     * @param pageSize    分页大小
-     * @return 文件头片段；读失败或路径非法时返回空串
-     */
-    private String readFilePageHead(Path projectRoot, String relative, int pageSize) throws IOException {
-        if (projectRoot == null || !Files.isDirectory(projectRoot)) {
-            return "";
-        }
-        Path normalizedRoot = projectRoot.toAbsolutePath().normalize();
-        Path candidate = normalizedRoot.resolve(relative).normalize();
-        if (!candidate.startsWith(normalizedRoot) || !Files.isRegularFile(candidate)) {
-            return "";
-        }
-        String content = Files.readString(candidate, StandardCharsets.UTF_8);
-        return content.length() <= pageSize ? content : content.substring(0, pageSize);
-    }
-
-    /**
-     * 缓存 ref 内容。
-     *
-     * @param refId   ref id
-     * @param content 内容
-     * @return 无
-     */
-    private void cacheRefToRedis(String refId, String content) {
-        if (StrUtil.isBlank(refId) || content == null) {
-            return;
-        }
-        // Redis 热缓存：键 cm:ref:{refId}，值为归档文件全文（与 conversation_memory_ref.content 一致）。
-        String key = "cm:ref:" + refId;
-        stringRedisTemplate.opsForValue().set(key, content, properties.getRefTtlSeconds(), TimeUnit.SECONDS);
-    }
-
-    /**
-     * 构建 state key。
-     *
-     * @param appId 应用 id
-     * @return redis key
-     */
-    private String buildStateKey(Long appId) {
-        return "cm:state:" + appId;
-    }
-
-    /**
-     * 判断路径是否应忽略。
-     *
-     * @param root 根目录
-     * @param path 文件路径
-     * @return true-忽略；false-保留
-     */
-    private boolean isIgnoredPath(Path root, Path path) {
-        Path relative = root.relativize(path);
-        for (Path segment : relative) {
-            if (ConversationMemoryConstant.SNAPSHOT_IGNORE_DIRS.contains(segment.toString())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 判断是否文本代码文件。
-     *
-     * @param path 文件
-     * @return true-文本代码；false-其他
-     */
-    private boolean isTextCodeFile(Path path) {
-        String fileName = path.getFileName() == null ? "" : path.getFileName().toString();
-        int idx = fileName.lastIndexOf('.');
-        if (idx < 0 || idx == fileName.length() - 1) {
-            return false;
-        }
-        String ext = fileName.substring(idx + 1).toLowerCase(Locale.ROOT);
-        return ConversationMemoryConstant.TEXT_FILE_EXTS.contains(ext);
-    }
-
-    /**
-     * 推断文件语言标签。
-     *
-     * @param relative 相对路径
-     * @return 语言名
-     */
-    private String detectLang(String relative) {
-        if (relative == null) {
-            return "text";
-        }
-        String lower = relative.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".java")) {
-            return "java";
-        }
-        if (lower.endsWith(".vue")) {
-            return "vue";
-        }
-        if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-            return "typescript";
-        }
-        if (lower.endsWith(".js") || lower.endsWith(".jsx")) {
-            return "javascript";
-        }
-        if (lower.endsWith(".html") || lower.endsWith(".htm")) {
-            return "html";
-        }
-        if (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) {
-            return "css";
-        }
-        if (lower.endsWith(".json")) {
-            return "json";
-        }
-        return "text";
-    }
-
-    /**
-     * 计算 SHA-256 十六进制。
-     *
-     * @param bytes 字节数组
-     * @return 哈希串
-     */
-    private String sha256Hex(byte[] bytes) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(bytes);
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /**
-     * 计算 SHA-256 十六进制。
-     *
-     * @param text 文本
-     * @return 哈希串
-     */
-    private String sha256Hex(String text) {
-        return sha256Hex(StrUtil.blankToDefault(text, "").getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * 目录指标。
-     */
-    private record DirMetrics(long fileCount, long latestMtime) {
-    }
-
-    /**
-     * 摘要包。
-     */
-    private record SummaryBundle(String level, String softSummary, String hardSummary) {
-    }
-
-    /**
-     * Manifest 包。
-     */
-    private record ManifestBundle(List<ManifestItem> items) {
-    }
-
-    /**
-     * Manifest 条目。
-     */
-    private record ManifestItem(String path, String hash, long size, long mtime, String lang) {
     }
 }

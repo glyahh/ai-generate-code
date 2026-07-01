@@ -101,3 +101,5 @@ __pycache__/
 ### Local Bug Notes (DO NOT COMMIT) ###
 bugs/
 .worktrees/
+/src/main/resources/application-local-a.yml
+/src/main/resources/application-local-b.yml

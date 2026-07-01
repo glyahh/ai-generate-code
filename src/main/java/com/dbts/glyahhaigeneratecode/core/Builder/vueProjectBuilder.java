@@ -259,11 +259,6 @@ public class vueProjectBuilder {
         }
     }
 
-//    /**
-//     * 生成用于遍历 src/**/*.vue 并调用 @vue/compiler-sfc 的 Node 脚本源码
-//     *
-//     * @return .cjs 脚本内容
-//     */
     // 用于修复极少数缺少<style>标签无法执行npm run build的情况
     private String buildSfcCheckScript() {
         return """

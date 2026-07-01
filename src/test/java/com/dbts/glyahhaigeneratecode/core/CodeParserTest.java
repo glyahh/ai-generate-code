@@ -27,7 +27,7 @@ class CodeParserTest {
             ```
             随便写一段描述
             """;
-        HtmlCodeResult result = CodeParser.parseHtmlCode(codeContent);
+        HtmlCodeResult result = new HtmlCodeParser().parse(codeContent);
         assertNotNull(result);
         assertNotNull(result.getHtmlCode());
     }
@@ -71,7 +71,7 @@ class CodeParserTest {
 
             文件创建完成！
             """;
-        MultiFileCodeResult result = CodeParser.parseMultiFileCode(codeContent);
+        MultiFileCodeResult result = new MultiFileCodeParser().parse(codeContent);
         assertNotNull(result);
         assertNotNull(result.getHtmlCode());
         assertNotNull(result.getCssCode());

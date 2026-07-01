@@ -174,6 +174,30 @@ public class UserPersonalizationServiceImpl implements UserPersonalizationServic
         return sb.toString();
     }
 
+    /**
+     * 获取缓存的应用风格 prompt。
+     *
+     * @param userId 用户ID
+     * @return 应用风格 prompt，未配置时返回 null
+     */
+    @Override
+    public String getCachedAppStyle(Long userId) {
+        if (userId == null || userId <= 0) return null;
+        return getCachedPrompt(userId, true);
+    }
+
+    /**
+     * 获取缓存的回答风格 prompt。
+     *
+     * @param userId 用户ID
+     * @return 回答风格 prompt，未配置时返回 null
+     */
+    @Override
+    public String getCachedAnswerStyle(Long userId) {
+        if (userId == null || userId <= 0) return null;
+        return getCachedPrompt(userId, false);
+    }
+
     // ======================== 私有方法 ========================
 
     /**
@@ -206,7 +230,7 @@ public class UserPersonalizationServiceImpl implements UserPersonalizationServic
      * @param isApp  true=应用风格 false=回答风格
      * @return prompt 文本，未配置时返回 null
      */
-    private String getCachedPrompt(Long userId, boolean isApp) {
+    String getCachedPrompt(Long userId, boolean isApp) {
         // 1. 根据风格类型选择 key 前缀
         String key = isApp ? buildAppKey(userId) : buildStyleKey(userId);
 
@@ -232,7 +256,7 @@ public class UserPersonalizationServiceImpl implements UserPersonalizationServic
 
         // ========== 以下为 Redis miss 或异常：回源 MySQL（含击穿防护） ==========
 
-        // 【缓存击穿防护】同步锁 + double-check
+        // [缓存击穿防护] 同步锁 + double-check
         // 同一 userId 的字符串常量池引用作为锁，确保只允许一个线程回源
         // 拿到usrId的固定字符串常量池的地址作为锁对象
         synchronized (userId.toString().intern()) {

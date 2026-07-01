@@ -72,6 +72,12 @@ public class ChatHistory implements Serializable {
     private String auditHitRule;
 
     /**
+     * Loop ID（本轮注入的 Loop 快照，nullable）
+     */
+    @Column("loopId")
+    private Long loopId;
+
+    /**
      * 创建时间
      */
     @Column("createTime")

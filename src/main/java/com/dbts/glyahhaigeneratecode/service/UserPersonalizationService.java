@@ -36,4 +36,20 @@ public interface UserPersonalizationService {
      * @return 格式化注入文本（含优先级说明标签），无内容时返回 ""
      */
     String buildInjectPrompt(Long userId);
+
+    /**
+     * 获取缓存的应用风格 prompt（无配置返回 null）。
+     *
+     * @param userId 用户ID
+     * @return 应用风格 prompt，未配置时返回 null
+     */
+    String getCachedAppStyle(Long userId);
+
+    /**
+     * 获取缓存的回答风格 prompt（无配置返回 null）。
+     *
+     * @param userId 用户ID
+     * @return 回答风格 prompt，未配置时返回 null
+     */
+    String getCachedAnswerStyle(Long userId);
 }

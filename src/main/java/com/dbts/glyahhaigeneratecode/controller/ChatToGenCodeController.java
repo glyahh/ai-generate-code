@@ -63,6 +63,7 @@ public class ChatToGenCodeController {
     }
 
     private Flux<ServerSentEvent<String>> toSseEvent(Flux<String> contentFlux) {
+        // 当上游有发生异常生成一段新的flux代替失败的数据流
         Flux<String> safeContentFlux = contentFlux.onErrorResume(e -> {
             log.error("SSE 流式生成失败，将以错误文本+done事件收尾。", e);
             return Flux.just(ChatHistoryConstant.GENERATION_FAILED_USER_MESSAGE);
@@ -79,6 +80,7 @@ public class ChatToGenCodeController {
                                 .build()
                 ));
     }
+
 
     private List<ServerSentEvent<String>> toSseEvents(String chunk) {
         List<ServerSentEvent<String>> events = new ArrayList<>();

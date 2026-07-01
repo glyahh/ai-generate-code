@@ -22,7 +22,7 @@ public interface ChatHistoryConstant {
     int CHAT_MEMORY_MAX_MESSAGES = 160;
 
     /**
-     * 从 MySQL 预加载进 Redis 的最大条数（配合 {@code turnHistoryToMemory} 的 limit），宜大于「可见轮数×2」并预留 tool/error 占位。
+     * 从 MySQL 预加载进 Redis 的最大条数（配合历史重建链路），宜大于「可见轮数×2」并预留 tool/error 占位。
      */
     int MEMORY_PRELOAD_MESSAGE_ROWS = 80;
 

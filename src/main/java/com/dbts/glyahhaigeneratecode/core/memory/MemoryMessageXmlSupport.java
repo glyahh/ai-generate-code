@@ -40,6 +40,7 @@ public final class MemoryMessageXmlSupport {
 
     /**
      * 构建 &lt;inject_prompt&gt; 元说明块
+     * 优先级分层
      */
     public static String buildInjectPromptMeta() {
         return "<" + TAG_INJECT_PROMPT + ">\n"

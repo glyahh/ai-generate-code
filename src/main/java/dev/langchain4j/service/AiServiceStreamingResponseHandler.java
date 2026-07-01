@@ -144,13 +144,21 @@ public class AiServiceStreamingResponseHandler implements StreamingChatResponseH
                 String toolName = toolExecutionRequest.name();
                 ToolExecutor toolExecutor = toolExecutors.get(toolName);
                 String toolExecutionResult;
-                try {
-                    toolExecutionResult = toolExecutor.execute(toolExecutionRequest, memoryId);
-                } catch (Exception e) {
-                    LOG.error("Tool execution failed, fallback as tool error result. toolName={}, toolId={}",
-                            toolName, toolExecutionRequest.id(), e);
-                    toolExecutionResult = "[tool_execution_error] "
-                            + (e.getMessage() == null ? "unknown error" : e.getMessage());
+                if (toolExecutor == null) {
+                    // 工具不在当前服务注册表中给 AI 明确的错误信息，让其改用可用工具重试
+
+                    toolExecutionResult = "[tool_execution_error] 工具 \""
+                            + toolName + "\" 在当前模式下不可用，请仅使用可用工具列表中的工具。";
+                    LOG.warn("Tool not registered, skipped. toolName={}, appId={}", toolName, memoryId);
+                } else {
+                    try {
+                        toolExecutionResult = toolExecutor.execute(toolExecutionRequest, memoryId);
+                    } catch (Exception e) {
+                        LOG.error("Tool execution failed, fallback as tool error result. toolName={}, toolId={}",
+                                toolName, toolExecutionRequest.id(), e);
+                        toolExecutionResult = "[tool_execution_error] "
+                                + (e.getMessage() == null ? "unknown error" : e.getMessage());
+                    }
                 }
                 ToolExecutionResultMessage toolExecutionResultMessage =
                         ToolExecutionResultMessage.from(toolExecutionRequest, toolExecutionResult);

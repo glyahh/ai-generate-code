@@ -71,6 +71,21 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId, String auditAction, String auditHitRule);
 
     /**
+     * 添加一条带审查字段与 loopId 的对话消息并返回主键 id（roundId 来源）
+     *
+     * @param appId        应用 id
+     * @param message      消息内容
+     * @param messageType  消息类型（user/ai/error）
+     * @param userId       用户 id
+     * @param auditAction  审查动作（ALLOW / REJECT / SKIP）
+     * @param auditHitRule 命中的规则编码（如 NONE / SENSITIVE_WORD）
+     * @param loopId       Loop ID（本轮注入的 Loop 快照，nullable）
+     * @return 保存后的消息主键 id，失败返回 null
+     */
+    Long addChatMessageAndReturnId(Long appId, String message, String messageType, Long userId,
+                                   String auditAction, String auditHitRule, Long loopId);
+
+    /**
      * 分页查询某个应用的对话历史（基于时间游标，向前加载）
      *
      * @param appId          应用 id
@@ -123,16 +138,6 @@ public interface ChatHistoryService extends IService<ChatHistory> {
     List<ChatHistoryVO> getChatHistoryVOList(List<ChatHistory> chatHistoryList);
 
     /**
-     * 将对话历史转为内存
-     *
-     * @param addId                   应用 id
-     * @param messageWindowChatMemory 聊天内存
-     * @param maxCount                最大数量
-     * @return 转换后的数量
-     */
-    int turnHistoryToMemory (Long addId, MessageWindowChatMemory messageWindowChatMemory, int maxCount);
-
-    /**
      * 加载会话 memory_state 并按需注入文件内容到 Redis ChatMemory
      *
      * @param appId                   应用 id
@@ -142,6 +147,22 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 注入后的内存消息条数
      */
     int loadConversationMemoryStateAndInject(Long appId, MessageWindowChatMemory messageWindowChatMemory, int maxCount, CodeGenTypeEnum codeGenTypeEnum);
+
+    /**
+     * 当前 AI 可见记忆版本。用于缓存 service 命中时判断 JVM 内存窗口是否仍可复用。
+     *
+     * @param appId 应用 id
+     * @return 版本标识
+     */
+    String getAiVisibleMemoryVersion(Long appId);
+
+    /**
+     * 标记 AI 可见记忆发生变化。仅用于无法自然落到 conversation_memory_state 的 Redis/回滚类变更。
+     *
+     * @param appId 应用 id
+     * @param reason 变更来源
+     */
+    void markAiVisibleMemoryChanged(Long appId, String reason);
 
     /**
      * 查询某应用全部对话历史（用于导出到本地，仅应用创建者或管理员可调用）
@@ -206,26 +227,6 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      * @return 是否实际执行了压缩（true=有合并操作）
      */
     boolean trySummarizeOldestRoundsIfNeeded(Long appId, Long userId, String triggerReason);
-
-    /**
-     * 在线压缩 Redis ChatMemory 中的超长历史 AI 消息（仅影响模型上下文，不改 DB 历史文本）。
-     * 主要用于 HTML / MULTI_FILE 场景下，缓存命中时也能降低后续请求 token。
-     *
-     * @param appId           应用 id
-     * @param codeGenTypeEnum 代码生成类型
-     */
-    default void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum) {
-        compactMemoryMessagesIfNeeded(appId, codeGenTypeEnum, "unknown");
-    }
-
-    /**
-     * 带触发来源标记的消息级在线截断压缩。
-     *
-     * @param appId           应用 id
-     * @param codeGenTypeEnum 代码生成类型
-     * @param triggerReason   触发来源（如 workflow_quality_pass / cache_hit）
-     */
-    void compactMemoryMessagesIfNeeded(Long appId, CodeGenTypeEnum codeGenTypeEnum, String triggerReason);
 
     /**
      * 刷新 AI ChatMemory Redis TTL（memoryId=appId）。

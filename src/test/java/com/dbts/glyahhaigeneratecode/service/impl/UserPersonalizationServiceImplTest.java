@@ -52,6 +52,32 @@ class UserPersonalizationServiceImplTest {
         assertTrue(p.contains("[user_answer_style]"));
     }
 
+    @Test void getCachedAppStyle_hasValue_returnsAppStyle() {
+        String key = "user:favourite:app:" + 1L;
+        when(stringRedisTemplate.opsForValue().get(key)).thenReturn("毛玻璃");
+        String result = service.getCachedAppStyle(1L);
+        assertEquals("毛玻璃", result);
+    }
+
+    @Test void getCachedAppStyle_noValue_returnsNull() {
+        when(stringRedisTemplate.opsForValue().get(contains("app:" + 1L))).thenReturn(null);
+        when(mapper.selectOneByQuery(any())).thenReturn(null);
+        assertNull(service.getCachedAppStyle(1L));
+    }
+
+    @Test void getCachedAnswerStyle_hasValue_returnsAnswerStyle() {
+        String key = "user:favourite:style:" + 1L;
+        when(stringRedisTemplate.opsForValue().get(key)).thenReturn("简洁回答");
+        String result = service.getCachedAnswerStyle(1L);
+        assertEquals("简洁回答", result);
+    }
+
+    @Test void getCachedAnswerStyle_noValue_returnsNull() {
+        when(stringRedisTemplate.opsForValue().get(contains("style:" + 1L))).thenReturn(null);
+        when(mapper.selectOneByQuery(any())).thenReturn(null);
+        assertNull(service.getCachedAnswerStyle(1L));
+    }
+
     @Test void saveOrUpdate_shouldDeleteCache() {
 
 

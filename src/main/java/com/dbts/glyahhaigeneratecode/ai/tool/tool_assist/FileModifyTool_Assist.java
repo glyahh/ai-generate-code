@@ -339,6 +339,21 @@ public class FileModifyTool_Assist {
     }
 
     /**
+     * 判断当前应用下该文件名是否禁止 modifyFile 修改（含重要文件判定与 codeGenType 放行规则）。
+     *
+     * @param appId       应用 id
+     * @param fileName    文件名（不含路径）
+     * @param appService  应用查询服务
+     * @return true 表示不允许修改
+     */
+    public boolean isModifyBlocked(Long appId, String fileName, AppService appService) {
+        if (!isImportantFile(fileName)) {
+            return false;
+        }
+        return isModifyBlockedForImportantFile(fileName, getCodeGenType(appId, appService));
+    }
+
+    /**
      * 判断当前文件名在指定 codeGenType 下是否禁止 modifyFile 修改。
      *
      * @param fileName    文件名（不含路径）
@@ -346,9 +361,6 @@ public class FileModifyTool_Assist {
      * @return true 表示不允许修改
      */
     public boolean isModifyBlockedForImportantFile(String fileName, CodeGenTypeEnum codeGenType) {
-        if (!isImportantFile(fileName)) {
-            return false;
-        }
         return !(codeGenType == CodeGenTypeEnum.HTML || codeGenType == CodeGenTypeEnum.MULTI_FILE)
                 || !isCoreWebOutputFile(fileName);
     }

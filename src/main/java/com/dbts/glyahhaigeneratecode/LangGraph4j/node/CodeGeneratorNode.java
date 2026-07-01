@@ -74,8 +74,7 @@ public class CodeGeneratorNode {
                     userMessage,
                     generationType,
                     appId,
-                    firstRound,
-                    false
+                    firstRound
             );
 
             // vue项目需要拼接

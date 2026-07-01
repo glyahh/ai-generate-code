@@ -18,9 +18,6 @@ public class aiCodeGeneratorRoutineServiceFactory {
 
     private final ApplicationContext applicationContext;
 
-//    @Resource(name = "routingChatModelPrototype")
-//    private ChatModel chatModel;
-
     // 因为这里的service不会随着用户没创一个应用而创一个(aiCodeGeneratorService会每次创建一个)
     // 所以这里没法并发service,所以没必要使用prototype
     public aiCodeGeneratorRoutineService createAiCodeGeneratorRoutineService() {

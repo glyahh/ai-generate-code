@@ -4,6 +4,8 @@ import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.core.AiCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.core.WorkflowCodeGeneratorFacade;
 import com.dbts.glyahhaigeneratecode.core.handler.StreamHandlerExecutor;
+import com.dbts.glyahhaigeneratecode.core.memory.MemoryMessageXmlSupport;
+import com.dbts.glyahhaigeneratecode.core.memory.MemorySessionInjectSupport;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import dev.langchain4j.guardrail.InputGuardrailException;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
@@ -15,7 +17,6 @@ import com.dbts.glyahhaigeneratecode.model.Entity.User;
 import com.dbts.glyahhaigeneratecode.model.enums.ChatHistoryMessageTypeEnum;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
-import com.dbts.glyahhaigeneratecode.service.UserPersonalizationService;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
 import com.dbts.glyahhaigeneratecode.service.ChatToGenCode;
 import com.dbts.glyahhaigeneratecode.service.support.LoopInjectService;
@@ -55,9 +56,9 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
     private final StreamHandlerExecutor streamHandlerExecutor;
 
-    private final UserPersonalizationService userPersonalizationService;
-
     private final LoopInjectService loopInjectService;
+
+    private final MemorySessionInjectSupport memorySessionInjectSupport;
     /**
      * 统一入口：基于应用配置和用户输入触发代码生成（流式）
      *
@@ -87,7 +88,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
 
         assertRequestNotDuplicate(appId, user.getId(), message, "legacy");
 
-        // 4.5 首轮判定：同一 appId 串行判定 + 入库，避免并发下都读到 rounds=0
+        // 4.5 首轮判定：防止同一个appId下, 多个用户同时请求, 导致都读到 rounds=0, 影响首轮判定结果
         final boolean firstRound;
         final Long roundId;
         ReentrantLock lock = getFirstRoundLock(appId);
@@ -105,7 +106,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
                     ChatHistoryMessageTypeEnum.USER.getValue(),
                     user.getId(),
                     auditResult.getAction(),
-                    auditResult.getHitRule()
+                    auditResult.getHitRule(),
+                    loopId
             );
             ThrowUtils.throwIf(roundId == null || roundId <= 0, ErrorCode.SYSTEM_ERROR, "用户消息入库失败");
             ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
@@ -113,8 +115,11 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             lock.unlock();
         }
 
-        // 6. 注入个性化 prompt + loop skill（注入顺序：personalization → message → loop_skill）
-        String enhancedMessage = injectPersonalizationPrompt(message, user.getId());
+        // 5.1 每次读取最新的两种style并注入
+        memorySessionInjectSupport.injectOrUpdateSessionStyle(appId, user.getId());
+
+        // 6. 包裹用户原话 + 注入 Loop skill
+        String enhancedMessage = MemoryMessageXmlSupport.wrapUserOriginal(message);
         String beforeLoop = enhancedMessage;
         enhancedMessage = loopInjectService.injectIfPresent(enhancedMessage, user.getId(), appId, loopId);
         // 记录提示词拼接日志
@@ -135,7 +140,7 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
         //    压缩触发时发射 [memory_compress_start/end] 标记，由 Controller 转为 SSE 事件通知前端
         //    使用 Flux.defer 惰性执行
         Flux<String> compressPhase = Flux.defer(() -> {
-            // 是否成功压缩了历史记忆
+            // 是否成功压缩了历史记忆 (3轮开压,3压2)
             boolean didCompress = chatHistoryService.trySummarizeOldestRoundsIfNeeded(appId, user.getId(), "entry_normal");
             if (didCompress) {
                 return Flux.just("[memory_compress_start]", "[memory_compress_end]");
@@ -180,7 +185,8 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
                     ChatHistoryMessageTypeEnum.USER.getValue(),
                     user.getId(),
                     auditResult.getAction(),
-                    auditResult.getHitRule()
+                    auditResult.getHitRule(),
+                    null  // workflow 暂不支持 Loop
             );
             ThrowUtils.throwIf(roundId == null || roundId <= 0, ErrorCode.SYSTEM_ERROR, "用户消息入库失败");
             ThrowUtils.throwIf(auditResult.isBlocked(), ErrorCode.PARAMS_ERROR, auditResult.getUserMessage());
@@ -188,8 +194,10 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             lock.unlock();
         }
 
-        // 获取一手流式string代码（此时不执行压缩，压缩作为 Flux 的第一个阶段）
-        String enhancedMessage = injectPersonalizationPrompt(message, user.getId());
+        // 风格 SystemMessage 注入
+        memorySessionInjectSupport.injectOrUpdateSessionStyle(appId, user.getId());
+        // 用户原话包裹（workflow 无 loopId）
+        String enhancedMessage = MemoryMessageXmlSupport.wrapUserOriginal(message);
         Flux<String> result = workflowCodeGeneratorFacade.generateAndSaveCodeStream(
                 enhancedMessage, codeGenTypeEnum, appId, firstRound);
 
@@ -275,32 +283,6 @@ public class ChatToGenCodeImpl implements ChatToGenCode {
             // 退化兜底：即使哈希异常也保证 key 构造可用
             return String.valueOf((text == null ? "" : text).hashCode());
         }
-    }
-
-    /**
-     * 构建最终提示词：用应用 initPrompt 作为前缀，再拼接用户输入
-     *
-     * @param app     当前应用
-     * @param message 用户输入内容
-     * @return 最终发送给 AI 的提示词
-     */
-    @SuppressWarnings("unused")
-    private String buildUserMessage(App app, String message) {
-        String initPrompt = app.getInitPrompt();
-        if (StrUtil.isBlank(initPrompt)) {
-            return message;
-        }
-        return initPrompt + System.lineSeparator() + message;
-    }
-
-    /**
-     * 若用户已配置个性化 prompt，将其作为前缀注入 userMessage。
-     * 优先级：低于本轮用户显式指令、高于系统默认 SystemMessage。
-     * 空配置时原样返回 message。
-     */
-    private String injectPersonalizationPrompt(String message, Long userId) {
-        String injectBlock = userPersonalizationService.buildInjectPrompt(userId);
-        return StrUtil.isBlank(injectBlock) ? message : injectBlock + message;
     }
 
 }

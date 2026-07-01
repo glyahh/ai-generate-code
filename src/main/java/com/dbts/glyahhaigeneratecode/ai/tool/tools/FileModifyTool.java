@@ -6,7 +6,6 @@ import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.tool_assist.FileModifyTool_Assist;
 import com.dbts.glyahhaigeneratecode.config.ConversationMemoryProperties;
 import com.dbts.glyahhaigeneratecode.core.memory.ConversationMemoryFileNoteSupport;
-import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.AppService;
 import com.dbts.glyahhaigeneratecode.service.ConversationMemoryFileNoteService;
 import dev.langchain4j.agent.tool.P;
@@ -111,25 +110,17 @@ public class FileModifyTool extends BaseTool {
                 return "错误：文件不存在或不是文件 - " + relativeFilePath;
             }
 
-            // 避免直接修改关键配置/入口文件
+            // 5. 重要文件默认禁止修改；HTML/MULTI_FILE 下 index.html 等核心产物放行
             String fileName = path.getFileName().toString();
-            if (fileModifyToolAssist.isImportantFile(fileName)) {
-                // 对 HTML / MULTI_FILE：允许修改核心产物文件（否则“增量编辑”无法落地）
-                // 对 vue 无法修改核心产物文件
-                // 5. 按应用代码生成类型决定是否放行 index.html 等核心 Web 产物
-                CodeGenTypeEnum codeGenType = fileModifyToolAssist.getCodeGenType(appId, appService);
-                if (fileModifyToolAssist.isModifyBlockedForImportantFile(fileName, codeGenType)) {
-                    return "错误：不允许直接修改重要文件 - " + fileName;
-                }
+            if (fileModifyToolAssist.isModifyBlocked(appId, fileName, appService)) {
+                return "错误：不允许直接修改重要文件 - " + fileName;
             }
 
-            // Guard against full-file replacements masquerading as "modify".
-            // The larger of oldContent and newContent must not exceed 5000 chars.
-            // 6. 限制单次替换片段体积，防止模型用 modifyFile 变相整文件覆盖
+            // 6. 限制单次替换片段体积，防止模型用 modifyFile 变相整文件覆盖或者过度修改
             int maxReplaceLen = Math.max(
                     oldContent != null ? oldContent.length() : 0,
                     newContent != null ? newContent.length() : 0);
-            if (maxReplaceLen > 8000) {
+            if (maxReplaceLen > 12000) {
                 return String.format(
                         "错误：修改内容过大（%d 字符，最大允许 8000）。"
                         + "请缩小修改范围，仅替换需变更的具体片段，不要将整个文件作为替换内容。"
@@ -137,7 +128,6 @@ public class FileModifyTool extends BaseTool {
                         maxReplaceLen);
             }
 
-            // 同轮去重：相同 (path, oldContent, newContent) 已成功执行过则直接返回
             // 7. 构建去重 key, 供后续set<string>校验是否重复，命中则跳过重复写盘与重复 UI 卡片
             String dedupKey = fileModifyToolAssist.buildDedupKey(appId, relativeFilePath, oldContent, newContent);
             if (fileModifyToolAssist.isDuplicateModify(dedupKey)) {
@@ -151,7 +141,6 @@ public class FileModifyTool extends BaseTool {
                 return "错误：旧内容不能为空";
             }
 
-            // 匹配策略：先精确 contains，失败再尝试空白容错匹配
             // 9. 优先精确匹配 oldContent, 确保当前磁盘上一定有oldContent；失败时调用 Assist 做缩进容错
             String matchedOldContent = fileModifyToolAssist.resolveMatchedOldContent(originalContent, oldContent);
             boolean matched = matchedOldContent != null;
@@ -159,21 +148,22 @@ public class FileModifyTool extends BaseTool {
                 log.info("modifyFile 精确匹配失败但空白容错匹配成功: {}", relativeFilePath);
             }
 
+            // 10. 匹配失败时附带诊断片段与缩进风格提示，引导模型重新 readFile
             if (!matched) {
-                // 提供文件片段帮助模型定位问题
-                // 10. 匹配失败时附带诊断片段与缩进风格提示，引导模型重新 readFile
+                // 尝试在原文里找「最像 oldContent 的位置」，截取上下文
                 String snippet = fileModifyToolAssist.buildMismatchSnippet(originalContent, oldContent);
                 return "警告：文件中未找到要替换的内容，文件未修改 - " + relativeFilePath
                         + "\n可能原因：① oldContent 的缩进空格数与文件实际缩进不一致（文件使用 "
+                        // 统计文件主导缩进风格
                         + fileModifyToolAssist.detectIndentStyle(originalContent)
                         + "）；② oldContent 包含额外/缺失的空白字符；③ oldContent 片段不存在于当前文件中。"
                         + "\n请使用 readFile 工具重新读取文件，确认目标片段的精确内容（含缩进）后再试。"
                         + snippet;
             }
 
-            // 最核心的替换string内容
             // 11. 用匹配到的原文片段执行 replace，并校验替换后内容确有变化
             if (newContent == null) log.warn("修改文件工具 -> ai返回了空的更新字符串");
+            // 从整个文件中匹配 matchedOldContent
             String modifiedContent = originalContent.replace(matchedOldContent, newContent == null ? "" : newContent);
             if (originalContent.equals(modifiedContent)) {
                 return "错误：替换后文件内容未发生变化（" + relativeFilePath + "）。"
@@ -192,6 +182,7 @@ public class FileModifyTool extends BaseTool {
 
             // 14. 异步登记 fileNote，供轮次收口后批量 LLM 摘要（失败不阻塞改盘）
             registerFileNoteAfterModify(appId, projectRoot, path, oldContent, newContent);
+
             return "文件修改成功: " + relativeFilePath;
 
         } catch (IOException e) {
@@ -241,11 +232,11 @@ public class FileModifyTool extends BaseTool {
                 return;
             }
             // 2. 按配置截断前后片段，组装变更 hint 供后续 LLM 摘要
-            int maxChars = conversationMemoryProperties == null ? 8000 : conversationMemoryProperties.getFileNoteInputChars();
+            int maxFileNoteChars = conversationMemoryProperties == null ? 8000 : conversationMemoryProperties.getFileNoteInputChars();
             String hint = "替换前片段:\n"
-                    + ConversationMemoryFileNoteSupport.truncateHint(StrUtil.blankToDefault(oldContent, ""), maxChars / 2)
+                    + ConversationMemoryFileNoteSupport.truncateHint(StrUtil.blankToDefault(oldContent, ""), maxFileNoteChars / 2)
                     + "\n替换后片段:\n"
-                    + ConversationMemoryFileNoteSupport.truncateHint(StrUtil.blankToDefault(newContent, ""), maxChars / 2);
+                    + ConversationMemoryFileNoteSupport.truncateHint(StrUtil.blankToDefault(newContent, ""), maxFileNoteChars / 2);
             // 3. 登记到 ConversationMemoryFileNoteService，同路径本轮以最新 hint 覆盖
             conversationMemoryFileNoteService.registerPendingFileChange(appId, relative, hint);
         } catch (Exception ignore) {

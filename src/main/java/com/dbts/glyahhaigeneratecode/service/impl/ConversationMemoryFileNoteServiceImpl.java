@@ -47,6 +47,7 @@ public class ConversationMemoryFileNoteServiceImpl implements ConversationMemory
     // 其他线程在锁外做 if (batchPromptTemplate != null) 时，能立刻看到已赋值结果，不会一直用「半初始化」或旧 null
     // JVM 中，多个线程可以同时读写同一个共享变量,线程不直接操作主内存，而是操作自己的副本 → 导致看不见最新值
     // 一般用于变量被多个线程控制,并且只进行原子操作
+    // volatile 用户多线程同步
     private volatile String batchPromptTemplate;
 
 

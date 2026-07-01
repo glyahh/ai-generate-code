@@ -65,14 +65,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private vueProjectBuilder vueProjectBuilder;
 
-//    @Resource
-//    private aiCodeGeneratorRoutineService aiCodeGeneratorRoutine;
-
     @Resource
     private aiCodeGeneratorRoutineServiceFactory aiCodeGeneratorRoutineServiceFactory;
-
-//    @Resource
-//    private AppService appService;
 
     @Resource
     private ScreenshotService screenshotService;

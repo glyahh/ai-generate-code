@@ -52,17 +52,18 @@ public class MemorySessionInjectSupport {
         boolean hasAns = StrUtil.isNotBlank(answerStyle);
 
         if (!hasApp && !hasAns) {
-            // 无风格配置 → 移除可能存在的旧会话级 SystemMessage
+            // 如果用户删除了其中两种风格 -> 无风格配置 → 移除可能存在的旧会话级 SystemMessage
             aiCodeGeneratorServiceFactory.applySessionStyle(appId, null);
             return;
         }
 
         // 2. 构造会话级 SystemMessage 正文
-        String injectMeta = MemoryMessageXmlSupport.buildInjectPromptMeta();
+        String inject_prompt = MemoryMessageXmlSupport.buildInjectPromptMeta();
         String styleBlock = MemoryMessageXmlSupport.buildUserStyleBlock(appStyle, answerStyle);
-        String sessionBody = injectMeta + "\n" + styleBlock;
+        // 整个 style string
+        String sessionBody = inject_prompt + "\n" + styleBlock;
 
-        // 3. 委托 factory 应用到 MessageWindowChatMemory 实例
+        // 3. 委托 factory 应用到 MessageWindowChatMemory 实例, 更新缓存
         aiCodeGeneratorServiceFactory.applySessionStyle(appId, sessionBody);
     }
 }

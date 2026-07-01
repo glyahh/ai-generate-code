@@ -15,7 +15,7 @@ public class ConversationMemoryProperties {
     /**
      * cm:state:{appId} TTL（秒），默认 14 天。
      */
-    private long stateTtlSeconds = 14L * 24L * 3600L;
+    private long stateTtlSeconds = 7L * 24L * 3600L;
 
     /**
      * cm:ref:{refId} TTL（秒），默认 3 天。

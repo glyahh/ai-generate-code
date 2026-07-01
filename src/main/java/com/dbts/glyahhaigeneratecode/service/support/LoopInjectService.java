@@ -3,6 +3,7 @@ package com.dbts.glyahhaigeneratecode.service.support;
 import com.dbts.glyahhaigeneratecode.mapper.LoopMapper;
 import com.dbts.glyahhaigeneratecode.mapper.AppLoopMapper;
 import com.dbts.glyahhaigeneratecode.model.Entity.Loop;
+import com.dbts.glyahhaigeneratecode.core.memory.MemoryMessageXmlSupport;
 import com.mybatisflex.core.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,18 +53,18 @@ public class LoopInjectService {
         if (loopId == null) {
             return message;
         }
+        // 校验Loop是否合法
         if (!validateLoop(userId, appId, loopId)) {
             return message;
         }
-
+        // 从redis中获取Loop
         String compiled = getCompiledPrompt(loopId);
         if (compiled == null || compiled.isBlank()) {
             return message;
         }
 
         String loopName = getLoopName(loopId);
-        String block = "\n[loop_skill name=\"" + escape(loopName) + "\"]\n"
-                + compiled + "\n[/loop_skill]";
+        String block = "\n" + MemoryMessageXmlSupport.wrapLoopSkill(loopId, compiled, loopName);
         return message + block;
     }
 
@@ -95,7 +96,7 @@ public class LoopInjectService {
         String cached = redisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             if ("{}".equals(cached)) {
-                return null; // 空值占位
+                return null; // 直接返回空值占位, 不用再查一遍数据库了
             }
             return cached;
         }

@@ -20,14 +20,12 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -39,12 +37,6 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class WorkflowCodeGeneratorFacade {
-
-    private static final Set<String> VUE_ECHO_IGNORED_DIR_NAMES = Set.of(
-            "node_modules", "dist", "build", ".git", ".idea", ".vscode", "coverage", "target", ".mvn"
-    );
-
-    private static final long VUE_ECHO_MAX_FILE_BYTES = 512L * 1024L;
 
     @Resource
     private ToolManager toolManager;
@@ -350,68 +342,6 @@ public class WorkflowCodeGeneratorFacade {
         } catch (Exception e) {
             log.warn("workflow 回显生成代码失败: type={}, dir={}", codeGenTypeEnum, generatedDir, e);
         }
-    }
-
-
-    /**
-     * 判断相对路径是否落在应忽略的目录（如 node_modules）之下
-     *
-     * @param root 项目根
-     * @param file 绝对路径文件
-     * @return true 表示可以回显
-     */
-    private boolean shouldEmitVueFile(Path root, Path file) {
-        Path relative = root.relativize(file);
-        int count = relative.getNameCount();
-        if (count == 0) {
-            return false;
-        }
-
-        // 1. 检查路径上任意父段是否为忽略目录名
-        for (int i = 0; i < count - 1; i++) {
-            String dir = relative.getName(i).toString();
-            if (VUE_ECHO_IGNORED_DIR_NAMES.contains(dir)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-
-    /**
-     * 读取文件头若干字节，启发式判断是否像文本（排除含 NUL 的二进制）
-     *
-     * @param path 文件路径
-     * @return true 更可能为文本
-     */
-    private boolean isLikelyTextFile(Path path) {
-        byte[] sample = new byte[4096];
-        int read;
-        // 1. 读最多 4KB 样本
-        try (InputStream in = Files.newInputStream(path)) {
-            read = in.read(sample);
-        } catch (Exception e) {
-            return false;
-        }
-
-        // 2. 读不到或空文件：按文本放行
-        if (read <= 0) {
-            return true;
-        }
-
-        // 3. 统计控制字符比例；出现 NUL 直接判二进制
-        int controlChars = 0;
-        for (int i = 0; i < read; i++) {
-            int b = sample[i] & 0xFF;
-            if (b == 0) {
-                return false;
-            }
-            if (b < 9 || (b > 13 && b < 32)) {
-                controlChars++;
-            }
-        }
-
-        return controlChars < Math.max(4, read / 20);
     }
 
 

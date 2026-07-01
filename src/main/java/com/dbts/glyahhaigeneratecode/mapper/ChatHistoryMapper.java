@@ -39,4 +39,9 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
             ALTER TABLE chat_history MODIFY COLUMN message LONGTEXT NOT NULL COMMENT '消息'
             """)
     int alterChatHistoryMessageToLongText();
+
+    @Update("""
+            ALTER TABLE chat_history ADD COLUMN loopId BIGINT NULL DEFAULT NULL COMMENT 'Loop ID（快照）' AFTER auditHitRule
+            """)
+    int alterChatHistoryAddLoopId();
 }

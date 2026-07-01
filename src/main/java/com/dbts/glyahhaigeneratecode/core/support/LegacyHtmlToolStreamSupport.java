@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.FluxSink;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -27,6 +28,35 @@ public final class LegacyHtmlToolStreamSupport {
     static final int WRITE_FILE_EXTRACT_WARN_THRESHOLD = 16 * 1024;
 
     private LegacyHtmlToolStreamSupport() {
+    }
+
+    /**
+     * HTML/MULTI_FILE 工具流状态：封装流式工具请求/执行追踪所需的状态集合，
+     * 减少 {@link #emitLegacyHtmlToolStreamChunk} 长参数列表中重复的 Map / Set / AtomicBoolean。
+     */
+    public static class ToolStreamState {
+        public final Map<String, StringBuilder> toolArgsById = new HashMap<>();
+        public final Set<String> syntheticExecutedIds = new HashSet<>();
+        public final Set<String> warnedLargeIncompleteIds = new HashSet<>();
+        public final Set<String> seenToolRequestIds = new HashSet<>();
+        public final AtomicBoolean nativeToolExecutedMode = new AtomicBoolean(false);
+    }
+
+    /**
+     * 快捷重载：接受 {@link ToolStreamState} 替代 5 个散状态参数。
+     */
+    public static void emitLegacyHtmlToolStreamChunk(
+            ToolManager toolManager,
+            FluxSink<String> sink,
+            Long appId,
+            CodeGenTypeEnum codeGenTypeEnum,
+            ToolExecutionRequest toolExecutionRequest,
+            ToolStreamState state,
+            boolean isPartialDelta) {
+        emitLegacyHtmlToolStreamChunk(
+                toolManager, sink, appId, codeGenTypeEnum, toolExecutionRequest,
+                state.toolArgsById, state.syntheticExecutedIds, state.warnedLargeIncompleteIds,
+                state.seenToolRequestIds, state.nativeToolExecutedMode, isPartialDelta);
     }
 
     /**

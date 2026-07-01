@@ -1,15 +1,9 @@
 package com.dbts.glyahhaigeneratecode.core;
 
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorService;
 import com.dbts.glyahhaigeneratecode.ai.aiCodeGeneratorServiceFactory;
 import com.dbts.glyahhaigeneratecode.ai.model.HtmlCodeResult;
 import com.dbts.glyahhaigeneratecode.ai.model.MultiFileCodeResult;
-import com.dbts.glyahhaigeneratecode.ai.model.message.AiResponseMessage;
-import com.dbts.glyahhaigeneratecode.ai.model.message.ToolExecutedMessage;
-import com.dbts.glyahhaigeneratecode.ai.model.message.ToolRequestMessage;
-import com.dbts.glyahhaigeneratecode.ai.tool.BaseTool;
 import com.dbts.glyahhaigeneratecode.ai.tool.ToolManager;
 import com.dbts.glyahhaigeneratecode.ai.tool.tools.FileModifyTool;
 import com.dbts.glyahhaigeneratecode.constant.AppConstant;
@@ -18,31 +12,20 @@ import com.dbts.glyahhaigeneratecode.core.context.HtmlMultiFileEditContextBuilde
 import com.dbts.glyahhaigeneratecode.core.context.VueEditContextBuilder;
 import com.dbts.glyahhaigeneratecode.core.parser.CodeParserExecutor;
 import com.dbts.glyahhaigeneratecode.core.saver.CodeFileSaverExecutor;
+import com.dbts.glyahhaigeneratecode.core.support.HtmlMultiFileTokenStreamAdapter;
 import com.dbts.glyahhaigeneratecode.core.support.LegacyHtmlStreamIntegrity;
-import com.dbts.glyahhaigeneratecode.core.support.LegacyHtmlToolStreamSupport;
+import com.dbts.glyahhaigeneratecode.core.support.VueTokenStreamAdapter;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
 import com.dbts.glyahhaigeneratecode.model.enums.CodeGenTypeEnum;
 import com.dbts.glyahhaigeneratecode.service.ChatHistoryService;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.TokenStream;
-import dev.langchain4j.service.tool.ToolExecution;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
-import reactor.core.publisher.SignalType;
 
 import java.io.File;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * AI 代码生成门面，统一串起生成、流式适配、解析和保存。
@@ -50,11 +33,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 @Slf4j
 public class AiCodeGeneratorFacade {
-
-    static final int WRITE_FILE_EXTRACT_WARN_THRESHOLD = 16 * 1024;
-
-    @Resource
-    private aiCodeGeneratorService aiCodeGeneratorService;
 
     @Resource
     private aiCodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
@@ -86,60 +64,43 @@ public class AiCodeGeneratorFacade {
      * @return 保存目录对应的 File
      */
     public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
-        // 1. 生成类型必填
-        if (codeGenTypeEnum == null) {
-            throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
-        }
+        validateCodeGenType(codeGenTypeEnum);
 
         return switch (codeGenTypeEnum) {
-            case HTML -> generateAndSaveHtmlCode(userMessage, appId);
-            case MULTI_FILE -> generateAndSaveMultiFileCode(userMessage, appId);
+            case HTML, MULTI_FILE -> generateAndSaveHtmlMultiFileCode(userMessage, appId, codeGenTypeEnum);
             default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenTypeEnum.getValue());
         };
     }
 
     /**
-     * 同步生成单文件 HTML 并落盘
+     * 同步生成 HTML / MULTI_FILE 并落盘（逻辑同 {@link #generateHtmlMultiFileCodeStream}，非流式）
+     *
+     * @param userMessage 用户提示
+     * @param appId       应用主键
+     * @param codeGenType HTML 或 MULTI_FILE
+     * @return 保存目录对应的 File
      */
-    private File generateAndSaveHtmlCode(String userMessage, Long appId) {
+    private File generateAndSaveHtmlMultiFileCode(String userMessage, Long appId, CodeGenTypeEnum codeGenType) {
         boolean firstRound = chatHistoryService.isFirstRound(appId, false);
-        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
-                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.HTML, appId);
+        boolean editIntent = isHtmlMultiEditIntent(codeGenType, userMessage, appId);
         boolean htmlMultiToollessBootstrap = firstRound && !editIntent;
         aiCodeGeneratorService svc = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
-                appId, CodeGenTypeEnum.HTML, htmlMultiToollessBootstrap, true);
+                appId, codeGenType, htmlMultiToollessBootstrap);
         if (editIntent) {
-            // Modify: TokenStream 流式，工具直接写盘，无需解析落盘
-            TokenStream tokenStream = svc.modifyCodeHTML(appId, userMessage);
-            adaptCodeTokenStream(CodeGenTypeEnum.HTML, tokenStream, appId).blockLast();
-            return new File(AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "html_" + appId);
+            TokenStream tokenStream = resolveHtmlMultiFileSyncTokenStream(svc, codeGenType, appId, userMessage);
+            HtmlMultiFileTokenStreamAdapter.adapt(
+                    tokenStream, codeGenType, appId, false, toolManager, null).blockLast();
+            return htmlMultiOutputDir(codeGenType, appId);
         }
-        HtmlCodeResult result = svc.generateCodeHTML(appId, userMessage);
-        return codeFileSaverExecutor.execute(CodeGenTypeEnum.HTML, result, appId);
+        return switch (codeGenType) {
+            case HTML -> codeFileSaverExecutor.execute(codeGenType, svc.generateCodeHTML(appId, userMessage), appId);
+            case MULTI_FILE -> codeFileSaverExecutor.execute(codeGenType, svc.generateCodeMultiFile(appId, userMessage), appId);
+            default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenType.getValue());
+        };
     }
 
     /**
-     * 同步生成多文件 HTML/CSS/JS 并落盘
-     */
-    private File generateAndSaveMultiFileCode(String userMessage, Long appId) {
-        boolean firstRound = chatHistoryService.isFirstRound(appId, false);
-        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
-                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.MULTI_FILE, appId);
-        boolean htmlMultiToollessBootstrap = firstRound && !editIntent;
-        aiCodeGeneratorService svc = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
-                appId, CodeGenTypeEnum.MULTI_FILE, htmlMultiToollessBootstrap, true);
-        if (editIntent) {
-            // Modify: TokenStream 流式，工具直接写盘，无需解析落盘
-            TokenStream tokenStream = svc.modifyCodeMultiFile(appId, userMessage);
-            adaptCodeTokenStream(CodeGenTypeEnum.MULTI_FILE, tokenStream, appId).blockLast();
-            return new File(AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "multi_file_" + appId);
-        }
-        MultiFileCodeResult result = svc.generateCodeMultiFile(appId, userMessage);
-        return codeFileSaverExecutor.execute(CodeGenTypeEnum.MULTI_FILE, result, appId);
-    }
-
-    /**
-     * 流式生成入口（默认非首轮、开启缓存命中时的记忆压缩）
+     * 流式生成入口（默认非首轮）
      *
      * @param userMessage     用户提示词
      * @param codeGenTypeEnum HTML / MULTI_FILE / VUE
@@ -148,11 +109,12 @@ public class AiCodeGeneratorFacade {
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         boolean firstRound = chatHistoryService.isFirstRound(appId, false);
-        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, firstRound, true);
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, firstRound);
     }
 
     /**
      * 流式生成入口，可指定是否首轮
+     * <p>缓存命中时仅刷新 Redis TTL 并在窗口空时失效重建，不做在线压缩。</p>
      *
      * @param userMessage     用户提示词
      * @param codeGenTypeEnum 生成类型
@@ -161,290 +123,15 @@ public class AiCodeGeneratorFacade {
      * @return SSE 文本流
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId, boolean firstRound) {
-        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, firstRound, true);
-    }
+        validateCodeGenType(codeGenTypeEnum);
 
-    /**
-     * 流式生成入口（完整参数）：可控制缓存命中时是否压缩记忆
-     *
-     * @param userMessage               用户提示词
-     * @param codeGenTypeEnum           生成类型
-     * @param appId                     应用主键
-     * @param firstRound                是否首轮
-     * @param compactMemoryOnCacheHit   命中缓存时是否压缩 Redis 会话
-     * 从「内存里的 AI 服务缓存」里拿到同一个 app 的实例时，要不要顺便把 Redis 里那份对话记忆做一轮「变短」处理
-     *
-     * @return SSE 文本流
-     */
-    public Flux<String> generateAndSaveCodeStream(String userMessage,
-                                                  CodeGenTypeEnum codeGenTypeEnum,
-                                                  Long appId,
-                                                  boolean firstRound,
-                                                  boolean compactMemoryOnCacheHit) {
-        // 1. 类型校验
-        if (codeGenTypeEnum == null) {
-            throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
-        }
+        clearModifyFileDedup();
 
-        // 每轮开始时清空 modifyFile 同轮去重集合（修复：防止上一轮的记录影响本轮）
-        try {
-            FileModifyTool fmt = toolManager.getTool("modifyFile") instanceof FileModifyTool f ? f : null;
-            if (fmt != null) {
-                fmt.clearRoundDedup();
-            }
-        } catch (Exception ignore) {
-            log.error("每轮清空工具modifyFile失败");
-        }
-
-        // 2. 按类型分发到各自私有方法
         return switch (codeGenTypeEnum) {
-            case HTML -> generateAndSaveHtmlCodeStream(userMessage, appId, firstRound, compactMemoryOnCacheHit);
-            case MULTI_FILE -> generateAndSaveMultiFileCodeStream(userMessage, appId, firstRound, compactMemoryOnCacheHit);
-            case VUE -> generateAndSaveVueCodeStream(userMessage, appId, firstRound, compactMemoryOnCacheHit);
+            case HTML, MULTI_FILE -> generateHtmlMultiFileCodeStream(codeGenTypeEnum, userMessage, appId, firstRound);
+            case VUE -> generateAndSaveVueCodeStream(userMessage, appId, firstRound);
             default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenTypeEnum.getValue());
         };
-    }
-
-    /**
-     * Legacy：对已是纯文本的 Flux 做聚合，结束时解析并保存（供旧链路复用）
-     *
-     * @param codeGenTypeEnum 生成类型
-     * @param result          上游文本流
-     * @param appId           应用主键
-     * @return 透传的 Flux（副作用在 doOnComplete）
-     */
-    private Flux<String> processCodeStream(CodeGenTypeEnum codeGenTypeEnum, Flux<String> result, Long appId) {
-        StringBuilder codeBuilder = new StringBuilder();
-        return result
-                .doOnNext(codeBuilder::append)
-                .doOnComplete(() -> {
-                    try {
-                        // 1. 聚合全文并打诊断日志（含截断尾部样例）
-                        String full = codeBuilder.toString();
-                        int len = full.length();
-                        // 为了打印日志而量身定制
-                        String tail = len > 200 ? full.substring(len - 200) : full;
-                        log.info(
-                                "legacy 流式聚合完成 appId={} codeGenType={} charLen={} possibleTruncatedTail={}\ntailSample=\n{}",
-                                appId,
-                                codeGenTypeEnum,
-                                len,
-                                LegacyHtmlStreamIntegrity.looksLikeIncompleteTrailingTag(full),
-                                tail
-                        );
-
-                        // 2. 解析为结果对象
-                        Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, full);
-
-                        // 3. 保存到 code_output
-                        File file = codeFileSaverExecutor.execute(codeGenTypeEnum, executeResult, appId);
-                        log.info("保存目录: {}", file.getAbsolutePath());
-                    } catch (Exception e) {
-                        log.error("生成代码失败: {}", e.getMessage(), e);
-                    }
-                })
-                .doFinally(signal -> {
-                    // 1. 取消时记录已缓冲长度，便于排查客户端断开
-                    if (signal == SignalType.CANCEL) {
-                        log.warn(
-                                "legacy 流式被取消 appId={} codeGenType={} partialCharLen={}",
-                                appId,
-                                codeGenTypeEnum,
-                                codeBuilder.length()
-                        );
-                    }
-                });
-    }
-
-    /**
-     * HTML/MULTI_FILE：将 TokenStream 转为纯文本 SSE，可选在结束时聚合解析落盘。
-     *
-     * @param codeGenTypeEnum   代码生成类型
-     * @param tokenStream       LangChain4j TokenStream
-     * @param appId             应用主键
-     * @param persistOnComplete true=流结束后解析全文并落盘；false=仅工具编辑流式，不在此落盘
-     * true：流结束会落盘
-     * false：这条管线只把 SSE 流透传出去，不在 complete 里做整段解析落盘
-     *
-     * @return 适配后的 Flux
-     */
-    private Flux<String> wireHtmlMultiFileTokenStream(
-            CodeGenTypeEnum codeGenTypeEnum, TokenStream tokenStream, Long appId, boolean persistOnComplete) {
-        // 根据工具ID每个工具对应的一个stringappend
-        Map<String, StringBuilder> toolArgsById = new HashMap<>();
-        // 工具执行
-        Set<String> syntheticExecutedIds = new HashSet<>();
-        // 工具警告
-        Set<String> warnedLargeIncompleteIds = new HashSet<>();
-        // 工具请求
-        Set<String> seenToolRequestIds = new HashSet<>();
-        // 表示 LangChain4j 是否已经回调过onToolExecuted那个工具真的执行完的那条路径
-        AtomicBoolean nativeToolExecutedMode = new AtomicBoolean(false);
-
-        return Flux.<String>create(sink -> {
-                    // 前端停止 → 取消底层 TokenStream, 防止旧流继续写入 ChatMemory/Redis
-                    sink.onCancel(() -> {
-                        try { tokenStream.cancel(); } catch (Exception ignore) { }
-                    });
-
-                    // 工具轮次门禁：工具执行阶段禁止输出普通 AI 文本，
-                    // 仅当 exit 工具已执行后才放行最终总结文本
-                    AtomicBoolean toolRound = new AtomicBoolean(false);
-                    AtomicBoolean exitExecuted = new AtomicBoolean(false);
-                    // 本轮是否已通过写/改/删工具落盘；有则流结束不再从回复抠代码存盘
-                    AtomicBoolean toolWroteDisk = new AtomicBoolean(false);
-
-                    StringBuilder codeBuilder = persistOnComplete ? new StringBuilder() : null;
-                    tokenStream.onPartialResponse(partial -> {
-                                if (partial == null || partial.isEmpty()) {
-                                    return;
-                                }
-                                // 工具轮次中间禁止输出普通 AI 文本；
-                                // 仅当 exit 工具已执行后（模型收到总结指令后）才放行最终总结文本
-                                if (toolRound.get() && !exitExecuted.get()) {
-                                    return;
-                                }
-                                if (codeBuilder != null) {
-                                    codeBuilder.append(partial);
-                                }
-                                try {
-                                    sink.next(partial);
-                                } catch (Exception ignore) {
-                                    log.warn("未再Html/MultiFile中将sink->partial");
-                                    //ThrowUtils.throwIf(true, ErrorCode.NOT_FOUND_ERROR, "未再Html/MultiFile中将sink->partial");
-                                }
-                            })
-                            // index -> 第几个调用的工具
-                            .onPartialToolExecutionRequest((Integer index, ToolExecutionRequest toolExecutionRequest) -> {
-                                // 标记已进入工具轮次，抑制后续普通 AI 文本直到 exit 执行
-                                toolRound.set(true);
-                                // 按 toolCallId 第一次出现时往 sink 推 [选择工具] %s
-                                // 一旦toolArgsById能解析出路径和内容，就 合成一段[执行工具] %s
-                                // 这样就算没有onCompleteToolExecutionRequest也能正常返回Flux<string>
-                                LegacyHtmlToolStreamSupport.emitLegacyHtmlToolStreamChunk(
-                                        toolManager,
-                                        sink,
-                                        appId,
-                                        codeGenTypeEnum,
-                                        toolExecutionRequest,
-                                        toolArgsById,
-                                        syntheticExecutedIds,
-                                        warnedLargeIncompleteIds,
-                                        seenToolRequestIds,
-                                        nativeToolExecutedMode,
-                                        true);
-                            })
-                            .onCompleteToolExecutionRequest((Integer index, ToolExecutionRequest completeToolExecutionRequest) -> {
-                                LegacyHtmlToolStreamSupport.emitLegacyHtmlToolStreamChunk(
-                                        toolManager,
-                                        sink,
-                                        appId,
-                                        codeGenTypeEnum,
-                                        completeToolExecutionRequest,
-                                        toolArgsById,
-                                        syntheticExecutedIds,
-                                        warnedLargeIncompleteIds,
-                                        seenToolRequestIds,
-                                        nativeToolExecutedMode,
-                                        false);
-                            })
-                            .onToolExecuted((ToolExecution toolExecution) -> {
-                                try {
-                                    String toolCallId = toolExecution.request().id();
-                                    nativeToolExecutedMode.compareAndSet(false, true);
-                                    if (toolCallId != null && syntheticExecutedIds.contains(toolCallId)) {
-                                        return;
-                                    }
-                                } catch (Exception ignore) {
-                                    // ignore
-                                }
-                                try {
-                                    String name = toolExecution.request().name();
-                                    JSONObject args = LegacyHtmlToolStreamSupport.safeParseToolArgumentsForStream(
-                                            toolExecution.request().arguments());
-                                    BaseTool t = toolManager.getTool(name);
-                                    boolean isExit = "exit".equals(name);
-                                    if ("modifyFile".equals(name) || "writeFile".equals(name) || "deleteFile".equals(name)) {
-                                        toolWroteDisk.set(true);
-                                    }
-                                    // exit 执行后放行后续普通 AI 文本（模型被告知输出最终总结）
-                                    if (isExit) {
-                                        exitExecuted.set(true);
-                                    }
-                                    String out = t!=null
-                                            // 获取使用工具的返回string
-                                            ? t.generateToolExecutedResult(args)
-                                            // 找不到工具的占位(滚木工具/doge)
-                                            : LegacyHtmlToolStreamSupport.fallbackToolExecutedPlain(name, args);
-                                    // 空字符串跳过（如 ExitTool 返回 ""）
-                                    if (!out.isEmpty()) {
-                                        try {
-                                            // 吐出真正使用工具的文本 string chunk
-                                            sink.next(out);
-                                        } catch (Exception ignore) {
-                                            // downstream closed
-                                        }
-                                    }
-                                } catch (Exception ignore) {
-                                    log.warn("使用工具创建flux源头出现问题");
-                                }
-                            })
-                            .onCompleteResponse((ChatResponse response) -> {
-                                try {
-                                    if (persistOnComplete && codeBuilder != null) {
-                                        if (toolWroteDisk.get()) {
-                                            log.info(
-                                                    "本轮已通过工具写盘，跳过流结束解析落盘 appId={} codeGenType={}",
-                                                    appId,
-                                                    codeGenTypeEnum);
-                                        } else {
-                                            persistParsedResult(codeGenTypeEnum, codeBuilder.toString(), appId);
-                                        }
-                                    }
-                                    sink.complete();
-                                } catch (Exception e) {
-                                    sink.error(e);
-                                }
-                            })
-                            .onError(sink::error)
-                            .start();
-                }, FluxSink.OverflowStrategy.BUFFER)
-                .doFinally(signal -> {
-                    if (signal == SignalType.CANCEL) {
-                        log.warn(
-                                "legacy token stream 被取消 appId={} codeGenType={} persistOnComplete={}",
-                                appId,
-                                codeGenTypeEnum,
-                                persistOnComplete);
-                        try { tokenStream.cancel(); } catch (Exception ignore) { }
-                    }
-                });
-    }
-
-    /**
-     * 将 TokenStream 适配为 Flux，并在 complete 回调中执行解析落盘。
-     *
-     * @param codeGenTypeEnum 代码生成类型
-     * @param tokenStream     langchain4j TokenStream
-     * @param appId           应用 id
-     * @return 适配后的 Flux 流
-     */
-    private Flux<String> processCodeTokenStream(CodeGenTypeEnum codeGenTypeEnum, TokenStream tokenStream, Long appId) {
-        // 1. 委托统一管线，并在流结束时解析落盘
-        return wireHtmlMultiFileTokenStream(codeGenTypeEnum, tokenStream, appId, true);
-    }
-
-    /**
-     * 将 TokenStream 仅做流式透传（不做聚合解析落盘）。
-     *
-     * @param codeGenTypeEnum 代码生成类型
-     * @param tokenStream     langchain4j TokenStream
-     * @param appId           应用 id
-     * @return 适配后的 Flux 流
-     */
-    private Flux<String> adaptCodeTokenStream(CodeGenTypeEnum codeGenTypeEnum, TokenStream tokenStream, Long appId) {
-        // 1. 与 processCodeTokenStream 相同管线，但不在 complete 时落盘
-        return wireHtmlMultiFileTokenStream(codeGenTypeEnum, tokenStream, appId, false);
     }
 
     /**
@@ -455,7 +142,6 @@ public class AiCodeGeneratorFacade {
      * @param appId           应用主键
      */
     private void persistParsedResult(CodeGenTypeEnum codeGenTypeEnum, String full, Long appId) {
-        // 1. 打日志（长度、尾部、是否疑似截断）
         int len = full == null ? 0 : full.length();
         String safeFull = full == null ? "" : full;
         log.info(
@@ -466,15 +152,12 @@ public class AiCodeGeneratorFacade {
                 LegacyHtmlStreamIntegrity.looksLikeIncompleteTrailingTag(safeFull)
         );
         try {
-            // 2. 解析为结果对象
             Object executeResult = codeParserExecutor.execute(codeGenTypeEnum, safeFull);
-            // 3. 解析结果为空（纯对话无代码块），跳过保存，不抛异常
             if (isParseResultEmpty(codeGenTypeEnum, executeResult)) {
                 log.info("模型本轮未生成代码，跳过落盘。appId={} codeGenType={} charLen={}",
                         appId, codeGenTypeEnum, len);
                 return;
             }
-            // 4. 保存到 code_output
             File file = codeFileSaverExecutor.execute(codeGenTypeEnum, executeResult, appId);
             log.info("保存目录: {}", file.getAbsolutePath());
         } catch (Exception e) {
@@ -513,219 +196,109 @@ public class AiCodeGeneratorFacade {
     }
 
     /**
-     * 多文件流式生成：按编辑意图选择是否仅透传 TokenStream，否则流结束落盘
+     * HTML / MULTI_FILE 流式生成：单文件 HTML 与多文件共用同一套 editIntent 判定与 TokenStream 适配逻辑
      *
-     * @param userMessage               用户提示
-     * @param appId                     应用主键
-     * @param firstRound                是否首轮
-     * @param compactMemoryOnCacheHit   缓存命中时是否压缩记忆
-     * @return Flux
+     * @param codeGenType  HTML 或 MULTI_FILE
+     * @param userMessage  用户提示
+     * @param appId        应用主键
+     * @param firstRound   是否首轮
+     * @return SSE 文本流
      */
-    private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage, Long appId, boolean firstRound, boolean compactMemoryOnCacheHit) {
-        // 1. 编辑意图 + 已有文件 → 不在 complete 时整段解析落盘
-        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
-                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.MULTI_FILE, appId);
-        // 2. 首轮且无编辑意图：允许无工具自举
+    private Flux<String> generateHtmlMultiFileCodeStream(
+            CodeGenTypeEnum codeGenType, String userMessage, Long appId, boolean firstRound) {
+        boolean editIntent = isHtmlMultiEditIntent(codeGenType, userMessage, appId);
         boolean htmlMultiToollessBootstrap = firstRound && !editIntent;
         aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
-                        appId, CodeGenTypeEnum.MULTI_FILE, htmlMultiToollessBootstrap, compactMemoryOnCacheHit);
-
-        // 3. 编辑轮采用 modify 提示词，首轮用 generate 提示词；依靠 changedFiles + fileNote + readFile 工具获取代码内容
-        TokenStream tokenStream = editIntent
-                ? aiCodeGeneratorService.modifyCodeMultiFileTokenStream(appId, userMessage)
-                : aiCodeGeneratorService.generateCodeMultiFileTokenStream(appId, userMessage);
-
-        // 4. 编辑走仅透传；否则流结束 persist
-        if (editIntent) {
-            return adaptCodeTokenStream(CodeGenTypeEnum.MULTI_FILE, tokenStream, appId);
-        }
-        return processCodeTokenStream(CodeGenTypeEnum.MULTI_FILE, tokenStream, appId);
+                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, codeGenType, htmlMultiToollessBootstrap);
+        TokenStream tokenStream = resolveHtmlMultiFileStreamTokenStream(
+                aiCodeGeneratorService, codeGenType, appId, userMessage, editIntent);
+        boolean persistOnComplete = !editIntent;
+        return HtmlMultiFileTokenStreamAdapter.adapt(
+                tokenStream,
+                codeGenType,
+                appId,
+                persistOnComplete,
+                toolManager,
+                persistOnComplete ? full -> persistParsedResult(codeGenType, full, appId) : null);
     }
 
     /**
-     * 单文件 HTML 流式生成：逻辑同 {@link #generateAndSaveMultiFileCodeStream(String, Long, boolean, boolean)}
-     *
-     * @param userMessage               用户提示
-     * @param appId                     应用主键
-     * @param firstRound                是否首轮
-     * @param compactMemoryOnCacheHit   缓存命中时是否压缩记忆
-     * @return Flux
+     * 按 HTML / MULTI_FILE 与 editIntent 选择流式 TokenStream 入口（modify / generate）
      */
-    private Flux<String> generateAndSaveHtmlCodeStream(String userMessage, Long appId, boolean firstRound, boolean compactMemoryOnCacheHit) {
-        boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
-                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(CodeGenTypeEnum.HTML, appId);
-        boolean htmlMultiToollessBootstrap = firstRound && !editIntent;
-        aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
-                        appId, CodeGenTypeEnum.HTML, htmlMultiToollessBootstrap, compactMemoryOnCacheHit);
-        // 3. 编辑轮采用 modify 提示词，首轮用 generate 提示词；依靠 changedFiles + fileNote + readFile 工具获取代码内容
-        TokenStream tokenStream = editIntent
-                ? aiCodeGeneratorService.modifyCodeHTMLTokenStream(appId, userMessage)
-                : aiCodeGeneratorService.generateCodeHTMLTokenStream(appId, userMessage);
-        if (editIntent) {
-            return adaptCodeTokenStream(CodeGenTypeEnum.HTML, tokenStream, appId);
-        }
-        return processCodeTokenStream(CodeGenTypeEnum.HTML, tokenStream, appId);
+    private TokenStream resolveHtmlMultiFileStreamTokenStream(
+            aiCodeGeneratorService svc, CodeGenTypeEnum codeGenType, Long appId, String userMessage, boolean editIntent) {
+        // 编辑轮采用 modify 提示词，生成轮用 generate 提示词
+        return switch (codeGenType) {
+            case HTML -> editIntent
+                    ? svc.modifyCodeHTMLTokenStream(appId, userMessage)
+                    : svc.generateCodeHTMLTokenStream(appId, userMessage);
+            case MULTI_FILE -> editIntent
+                    ? svc.modifyCodeMultiFileTokenStream(appId, userMessage)
+                    : svc.generateCodeMultiFileTokenStream(appId, userMessage);
+            default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenType.getValue());
+        };
+    }
+
+    /**
+     * 同步编辑轮：按 HTML / MULTI_FILE 选择 modify TokenStream（工具直接写盘）
+     */
+    private TokenStream resolveHtmlMultiFileSyncTokenStream(
+            aiCodeGeneratorService svc, CodeGenTypeEnum codeGenType, Long appId, String userMessage) {
+        return switch (codeGenType) {
+            case HTML -> svc.modifyCodeHTML(appId, userMessage);
+            case MULTI_FILE -> svc.modifyCodeMultiFile(appId, userMessage);
+            default -> throw new MyException(ErrorCode.SYSTEM_ERROR, "不支持的生成类型: " + codeGenType.getValue());
+        };
     }
 
     /**
      * Vue 流式生成：TokenStream 适配为 JSON 行 + 流结束后触发本地 npm build
      *
-     * @param userMessage               用户提示
-     * @param appId                     应用主键
-     * @param firstRound                是否首轮
-     * @param compactMemoryOnCacheHit   缓存命中时是否压缩记忆
+     * @param userMessage 用户提示
+     * @param appId       应用主键
+     * @param firstRound  是否首轮
      * @return Flux
      */
-    private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound, boolean compactMemoryOnCacheHit) {
-        // 编辑意图判定：关键词命中 + 磁盘已有 Vue 源码文件
+    private Flux<String> generateAndSaveVueCodeStream(String userMessage, Long appId, boolean firstRound) {
         boolean editIntent = htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
                 && vueEditContextBuilder.hasExistingVueFiles(appId);
-        // 注入编辑上下文（仅编辑意图时）
-        String enhancedMessage = userMessage;
-        if (editIntent) {
-            enhancedMessage = vueEditContextBuilder.buildPromptIfNeed(userMessage, appId);
-        }
-        // 1. 取 Vue 专用 service（首轮控制工具白名单；编辑意图时开放全套工具）
+        String enhancedMessage = editIntent
+                ? vueEditContextBuilder.buildPromptIfNeed(userMessage, appId)
+                : userMessage;
         aiCodeGeneratorService aiCodeGeneratorService =
-                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId, CodeGenTypeEnum.VUE, firstRound && !editIntent, compactMemoryOnCacheHit);
-        // 2. 开流（编辑意图用 modify 提示词，否则用 generate 提示词）
+                aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(
+                        appId, CodeGenTypeEnum.VUE, firstRound && !editIntent);
         TokenStream tokenStream = editIntent
                 ? aiCodeGeneratorService.modifyCodeVueFileStream(appId, enhancedMessage)
                 : aiCodeGeneratorService.generateCodeVueFileStream(appId, enhancedMessage);
-        // 3. 转为前端 JSON 行协议
-        return adaptVueTokenStream(tokenStream, appId);
+        return VueTokenStreamAdapter.adapt(tokenStream, appId, vueProjectBuilder);
     }
 
-    /**
-     * 将 LangChain4j Vue TokenStream 转为 JSON 行 Flux，并处理 writeFile 参数流式拼接与构建
-     *
-     * @param tokenStream LangChain4j 流
-     * @param appId       应用主键（决定 vue_project_{appId} 目录）
-     * @return JSON 行流
-     */
-    Flux<String> adaptVueTokenStream(TokenStream tokenStream, Long appId) {
-        // 按 toolCallId 累积流式 arguments，直到能拼出一个“可提取关键字段”的完整片段
-        Map<String, StringBuilder> toolArgsById = new HashMap<>();
-        // 记录已经发过 synthetic tool_executed 的 toolCallId，避免重复发卡片
-        Set<String> syntheticExecutedIds = new HashSet<>();
-        // 只在超大参数且长期提取失败时告警一次，避免日志刷屏
-        Set<String> warnedLargeIncompleteIds = new HashSet<>();
-        // 一旦收到模型原生 onToolExecuted，就切回原生模式，不再继续合成 synthetic 消息
-        AtomicBoolean nativeToolExecutedMode = new AtomicBoolean(false);
-        // 工具请求去重：每个 toolCallId 仅首次 emit ToolRequestMessage
-        Set<String> seenToolRequestIds = new HashSet<>();
-
-        return Flux.create(sink -> {
-                    sink.onCancel(() -> {
-                        try { tokenStream.cancel(); } catch (Exception ignore) { }
-                    });
-                    tokenStream.onPartialResponse((String partialResponse) -> {
-                    AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
-                    sink.next(JSONUtil.toJsonStr(aiResponseMessage));
-                })
-                .onPartialToolExecutionRequest((index, toolExecutionRequest) -> {
-                    String toolCallId = toolExecutionRequest.id();
-                    // 每个 toolCallId 仅首次 emit ToolRequestMessage，避免重复 JSON 行
-                    if (toolCallId != null && seenToolRequestIds.add(toolCallId)) {
-                        ToolRequestMessage toolRequestMessage = new ToolRequestMessage(toolExecutionRequest);
-                        sink.next(JSONUtil.toJsonStr(toolRequestMessage));
-                    }
-
-                    try {
-                        String toolName = toolExecutionRequest.name();
-                        String argsPart = toolExecutionRequest.arguments();
-                        if (!nativeToolExecutedMode.get()
-                                && toolCallId != null
-                                && toolName != null
-                                && argsPart != null
-                                && !syntheticExecutedIds.contains(toolCallId)) {
-                            StringBuilder buf = toolArgsById.computeIfAbsent(toolCallId, k -> new StringBuilder());
-                            buf.append(argsPart);
-
-                            if ("writeFile".equals(toolName)) {
-                                // 这里是“提前合成 tool_executed 卡片”的关键：
-                                // 只要从当前 buffer 里提取到 relativeFilePath + content，就立即回放给前端
-                                String syntheticMessage = buildSyntheticWriteFileToolExecutedMessage(toolCallId, buf.toString());
-                                if (syntheticMessage != null) {
-                                    syntheticExecutedIds.add(toolCallId);
-                                    sink.next(syntheticMessage);
-                                } else if (buf.length() >= WRITE_FILE_EXTRACT_WARN_THRESHOLD
-                                        && warnedLargeIncompleteIds.add(toolCallId)) {
-                                    log.warn("writeFile 参数流超过 {} 字节仍未提取出 relativeFilePath/content，继续等待后续片段。toolCallId={}",
-                                            WRITE_FILE_EXTRACT_WARN_THRESHOLD, toolCallId);
-                                }
-                            }
-                        }
-                    } catch (Exception ignore) {
-                        // ignore
-                    }
-                })
-                //
-                .onCompleteToolExecutionRequest((index, completeToolExecutionRequest) -> {
-                    // 兼容部分 API 仅在 complete 时给出完整 tool request；
-                    // 若该 toolCallId 尚未通过 partial 发出，则在此补发 ToolRequestMessage
-                    String toolCallId = completeToolExecutionRequest.id();
-                    if (toolCallId != null && seenToolRequestIds.add(toolCallId)) {
-                        ToolRequestMessage toolRequestMessage = new ToolRequestMessage(completeToolExecutionRequest);
-                        sink.next(JSONUtil.toJsonStr(toolRequestMessage));
-                    }
-                })
-                .onToolExecuted((ToolExecution toolExecution) -> {
-                    try {
-                        String toolCallId = toolExecution.request().id();
-                        nativeToolExecutedMode.compareAndSet(false, true);
-                        // 只要该 toolCallId 已经发过 synthetic tool_executed，就始终跳过 native 同 ID 事件，避免同一工具卡片重复渲染。
-                        if (toolCallId != null && syntheticExecutedIds.contains(toolCallId)) {
-                            return;
-                        }
-                    } catch (Exception ignore) {
-                        // ignore
-                    }
-                    ToolExecutedMessage toolExecutedMessage = new ToolExecutedMessage(toolExecution);
-                    sink.next(JSONUtil.toJsonStr(toolExecutedMessage));
-                })
-                .onCompleteResponse((ChatResponse response) -> {
-                    try {
-                        String projectDirName = "vue_project_" + appId;
-                        Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName);
-                        String path = projectRoot.toString();
-                        boolean ok = vueProjectBuilder.buildProject(path);
-                        if (!ok) {
-                            log.warn("Vue 项目构建未成功，预览可能不可用。appId={} path={}", appId, path);
-                        }
-                    } catch (Exception e) {
-                        log.error("Vue 项目构建异常。appId={}", appId, e);
-                    }
-                    sink.complete();
-                })
-                .onError((Throwable error) -> {
-                    error.printStackTrace();
-                    sink.error(error);
-                })
-                .start();
-        });
+    private static void validateCodeGenType(CodeGenTypeEnum codeGenTypeEnum) {
+        if (codeGenTypeEnum == null) {
+            throw new MyException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
+        }
     }
 
-    /**
-     * 从流式累积的 writeFile arguments 中若能提取 path+content，则拼出一条 tool_executed JSON 供前端渲染
-     *
-     * @param toolCallId    工具调用 id
-     * @param rawArguments  累积的参数字符串
-     * @return JSON 字符串；字段不齐则 null
-     */
-    static String buildSyntheticWriteFileToolExecutedMessage(String toolCallId, String rawArguments) {
-        return LegacyHtmlToolStreamSupport.buildSyntheticWriteFileToolExecutedMessage(toolCallId, rawArguments);
+    private void clearModifyFileDedup() {
+        try {
+            FileModifyTool fmt = toolManager.getTool("modifyFile") instanceof FileModifyTool f ? f : null;
+            if (fmt != null) {
+                fmt.clearRoundDedup();
+            }
+        } catch (Exception e) {
+            log.error("每轮清空工具modifyFile失败", e);
+        }
     }
 
-    /**
-     * 从 writeFile 的原始 arguments 串中提取 relativeFilePath + content（先严格后容错）
-     *
-     * @param rawArguments 模型输出的参数字符串（可能不完整）
-     * @return 含两字段的 JSONObject；无法提取则 null
-     */
-    static JSONObject tryExtractWriteFileArguments(String rawArguments) {
-        return LegacyHtmlToolStreamSupport.tryExtractWriteFileArguments(rawArguments);
+    private boolean isHtmlMultiEditIntent(CodeGenTypeEnum codeGenType, String userMessage, Long appId) {
+        return htmlMultiFileEditContextBuilder.isEditIntentMessage(userMessage)
+                && htmlMultiFileEditContextBuilder.hasExistingEditableFiles(codeGenType, appId);
     }
+
+    private static File htmlMultiOutputDir(CodeGenTypeEnum codeGenType, Long appId) {
+        return new File(AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator
+                + codeGenType.getValue() + "_" + appId);
+    }
+
 }

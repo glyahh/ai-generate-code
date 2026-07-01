@@ -4,6 +4,7 @@ import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.util.StrUtil;
 import com.dbts.glyahhaigeneratecode.exception.ErrorCode;
 import com.dbts.glyahhaigeneratecode.exception.MyException;
+import com.dbts.glyahhaigeneratecode.core.memory.MemoryMessageXmlSupport;
 import com.dbts.glyahhaigeneratecode.mapper.ChatHistoryMapper;
 import com.dbts.glyahhaigeneratecode.model.Entity.App;
 import com.dbts.glyahhaigeneratecode.model.Entity.ChatHistory;
